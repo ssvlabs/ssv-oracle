@@ -1,0 +1,186 @@
+# ─────────────────────────────────────────────────────────────────────────
+# 1. Operating System Files
+# ─────────────────────────────────────────────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# ─────────────────────────────────────────────────────────────────────────
+# 2. Version Control and Git Metadata
+# ─────────────────────────────────────────────────────────────────────────
+# If someone accidentally commits a sensitive file, it's still in history-
+# but ignoring it helps stop new copies from getting added.
+.gitattributes
+/.git/          # Don't include your .git directory as part of a submodule/context
+
+# ─────────────────────────────────────────────────────────────────────────
+# 3. Editor, IDE, and Workspace Settings
+# ─────────────────────────────────────────────────────────────────────────
+# VSCode
+.vscode/
+.vscode/*
+
+# IntelliJ IDEA / WebStorm / PhpStorm / etc.
+.idea/
+*.iml
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim / Emacs / Nano swap files
+*.swp
+*.swo
+*~
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+
+# Miscellaneous editors
+*.kate-swp
+*.kate-swp.*
+*.komodoproject
+*.komodotoolbar
+*.kdev4
+*.kdev4.*
+# ...
+
+# ─────────────────────────────────────────────────────────────────────────
+# 4. Language-Agnostic Build Artifacts
+# ─────────────────────────────────────────────────────────────────────────
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+/logs
+*.log
+*.log.*
+
+# Dependency directories (if you want to rebuild inside the container or CI)
+node_modules/
+jspm_packages/
+
+# Coverage reports
+coverage/
+*.lcov
+*.lcov.*
+*.clover
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.pid
+*.seed
+*.pid.lock
+
+# Compiled Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Compiled JavaScript (bundles, minified, maps)
+*.min.js
+*.map
+
+
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 5. Language-Specific Temporary Files
+# ─────────────────────────────────────────────────────────────────────────
+# Python
+*.egg-info/
+*.egg
+*.whl
+pip-log.txt
+pip-delete-this-directory.txt
+dist/
+build/
+.eggs/
+
+/.env
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Node.js / JavaScript
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+/node_modules/
+# If you are using Yarn Plug'n'Play
+.pnp.cjs
+.pnp.loader.mjs
+
+# TypeScript
+*.tsbuildinfo
+
+# Go
+/bin/
+/vendor/
+/*.exe
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 6. Configuration and Secret Files
+# ─────────────────────────────────────────────────────────────────────────
+# Environment variables
+.env
+.env.*.local
+.env.local
+
+# ─────────────────────────────────────────────────────────────────────────
+# 10. Miscellaneous
+# ─────────────────────────────────────────────────────────────────────────
+# Backup files
+*.bak
+*.old
+*.orig
+
+# Coverage
+coverage/
+*.lcov
+
+# Database files
+*.sqlite
+*.sqlite3
+
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+
+# Fonts
+*.eot
+*.otf
+*.ttf
+*.woff
+*.woff2
+
+# Executable packages
+*.AppImage
+*.deb
+*.rpm
+
+# Editor temp files
+~$*

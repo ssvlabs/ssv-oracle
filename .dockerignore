@@ -1,0 +1,74 @@
+# -------------------------------------------------------
+# 1. Git metadata and version-control artifacts
+# -------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+.github
+
+# -------------------------------------------------------
+# 2. Local development files & folders
+# -------------------------------------------------------
+node_modules
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+
+vendor/
+dist/
+target/
+
+# -------------------------------------------------------
+# 3. Environment & credential files
+# -------------------------------------------------------
+.env
+.env.local
+.env.*.local
+
+# -------------------------------------------------------
+# 4. Editor and OS-specific files
+# -------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# -------------------------------------------------------
+# 5. Dockerfiles and Docker-related artifacts (optional)
+# -------------------------------------------------------
+.dockerignore
+Dockerfile*
+
+# -------------------------------------------------------
+# 6. Logs, caches, and coverage outputs
+# -------------------------------------------------------
+logs/
+*.log
+coverage/
+*.lcov
+.cache/
+
+# -------------------------------------------------------
+# 7. Testing artifacts (optional)
+# -------------------------------------------------------
+test-results/
+pytest-report.html
+*.spec.ts
+*.test.js
+*.test.ts
+
+# -------------------------------------------------------
+# 8. Miscellaneous (customize as needed)
+# -------------------------------------------------------
+*.local
+*.bak
+*.tmp
+*.swp
