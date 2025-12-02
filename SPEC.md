@@ -31,17 +31,17 @@ function getOracleTimingConfig(uint64 referenceEpoch)
 - `startEpoch` – first epoch at which oracle commitments are defined.
 - `epochInterval` – how many epochs between oracle rounds (must be > 0).
 
-The client reads these values at startup from a configuration JSON.
+The client reads these values at startup from a configuration YAML.
 The client should support a dynamic transition of configuration changes.
 
 So given a configuration:
-```json
-{
-	firstStartEpoch: x,
-	firstInterval: a,
-	secondStartEpoch: y,
-    secondInterval: b
-}
+```yml
+# Do not edit default values
+- timing-config:
+	- firstStartEpoch: x
+	- firstInterval: a
+	- secondStartEpoch: y
+	- secondInterval: b
 ```
 
 Then the following logic should be performed:
