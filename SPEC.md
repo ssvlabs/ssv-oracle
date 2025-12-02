@@ -19,25 +19,44 @@ The client must:
 
 ## 2. Timing & Rounds
 
-### 2.1 Onchain Timing Configuration
+### 2.1 Timing Configuration
 
-The oracle contract exposes timing configuration:
+Timing Configuration:
 
-```solidity
-function getOracleTimingConfig()
-    external
-    view
+```go
+function getOracleTimingConfig(uint64 referenceEpoch)
     returns (uint64 startEpoch, uint64 epochInterval);
 ```
 
 - `startEpoch` – first epoch at which oracle commitments are defined.
 - `epochInterval` – how many epochs between oracle rounds (must be > 0).
 
-The client reads these values from the contract at startup when it picks up a `ConfigUpdate` event to account for possible DAO updates.
+The client reads these values at startup from a configuration JSON.
+The client should support a dynamic transition of configuration changes.
+
+So given a configuration:
+```json
+{
+	firstStartEpoch: x,
+	firstInterval: a,
+	secondStartEpoch: y,
+    secondInterval: b
+}
+```
+
+Then the following logic should be performed:
+```python
+if referenceEpoch >= y:
+	return (y,b)
+else:
+	return (x,a)
+```
+
+
 
 ### 2.2 Round & Target Epoch
 
-The client maintains a `currentRound` variable. To compute the target epoch for this round, use:
+The client maintains a `round` variable. To compute the target epoch for this round, use:
 
 ```go
 function getTargetEpoch(round) {
@@ -141,24 +160,22 @@ The oracle client calls the oracle contract:
 
 ```solidity
 function commitRoot{
-	uint64  round
     bytes32 merkleRoot,
     uint64  blockNum,
 ) external;
 ```
 
 - `merkleRoot` – Merkle root of all cluster effective balances for `targetEpoch`.
-- `blockNum` – The blockNumber that maps to the first present block since the start of the `targetEpoch`.
+- `blockNum` – The blockNumber that maps to the checkpoint of the `targetEpoch`.
 
 **Edge condition** - If all blocks in the epoch are missing, then skip the epoch by passing `merkleRoot = 0` and `blockNum = 0`
 
 
 Contract responsibilities (out of scope for client):
 
-- Require a **threshold** of oracle commits per `roundId`.
+- Require a **threshold** of oracle commits per `blockNum`.
 - Perform **weighted majority** to decide the canonical root.
 - Handle storage and further use of that root.
-- Verifies that `targetEpoch` is as expected for round
 
 ---
 
@@ -231,60 +248,59 @@ Contract responsibilities (out of scope for client):
 ## 8. Protocol Flow (Per Loop)
 
 1. **Fetch timing config**
-   - Call `getOracleTimingConfig()` → `(startEpoch, epochInterval)`.
+   - Call `getOracleTimingConfig(lastTargetEpoch)` → `(startEpoch, epochInterval)`.
    - If `epochInterval == 0`, log error and abort (misconfiguration).
 
-2. **Get latest round that was committed by oracle**:
-   - Normally can be fetched from memory.
-   - If not available:
+2. **Calculate Current Round**:
         a. Finding `latestFinalizedEpoch` from beacon node.
-        b. calculate `round = RoundUp((latestFinalized-initialEpoch)/epochInterval)`
-   
+		b. `if LatestFinalized<=initialEpoch: round = 0`
+        c. Calculate `round = RoundUp((latestFinalized-initialEpoch)/epochInterval)`.
 
-3. **Compute targetEpoch & roundId**
+4. **Compute targetEpoch & roundId**
    - Compute:
      ```text
      targetEpoch = startEpoch + round * epochInterval
      ```
    - Check if `targetEpoch` is finalized via consensus node before proceeding.
 
-4. **Idempotency check (already committed?)**
+5. **Idempotency check (already committed?)**
    - From local DB and/or onchain state, check:
-     - If this oracle address already has a successful commit for `roundId`.
+     - If this oracle address already has a successful commit for `targetEpoch` (or corresponding `blockNum`).
    - If yes, abort this cycle (nothing to do).
 
-5. **Fetch cluster balances**
+6. **Fetch cluster balances**
    - For `targetEpoch` (finalized and calculated per round):
      - Get full list of `(clusterId, effectiveBalance)`.
+     - Get `BlockNum` of finalized checkpoint.
    
 
-6. **Build Merkle root**
+7. **Build Merkle root**
    - Encode leaves as in section 5
    - Sort by `clusterId`.
    - If number of leaves is odd, append `emptyLeaf`.
    - Build Merkle tree and compute `merkleRoot`.
 
 
-7. **Construct and sign TX**
+8. **Construct and sign TX**
    - Encode:
      ```solidity
-     commitRoot(roundId, merkleRoot, targetEpoch, referenceBlock)
+     commitRoot(merkleRoot, targetEpoch, referenceBlockNum)
      ```
    - Estimate gas and set EIP-1559 parameters (maxFee, maxPriorityFee).
    - Sign with the oracle key.
 
-8. **Broadcast TX**
+9. **Broadcast TX**
     - Send TX to Ethereum node.
-    - Persist `{roundId, targetEpoch, merkleRoot, referenceBlock, txHash, retryCount=0}` locally.
+    - Persist `{round, targetEpoch, merkleRoot, referenceBlock, txHash, retryCount=0}` locally.
 
-9. **Track TX and ensure success**
+10. **Track TX and ensure success**
     - Poll for receipt until:
       - TX is mined, or
       - `tx_inclusion_timeout_blocks` reached.
     - If **status == 1** (success):
-      - Mark `(roundId, targetEpoch)` as successfully committed.
+      - Mark `(blocknum, targetEpoch)` as successfully committed.
     - Else (reverted, dropped, or timeout):
-      1. Check onchain if a commit for this oracle and `roundId` already exists (in case the first TX was replaced by another one).
+      1. Check onchain if a commit for this oracle and `blockNum` already exists (in case the first TX was replaced by another one).
       2. If not committed and `retryCount < max_retry_attempts`:
          - Bump gas (e.g. multiply `maxFee` and/or `maxPriorityFee` by `gas_bump_factor`).
          - Resubmit a new TX and update `retryCount`.
@@ -317,7 +333,7 @@ Cluster Updater is a separate role from the Effective Balance Oracle.
 It has the following flow:
 
 1. Builds merkle trees like the oracle.
-2. Listen to `RootCommitted(round, merkleRoot, blockNum, block.timestamp)` event and validate the correct `merkleRoot` is constructed for `round`.
+2. Listen to `RootCommitted(merkleRoot, blockNum, block.timestamp)` event and validate the correct `merkleRoot` is constructed for `blockNum`.
 3. Call one of the following contract functions:
     1. Call `updateClusterBalance` per cluster in internal configuration.
     2. Call `BulkClustersBalancesUpdate` depending on internal configuration.
