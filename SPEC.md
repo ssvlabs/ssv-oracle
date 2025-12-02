@@ -253,7 +253,7 @@ Contract responsibilities (out of scope for client):
 
 2. **Calculate Current Round**:
         a. Finding `latestFinalizedEpoch` from beacon node.
-		b. `if LatestFinalized<=initialEpoch: round = 0`
+		    b. `if LatestFinalized<=initialEpoch: round = 0`
         c. Calculate `round = RoundUp((latestFinalized-initialEpoch)/epochInterval)`.
 
 4. **Compute targetEpoch & roundId**
@@ -264,9 +264,14 @@ Contract responsibilities (out of scope for client):
    - Check if `targetEpoch` is finalized via consensus node before proceeding.
 
 5. **Idempotency check (already committed?)**
+   - If epoch finalized, find the checkpoint's `BlockNum`
    - From local DB and/or onchain state, check:
-     - If this oracle address already has a successful commit for `targetEpoch` (or corresponding `blockNum`).
+     - If this oracle address already has a successful commit for a block number greater than or equal to `blockNum`.
    - If yes, abort this cycle (nothing to do).
+
+   ```python
+   if targetEpoch.Checkpoint.BlockNum <= committedBlockNum: return
+   ```
 
 6. **Fetch cluster balances**
    - For `targetEpoch` (finalized and calculated per round):
