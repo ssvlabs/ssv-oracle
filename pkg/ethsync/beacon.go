@@ -365,10 +365,10 @@ func (c *BeaconClient) doRequest(ctx context.Context, url string, result interfa
 			break
 		}
 
-		defer resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
 			lastErr = fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 			if attempt < c.maxRetries-1 {
 				time.Sleep(c.retryDelay)
@@ -377,7 +377,11 @@ func (c *BeaconClient) doRequest(ctx context.Context, url string, result interfa
 			break
 		}
 
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		if readErr != nil {
+			return fmt.Errorf("failed to read response body: %w", readErr)
+		}
+
+		if err := json.Unmarshal(body, result); err != nil {
 			return fmt.Errorf("failed to decode response: %w", err)
 		}
 
@@ -415,10 +419,10 @@ func (c *BeaconClient) doPostRequest(ctx context.Context, url string, body inter
 			break
 		}
 
-		defer resp.Body.Close()
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(resp.Body)
 			lastErr = fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
 			if attempt < c.maxRetries-1 {
 				time.Sleep(c.retryDelay)
@@ -427,7 +431,11 @@ func (c *BeaconClient) doPostRequest(ctx context.Context, url string, body inter
 			break
 		}
 
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		if readErr != nil {
+			return fmt.Errorf("failed to read response body: %w", readErr)
+		}
+
+		if err := json.Unmarshal(respBody, result); err != nil {
 			return fmt.Errorf("failed to decode response: %w", err)
 		}
 

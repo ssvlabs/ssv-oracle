@@ -69,8 +69,8 @@ func NewClient(rpcURL string, contractAddress string, privateKeyHex string) (*Cl
 		return nil, fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
 
-	// Parse private key
-	privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	// Parse private key (handle optional 0x prefix)
+	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyHex, "0x"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}

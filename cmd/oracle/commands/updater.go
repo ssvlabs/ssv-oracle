@@ -72,19 +72,19 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 
 	// Validate timing config
 	if err := oracle.ValidateTimingPhases(cfg.OracleTiming); err != nil {
-		log.Fatalf("Invalid timing config: %v", err)
+		return fmt.Errorf("invalid timing config: %w", err)
 	}
 
 	// Get private key from environment
 	privateKey := os.Getenv(cfg.PrivateKeyEnv)
 	if privateKey == "" && !mockMode {
-		log.Fatalf("Private key not found in environment variable %s", cfg.PrivateKeyEnv)
+		return fmt.Errorf("private key not found in environment variable %s", cfg.PrivateKeyEnv)
 	}
 
 	// Get database password from environment
 	dbPassword := os.Getenv(cfg.DBPasswordEnv)
 	if dbPassword == "" {
-		log.Fatalf("Database password not found in environment variable %s", cfg.DBPasswordEnv)
+		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
 	}
 
 	log.Printf("SSV Cluster Updater %s", Version)
@@ -100,7 +100,7 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 	// Create PostgreSQL storage
 	storage, err := ethsync.NewPostgresStorage(connString)
 	if err != nil {
-		log.Fatalf("Failed to create storage: %v", err)
+		return fmt.Errorf("failed to create storage: %w", err)
 	}
 	defer func() {
 		if err := storage.Close(); err != nil {
@@ -118,7 +118,7 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 
 	spec, err := beaconClient.GetSpec(context.Background())
 	if err != nil {
-		log.Fatalf("Failed to get beacon spec: %v", err)
+		return fmt.Errorf("failed to get beacon spec: %w", err)
 	}
 	log.Printf("Beacon spec: slotsPerEpoch=%d", spec.SlotsPerEpoch)
 
@@ -130,7 +130,7 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 		var err error
 		ethClient, err = contract.NewClient(cfg.EthRPC, cfg.OracleContract, privateKey)
 		if err != nil {
-			log.Fatalf("Failed to create Ethereum client: %v", err)
+			return fmt.Errorf("failed to create Ethereum client: %w", err)
 		}
 		defer ethClient.Close()
 	}
@@ -162,7 +162,7 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 	log.Println("Starting cluster updater...")
 
 	if err := updaterInstance.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatalf("Updater error: %v", err)
+		return fmt.Errorf("updater error: %w", err)
 	}
 
 	log.Println("Updater shutdown complete")

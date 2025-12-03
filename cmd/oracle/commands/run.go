@@ -81,13 +81,13 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	// Get private key from environment
 	privateKey := os.Getenv(cfg.PrivateKeyEnv)
 	if privateKey == "" {
-		log.Fatalf("Private key not found in environment variable %s", cfg.PrivateKeyEnv)
+		return fmt.Errorf("private key not found in environment variable %s", cfg.PrivateKeyEnv)
 	}
 
 	// Get database password from environment
 	dbPassword := os.Getenv(cfg.DBPasswordEnv)
 	if dbPassword == "" {
-		log.Fatalf("Database password not found in environment variable %s", cfg.DBPasswordEnv)
+		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
 	}
 
 	log.Printf("SSV Oracle %s", Version)
@@ -106,7 +106,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	storage, err := ethsync.NewPostgresStorage(connString)
 	if err != nil {
-		log.Fatalf("Failed to create storage: %v", err)
+		return fmt.Errorf("failed to create storage: %w", err)
 	}
 	defer func() {
 		if err := storage.Close(); err != nil {
@@ -119,7 +119,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		log.Println("Fresh start: clearing database...")
 		ctx := context.Background()
 		if err := storage.ClearAllState(ctx); err != nil {
-			log.Fatalf("Failed to clear database state: %v", err)
+			return fmt.Errorf("failed to clear database state: %w", err)
 		}
 	}
 
@@ -131,14 +131,14 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		RetryDelay: 5 * time.Second,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create execution client: %v", err)
+		return fmt.Errorf("failed to create execution client: %w", err)
 	}
 	defer execClient.Close()
 
 	// Get and log chain ID
 	chainID, err := execClient.GetChainID(context.Background())
 	if err != nil {
-		log.Fatalf("Failed to get chain ID: %v", err)
+		return fmt.Errorf("failed to get chain ID: %w", err)
 	}
 	log.Printf("Chain ID: %d", chainID)
 
@@ -146,17 +146,17 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 	dbChainID, err := storage.GetChainID(ctx)
 	if err != nil {
-		log.Fatalf("Failed to get chain ID from database: %v", err)
+		return fmt.Errorf("failed to get chain ID from database: %w", err)
 	}
 
 	if dbChainID == nil {
 		// First run: store chain ID
 		if err := storage.SetChainID(ctx, chainID.Uint64()); err != nil {
-			log.Fatalf("Failed to store chain ID: %v", err)
+			return fmt.Errorf("failed to store chain ID: %w", err)
 		}
 		log.Printf("Stored chain ID: %d", chainID)
 	} else if *dbChainID != chainID.Uint64() {
-		log.Fatalf("Chain ID mismatch: database has %d, RPC has %d. Use --fresh to start with new chain", *dbChainID, chainID)
+		return fmt.Errorf("chain ID mismatch: database has %d, RPC has %d. Use --fresh to start with new chain", *dbChainID, chainID)
 	}
 
 	// Create beacon client
@@ -170,7 +170,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	// Fetch genesis time to create beacon spec for slot/epoch calculations
 	spec, err := beaconClient.GetSpec(context.Background())
 	if err != nil {
-		log.Fatalf("Failed to get beacon spec: %v", err)
+		return fmt.Errorf("failed to get beacon spec: %w", err)
 	}
 	log.Printf("Beacon spec: genesis=%s, slotsPerEpoch=%d, slotDuration=%v",
 		spec.GenesisTime.Format(time.RFC3339), spec.SlotsPerEpoch, spec.SlotDuration)
@@ -184,7 +184,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		Spec:            spec,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create event syncer: %v", err)
+		return fmt.Errorf("failed to create event syncer: %w", err)
 	}
 
 	// Log timing configuration
@@ -200,7 +200,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		var err error
 		ethClient, err = contract.NewClient(cfg.EthRPC, cfg.OracleContract, privateKey)
 		if err != nil {
-			log.Fatalf("Failed to create Ethereum client: %v", err)
+			return fmt.Errorf("failed to create Ethereum client: %w", err)
 		}
 		defer ethClient.Close()
 	}
@@ -230,14 +230,14 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	// Perform initial sync (blocking, sequential)
 	log.Println("Syncing SSV contract events...")
 	if err := syncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
-		log.Fatalf("Initial sync failed: %v", err)
+		return fmt.Errorf("initial sync failed: %w", err)
 	}
 
 	// Run oracle loop (which will do incremental syncs and balance fetching)
 	log.Println("Starting oracle commit loop...")
 
 	if err := oracleInstance.Run(ctx, syncer, beaconClient); err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatalf("Oracle error: %v", err)
+		return fmt.Errorf("oracle error: %w", err)
 	}
 
 	log.Println("Oracle shutdown complete")
