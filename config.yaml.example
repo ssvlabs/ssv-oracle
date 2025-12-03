@@ -1,0 +1,65 @@
+# SSV Oracle Configuration Example
+# Copy this file to config.yaml and update values for your environment.
+
+# ============================================================================
+# Ethereum & Beacon Chain
+# ============================================================================
+
+# Ethereum Execution Layer RPC endpoint (for SSV contract events)
+eth_rpc: "http://127.0.0.1:8545"
+
+# Beacon Chain (Consensus Layer) API endpoint (for effective balances and finalization)
+beacon_rpc: "http://127.0.0.1:5052"
+
+# ============================================================================
+# Contracts
+# ============================================================================
+
+# SSV Network contract address
+ssv_contract: "0x..."
+
+# Oracle contract address (set to zero address for mock/PoC mode)
+oracle_contract: "0x0000000000000000000000000000000000000000"
+
+# ============================================================================
+# Event Syncing Configuration
+# ============================================================================
+
+# Block number when SSV contract was deployed (start syncing from here)
+sync_from_block: 0
+
+# Blocks to process per batch (smaller = faster progress updates)
+sync_batch_size: 1000
+
+# Max retry attempts for RPC failures
+sync_max_retries: 3
+
+# ============================================================================
+# Database Configuration
+# ============================================================================
+
+# PostgreSQL connection
+db_host: "localhost"
+db_port: 5432
+db_name: "ssv_oracle"
+db_user: "oracle"
+db_password_env: "DB_PASSWORD"  # Read password from this environment variable
+
+# ============================================================================
+# Oracle Credentials
+# ============================================================================
+
+# Private key for signing transactions (read from environment variable)
+private_key_env: "PRIVATE_KEY"
+
+# ============================================================================
+# Oracle Timing Configuration
+# ============================================================================
+
+# Timing phases define when oracle commits should happen.
+# Each phase has a start_epoch and interval (in epochs).
+# Phases must be sorted by start_epoch ascending.
+# Multiple phases allow changing interval over time.
+oracle_timing:
+  - start_epoch: 0       # First epoch where oracle should commit
+    interval: 225        # Commit every 225 epochs (~1 day on mainnet)

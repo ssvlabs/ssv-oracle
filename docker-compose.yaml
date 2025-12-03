@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ssv-oracle-db
+    environment:
+      - POSTGRES_DB=ssv_oracle
+      - POSTGRES_USER=oracle
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-oracle123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./pkg/ethsync/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oracle -d ssv_oracle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
