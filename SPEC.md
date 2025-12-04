@@ -23,15 +23,14 @@ The client must:
 
 Timing Configuration:
 
-```go
-function getOracleTimingConfig(uint64 referenceEpoch)
-    returns (uint64 startEpoch, uint64 epochInterval);
+```
+Procedure getOracleTimingConfig(referenceEpoch) returns (startEpoch, epochInterval);
 ```
 
 - `startEpoch` – first epoch at which oracle commitments are defined.
 - `epochInterval` – how many epochs between oracle rounds (must be > 0).
 
-The client reads these values at startup from a configuration YAML.
+The client reads these values at startup from a configuration.
 The client should support a dynamic transition of configuration changes.
 
 So given a configuration:
@@ -58,8 +57,8 @@ else:
 
 The client maintains a `round` variable. To compute the target epoch for this round, use:
 
-```go
-function getTargetEpoch(round) {
+```
+Procedure getTargetEpoch(round) {
 	return startEpoch + round * epochInterval
 }
 ```
@@ -78,28 +77,12 @@ If `epoch <= finalizedEpoch` then it is eligible for data polling.
 
 ### 3.2 Data Sources
 
-The client obtains `(clusterId, effectiveBalance)` for `epoch` from:
-
-1. **SSV node API (primary)**
-   e.g. a call conceptually like:
-   ```text
-   getEffectiveBalanceForEachClusters(targetEpoch)
-   ```
-   returning:
-   ```json
-   [
-     { "clusterId": "0x...", "effectiveBalance": "123456" },
-     ...
-   ]
-   ```
-
-2. **Ethereum node (optional / verification / fallback)**
+The client obtains `(clusterId, effectiveBalance)` for `epoch` from Ethereum Node:
    - Reads SSV protocol contracts for:
      - Cluster registry.
      - Cluster effective balances at `targetEpoch` (or corresponding `referenceBlock`).
-   - Can be used to verify a random subset of entries to detect misbehavior of SSV nodes.
 
-Primary source of truth is **onchain SSV state**; SSV node is an index.
+Primary source of truth is **onchain SSV state**;
 
 ---
 
@@ -110,20 +93,21 @@ Primary source of truth is **onchain SSV state**; SSV node is an index.
 For each cluster `c`:
 
 - `clusterId` – `bytes32` (canonical cluster identifier).
-- `effectiveBalance` – integer (e.g. `uint64` / `uint256`), with agreed units (e.g. Gwei or ETH @marco ?). 
+- `effectiveBalance` – integer `uint64` representing units in gwei.
 
 ---
 
 ## 5. Merkle Tree Construction
 
-### 5.1 Leaf Encoding
+A merkle tree must be constructed so it will be compatible with the logic used by [OpenZeppelin Merkle Tree](https://docs.openzeppelin.com/contracts-cairo/alpha/api/merkle-tree)
 
+### 5.1 Leaf Encoding
 
 For each cluster:
 
 `leaf_c = keccak256(abi.encode(clusterId, effectiveBalance))`
 
-- `clusterId` encoded as `bytes32`. It should be caluclated like in the contract: `clusterId = keccak256(abi.encodePacked(msg.sender, operatorIds));`
+- `clusterId` encoded as `bytes32`. It should be calculated like in the contract: `clusterId = keccak256(abi.encodePacked(msg.sender, operatorIds));`
 - `effectiveBalance` encoded as fixed-width integer (`uint64`).
 
 The exact encoding (types & order) is **part of the protocol** and must be identical across implementations.
@@ -136,19 +120,11 @@ The exact encoding (types & order) is **part of the protocol** and must be ident
 
 This guarantees deterministic leaf ordering.
 
-### 5.3 Odd-Leaf Handling (Empty Leaf)
+### 5.3 Empty Tree  
+If there are zero clusters, the Merkle root is defined as:  
+`merkleRoot = keccak256("")`  
+(i.e., keccak256 of zero bytes, resulting in 0xc5d2...bf8b)  
 
-Simply duplicate the last leaf. Ensure OpenZepplin compatibility like in [the following library]( https://github.com/cbergoon/merkletree).
-
-### 5.4 Parent Computation
-
-Build a binary Merkle tree:
-
-```text
-parent = keccak256(left || right)
-```
-
-where `left` and `right` are 32-byte child hashes. The final single hash is `merkleRoot`.
 
 ---
 
@@ -159,7 +135,7 @@ where `left` and `right` are 32-byte child hashes. The final single hash is `mer
 The oracle client calls the oracle contract:
 
 ```solidity
-function commitRoot{
+function commitRoot(
     bytes32 merkleRoot,
     uint64  blockNum,
 ) external;
@@ -167,8 +143,6 @@ function commitRoot{
 
 - `merkleRoot` – Merkle root of all cluster effective balances for `targetEpoch`.
 - `blockNum` – The blockNumber that maps to the checkpoint of the `targetEpoch`.
-
-**Edge condition** - If all blocks in the epoch are missing, then skip the epoch by passing `merkleRoot = 0` and `blockNum = 0`
 
 
 Contract responsibilities (out of scope for client):
@@ -280,17 +254,10 @@ Contract responsibilities (out of scope for client):
    
 
 7. **Build Merkle root**
-   - Encode leaves as in section 5
-   - Sort by `clusterId`.
-   - If number of leaves is odd, append `emptyLeaf`.
-   - Build Merkle tree and compute `merkleRoot`.
-
+   - Encode and sort as in section 5
 
 8. **Construct and sign TX**
-   - Encode:
-     ```solidity
-     commitRoot(merkleRoot, targetEpoch, referenceBlockNum)
-     ```
+   - Call `commitRoot`.
    - Estimate gas and set EIP-1559 parameters (maxFee, maxPriorityFee).
    - Sign with the oracle key.
 
@@ -364,7 +331,7 @@ function UpdateClusterBalance(
     address clusterOwner,
     uint64[] operatorIds,
     Cluster cluster,
-    uint256 effectiveBalance,
+    uint64 effectiveBalance,
     bytes32[] calldata merkleProof
 ) external;
 ```
