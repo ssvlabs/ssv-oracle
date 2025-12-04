@@ -14,7 +14,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"ssv-oracle/contract"
-	"ssv-oracle/oracle"
 	"ssv-oracle/pkg/ethsync"
 	"ssv-oracle/updater"
 )
@@ -57,7 +56,6 @@ type UpdaterConfig struct {
 
 	// Oracle
 	PrivateKeyEnv string `yaml:"private_key_env"`
-	OracleTiming  []oracle.TimingPhase `yaml:"oracle_timing"`
 }
 
 func runUpdater(_ *cobra.Command, _ []string) error {
@@ -69,11 +67,6 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 
 	// Enable mock mode if oracle contract is zero address
 	mockMode := cfg.OracleContract == "0x0000000000000000000000000000000000000000"
-
-	// Validate timing config
-	if err := oracle.ValidateTimingPhases(cfg.OracleTiming); err != nil {
-		return fmt.Errorf("invalid timing config: %w", err)
-	}
 
 	// Get private key from environment
 	privateKey := os.Getenv(cfg.PrivateKeyEnv)
@@ -125,7 +118,7 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 	// Create contract client
 	var ethClient *contract.Client
 	if mockMode {
-		ethClient = contract.NewMockClient(storage)
+		ethClient = contract.NewMockClient()
 	} else {
 		var err error
 		ethClient, err = contract.NewClient(cfg.EthRPC, cfg.OracleContract, privateKey)
@@ -140,7 +133,6 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 		Storage:        storage,
 		ContractClient: ethClient,
 		Spec:           spec,
-		TimingPhases:   cfg.OracleTiming,
 		MockMode:       mockMode,
 		DBConnString:   connString,
 	})

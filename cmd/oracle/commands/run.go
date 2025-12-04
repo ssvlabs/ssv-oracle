@@ -195,7 +195,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	// Create Ethereum client for oracle commits
 	var ethClient *contract.Client
 	if mockMode {
-		ethClient = contract.NewMockClient(storage)
+		ethClient = contract.NewMockClient()
 	} else {
 		var err error
 		ethClient, err = contract.NewClient(cfg.EthRPC, cfg.OracleContract, privateKey)

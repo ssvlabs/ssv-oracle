@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS oracle_commits (
 
 CREATE INDEX IF NOT EXISTS idx_commits_epoch ON oracle_commits(target_epoch);
 CREATE INDEX IF NOT EXISTS idx_commits_status ON oracle_commits(tx_status);
+CREATE INDEX IF NOT EXISTS idx_commits_ref_block ON oracle_commits(reference_block);
 
 -- ============================================================================
 -- QUERY FUNCTIONS

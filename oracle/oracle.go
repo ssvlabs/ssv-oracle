@@ -6,6 +6,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"ssv-oracle/contract"
 	"ssv-oracle/merkle"
 	"ssv-oracle/pkg/ethsync"
@@ -152,11 +154,22 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		return 0, fmt.Errorf("transaction reverted")
 	}
 
-	txHash := "mock"
+	var txHashBytes []byte
+	var txHashStr string
 	if tx != nil {
-		txHash = tx.Hash().Hex()
+		txHashBytes = tx.Hash().Bytes()
+		txHashStr = tx.Hash().Hex()
+	} else {
+		// Mock mode: generate deterministic fake tx hash from reference block
+		mockHash := common.BytesToHash([]byte(fmt.Sprintf("mock-tx-block-%d", checkpoint.BlockNum)))
+		txHashBytes = mockHash.Bytes()
+		txHashStr = mockHash.Hex()
 	}
-	log.Printf("Committed target epoch %d (tx: %s)", targetEpoch, txHash)
+	if err := o.storage.InsertOracleCommit(ctx, round, targetEpoch, merkleRoot[:], checkpoint.BlockNum, txHashBytes); err != nil {
+		log.Printf("Warning: failed to store commit: %v", err)
+	}
+
+	log.Printf("Committed target epoch %d (tx: %s)", targetEpoch, txHashStr)
 
 	return targetEpoch, nil
 }

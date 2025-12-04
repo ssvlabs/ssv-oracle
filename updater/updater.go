@@ -9,7 +9,6 @@ import (
 
 	"ssv-oracle/contract"
 	"ssv-oracle/merkle"
-	"ssv-oracle/oracle"
 	"ssv-oracle/pkg/ethsync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -20,7 +19,6 @@ type Updater struct {
 	storage        *ethsync.PostgresStorage
 	contractClient *contract.Client
 	spec           *ethsync.Spec
-	timingPhases   []oracle.TimingPhase
 	mockMode       bool
 	dbConnString   string // For LISTEN/NOTIFY in mock mode
 }
@@ -30,7 +28,6 @@ type Config struct {
 	Storage        *ethsync.PostgresStorage
 	ContractClient *contract.Client
 	Spec           *ethsync.Spec
-	TimingPhases   []oracle.TimingPhase
 	MockMode       bool
 	DBConnString   string // Required for mock mode (LISTEN/NOTIFY)
 }
@@ -41,7 +38,6 @@ func New(cfg *Config) *Updater {
 		storage:        cfg.Storage,
 		contractClient: cfg.ContractClient,
 		spec:           cfg.Spec,
-		timingPhases:   cfg.TimingPhases,
 		mockMode:       cfg.MockMode,
 		dbConnString:   cfg.DBConnString,
 	}
@@ -140,13 +136,23 @@ func (u *Updater) runRealMode(ctx context.Context) error {
 					break innerLoop
 				}
 
-				// Calculate targetEpoch from block timestamp
-				targetEpoch := u.calculateTargetEpoch(event.Timestamp)
+				log.Printf("Received RootCommitted: blockNum=%d, merkleRoot=0x%x",
+					event.BlockNum, event.MerkleRoot[:8])
 
-				log.Printf("Received RootCommitted: blockNum=%d, timestamp=%d, targetEpoch=%d, merkleRoot=0x%x",
-					event.BlockNum, event.Timestamp, targetEpoch, event.MerkleRoot[:8])
+				// Look up targetEpoch from oracle_commits by reference block
+				commit, err := u.storage.GetCommitByReferenceBlock(ctx, event.BlockNum)
+				if err != nil {
+					log.Printf("ERROR: failed to lookup commit for block %d: %v", event.BlockNum, err)
+					continue
+				}
+				if commit == nil {
+					log.Printf("ERROR: commit for block %d not found in database - event from unknown source?", event.BlockNum)
+					continue
+				}
 
-				if err := u.processCommit(ctx, event.BlockNum, targetEpoch, event.MerkleRoot[:]); err != nil {
+				log.Printf("Found commit: targetEpoch=%d, round=%d", commit.TargetEpoch, commit.RoundID)
+
+				if err := u.processCommit(ctx, event.BlockNum, commit.TargetEpoch, event.MerkleRoot[:]); err != nil {
 					log.Printf("Error processing commit block %d: %v", event.BlockNum, err)
 				}
 			}
@@ -286,19 +292,4 @@ func (u *Updater) processCommit(ctx context.Context, blockNum, targetEpoch uint6
 		blockNum, updated, skipped, errors)
 
 	return nil
-}
-
-// calculateTargetEpoch derives the target epoch from a block timestamp.
-// The block was created after the oracle committed, so we find the most recent
-// targetEpoch that would have been finalized before this block.
-func (u *Updater) calculateTargetEpoch(timestamp uint64) uint64 {
-	blockEpoch := u.spec.EpochAtTimestamp(timestamp)
-
-	// Find the timing phase and calculate which targetEpoch this corresponds to
-	phase := oracle.GetTimingForEpoch(u.timingPhases, blockEpoch)
-	_, targetEpoch, ready := phase.RoundForFinalizedEpoch(blockEpoch)
-	if !ready {
-		return phase.StartEpoch
-	}
-	return targetEpoch
 }

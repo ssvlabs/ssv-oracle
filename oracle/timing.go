@@ -16,24 +16,6 @@ func (p TimingPhase) TargetEpoch(round uint64) uint64 {
 	return p.StartEpoch + (round * p.Interval)
 }
 
-// RoundForFinalizedEpoch calculates which round a finalized epoch corresponds to.
-// Returns (round, targetEpoch, true) if a round is ready, or (0, 0, false) if not.
-//
-// A round is "ready" when its targetEpoch is fully finalized (finalizedEpoch > targetEpoch).
-func (p TimingPhase) RoundForFinalizedEpoch(finalizedEpoch uint64) (round uint64, targetEpoch uint64, ready bool) {
-	if finalizedEpoch <= p.StartEpoch {
-		return 0, p.StartEpoch, false
-	}
-
-	// Round N target = startEpoch + N * interval
-	// Fully finalized when: finalizedEpoch > startEpoch + N * interval
-	// So max finalized round = floor((finalizedEpoch - startEpoch - 1) / interval)
-	maxFinalizedRound := (finalizedEpoch - p.StartEpoch - 1) / p.Interval
-	targetEpoch = p.TargetEpoch(maxFinalizedRound)
-
-	return maxFinalizedRound, targetEpoch, true
-}
-
 // ValidateTimingPhases validates the oracle timing configuration.
 func ValidateTimingPhases(phases []TimingPhase) error {
 	if len(phases) == 0 {

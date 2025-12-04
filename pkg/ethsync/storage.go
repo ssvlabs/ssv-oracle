@@ -43,6 +43,9 @@ type Storage interface {
 	GetLatestValidatorBalances(ctx context.Context, validators []ActiveValidator, beforeEpoch uint64) (map[string]uint64, error)
 	IsReadyToCommit(ctx context.Context, targetEpoch uint64, slotsPerEpoch uint64) (bool, error)
 
+	// Oracle commits
+	InsertOracleCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, txHash []byte) error
+
 	// Transaction support
 	BeginTx(ctx context.Context) (Tx, error)
 
@@ -329,6 +332,28 @@ func (s *PostgresStorage) GetCommitByRound(ctx context.Context, roundID uint64) 
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get commit for round %d: %w", roundID, err)
+	}
+
+	return &c, nil
+}
+
+// GetCommitByReferenceBlock returns a single oracle commit by reference block number.
+// Used by updater to look up targetEpoch from RootCommitted events.
+func (s *PostgresStorage) GetCommitByReferenceBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
+	query := `
+		SELECT round_id, target_epoch, merkle_root, reference_block
+		FROM oracle_commits
+		WHERE reference_block = $1
+		  AND tx_status = 'confirmed'
+	`
+
+	var c OracleCommit
+	err := s.db.QueryRowContext(ctx, query, blockNum).Scan(&c.RoundID, &c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get commit for block %d: %w", blockNum, err)
 	}
 
 	return &c, nil

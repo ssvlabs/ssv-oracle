@@ -36,13 +36,7 @@ type Client struct {
 	contractABI     abi.ABI
 	privateKey      []byte
 	chainID         *big.Int
-	mockMode        bool          // PoC: mock mode until contract is ready
-	storage         CommitStorage // For persisting commits in mock mode
-}
-
-// CommitStorage interface for persisting oracle commits.
-type CommitStorage interface {
-	InsertOracleCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, txHash []byte) error
+	mockMode        bool // PoC: mock mode until contract is ready
 }
 
 // NewClient creates a new Ethereum client.
@@ -86,10 +80,9 @@ func NewClient(rpcURL string, contractAddress string, privateKeyHex string) (*Cl
 }
 
 // NewMockClient creates a mock Ethereum client for PoC testing (no real contract needed).
-func NewMockClient(storage CommitStorage) *Client {
+func NewMockClient() *Client {
 	return &Client{
 		mockMode: true,
-		storage:  storage,
 	}
 }
 
@@ -97,17 +90,9 @@ func NewMockClient(storage CommitStorage) *Client {
 // Returns the signed transaction (nil in mock mode) for use with WaitForReceipt.
 // roundID and targetEpoch are passed for storage purposes only (oracle calculates these locally).
 func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum uint64, roundID uint64, targetEpoch uint64) (*types.Transaction, error) {
-	// Mock mode: update storage without sending real transaction
+	// Mock mode: return nil transaction (no real tx to send)
+	// Oracle will store the commit after WaitForReceipt
 	if c.mockMode {
-		// Generate fake transaction hash
-		txHash := common.BytesToHash([]byte(fmt.Sprintf("mock-tx-block-%d", blockNum)))
-
-		// Record the commit (roundID and targetEpoch stored for reference)
-		if err := c.storage.InsertOracleCommit(ctx, roundID, targetEpoch, merkleRoot[:], blockNum, txHash.Bytes()); err != nil {
-			return nil, fmt.Errorf("failed to insert oracle commit: %w", err)
-		}
-
-		// Return nil transaction in mock mode (WaitForReceipt handles this)
 		return nil, nil
 	}
 
