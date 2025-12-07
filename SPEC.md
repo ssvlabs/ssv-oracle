@@ -168,7 +168,7 @@ Contract responsibilities (out of scope for client):
    - Ensures no overlapping runs.
 
 2. **Config & Timing Manager**
-   - Reads `startEpoch` and `epoch_interval` from the oracle contract.
+   - Reads `startEpoch` and `epoch_interval` from the configurations.
    - Caches the values and refreshes them periodically or upon error.
    - Computes `(round, targetEpoch)` according to configuarations.
 
@@ -178,8 +178,8 @@ Contract responsibilities (out of scope for client):
    - Resolves `referenceBlock` (or slot) corresponding to the Ethereum checkpoint of `targetEpoch`.
 
 4. **Data Fetcher**
-   - Calls SSV node API to obtain `(clusterId, effectiveBalance)` for `targetEpoch`.
-   - Optionally verifies a subset directly from SSV contracts via Ethereum RPC.
+   - Syncs SSV contracts events in order reconstruct cluster data.
+   - Calls beacon node API to enable calculations `(clusterId, effectiveBalance)` for `targetEpoch`.
 
 5. **Merkle Builder**
    - Sorts and encodes cluster data.
