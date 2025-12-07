@@ -4,9 +4,6 @@
 
 This document specifies the **offchain oracle client** that periodically publishes a Merkle root of **effective balances of all SSV clusters** to an onchain oracle contract.
 
-
-**TBD** Out of scope: onchain logic for thresholds, weighted majority, and fee distribution.
-
 The client will:
 
 - Read **timing configuration** (`startEpoch`, `epoch_interval`) from a universal configuration shared on github.
@@ -91,7 +88,7 @@ Only epochs calculated as targets will be polled.
 
 The client obtains `(clusterId, effectiveBalance)` for `epoch` from Ethereum Node:
    - Syncs SSV network events to build a mapping of validators to clusters.
-   - Fetch the effective balance for SSV validators via "TBD codex"
+   - Fetch the effective balance for SSV validators via `GET /eth/v1/beacon/states/{target_epoch_checkpoint_hash}/validators` api call.
 
 ---
 
@@ -154,11 +151,10 @@ function commitRoot(
 - `blockNum` – The blockNumber that maps to the checkpoint of the `targetEpoch`.
 
 
-TBD: maybe delete when there is an oracle section.
+(TBD: maybe move when there is a contract section)
 Contract responsibilities (out of scope for client):
 
 - Require a **threshold** of oracle commits per `blockNum`.
-- Perform **weighted majority** to decide the canonical root (TBD which one? Wait for Lior for clarifications).
 - Handle storage and further use of that root.
 
 ---
