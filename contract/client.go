@@ -2,13 +2,11 @@ package contract
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"math/big"
 	"strings"
 
 	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -17,9 +15,6 @@ import (
 
 	"ssv-oracle/pkg/logger"
 )
-
-//go:embed Oracle.abi
-var oracleABI string
 
 // Cluster represents the SSV Cluster struct as used in the contract.
 type Cluster struct {
@@ -30,20 +25,20 @@ type Cluster struct {
 	Balance         *big.Int
 }
 
-// Client is an Ethereum client for interacting with the Oracle contract.
+// Client is an Ethereum client for interacting with the SSV Network contract.
 type Client struct {
-	ethClient       *ethclient.Client
+	ethClient       *ethclient.Client // HTTP client for transactions
+	wsClient        *ethclient.Client // WebSocket client for subscriptions (optional)
 	contractAddress common.Address
-	contractABI     abi.ABI
 	privateKey      []byte
 	chainID         *big.Int
-	mockMode        bool // PoC: mock mode until contract is ready
 }
 
 // NewClient creates a new Ethereum client.
 // Chain ID is auto-detected from the RPC endpoint.
-func NewClient(rpcURL string, contractAddress string, privateKeyHex string) (*Client, error) {
-	// Connect to Ethereum node
+// wsRPCURL is optional - if provided, enables event subscriptions.
+func NewClient(rpcURL string, wsRPCURL string, contractAddress string, privateKeyHex string) (*Client, error) {
+	// Connect to Ethereum node (HTTP)
 	ethClient, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ethereum node: %w", err)
@@ -58,46 +53,36 @@ func NewClient(rpcURL string, contractAddress string, privateKeyHex string) (*Cl
 	// Parse contract address
 	contractAddr := common.HexToAddress(contractAddress)
 
-	// Parse ABI
-	contractABI, err := abi.JSON(strings.NewReader(oracleABI))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse contract ABI: %w", err)
-	}
-
 	// Parse private key (handle optional 0x prefix)
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyHex, "0x"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 
-	return &Client{
+	client := &Client{
 		ethClient:       ethClient,
 		contractAddress: contractAddr,
-		contractABI:     contractABI,
 		privateKey:      crypto.FromECDSA(privateKey),
 		chainID:         chainID,
-		mockMode:        false,
-	}, nil
-}
-
-// NewMockClient creates a mock Ethereum client for PoC testing (no real contract needed).
-func NewMockClient() *Client {
-	return &Client{
-		mockMode: true,
 	}
+
+	// Connect to WebSocket endpoint if provided (for subscriptions)
+	if wsRPCURL != "" {
+		wsClient, err := ethclient.Dial(wsRPCURL)
+		if err != nil {
+			ethClient.Close()
+			return nil, fmt.Errorf("failed to connect to WebSocket endpoint: %w", err)
+		}
+		client.wsClient = wsClient
+		logger.Infow("WebSocket client connected", "url", wsRPCURL)
+	}
+
+	return client, nil
 }
 
-// CommitRoot submits a Merkle root commitment to the oracle contract.
-// Returns the signed transaction (nil in mock mode) for use with WaitForReceipt.
+// CommitRoot submits a Merkle root commitment to the SSV Network contract.
 // roundID and targetEpoch are passed for storage purposes only (oracle calculates these locally).
 func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum uint64, roundID uint64, targetEpoch uint64) (*types.Transaction, error) {
-	// Mock mode: return nil transaction (no real tx to send)
-	// Oracle will store the commit after WaitForReceipt
-	if c.mockMode {
-		return nil, nil
-	}
-
-	// Real mode: send actual transaction
 	privateKey, err := crypto.ToECDSA(c.privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert private key: %w", err)
@@ -127,7 +112,7 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum u
 	)
 
 	// Encode function call (contract only receives merkleRoot and blockNum)
-	data, err := c.contractABI.Pack("commitRoot", merkleRoot, blockNum)
+	data, err := SSVNetworkABI.Pack("commitRoot", merkleRoot, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack function call: %w", err)
 	}
@@ -173,17 +158,7 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum u
 }
 
 // WaitForReceipt waits for a transaction to be mined and returns the receipt.
-// Pass nil for tx in mock mode (returns fake successful receipt).
 func (c *Client) WaitForReceipt(ctx context.Context, tx *types.Transaction) (*types.Receipt, error) {
-	// Mock mode or nil transaction: return fake successful receipt
-	if c.mockMode || tx == nil {
-		return &types.Receipt{
-			Status:      1,                // Success
-			BlockNumber: big.NewInt(1000), // Fake block number
-		}, nil
-	}
-
-	// Real mode: wait for transaction to be mined
 	receipt, err := bind.WaitMined(ctx, c.ethClient, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to wait for transaction: %w", err)
@@ -193,7 +168,6 @@ func (c *Client) WaitForReceipt(ctx context.Context, tx *types.Transaction) (*ty
 }
 
 // UpdateClusterBalance calls the contract to update a cluster's effective balance.
-// In mock mode, logs the call instead of sending a transaction.
 //
 // NOTE: This function is NOT thread-safe. It fetches the nonce independently for each call,
 // which can cause nonce collisions if called concurrently. Callers must ensure sequential
@@ -204,16 +178,9 @@ func (c *Client) UpdateClusterBalance(
 	owner common.Address,
 	operatorIds []uint64,
 	cluster Cluster,
-	effectiveBalance uint64,
-	proof [][32]byte,
+	effectiveBalance *big.Int,
+	merkleProof [][32]byte,
 ) (*types.Transaction, error) {
-	// Mock mode: log the call instead of sending real transaction
-	if c.mockMode {
-		// Return nil transaction in mock mode (similar to CommitRoot)
-		return nil, nil
-	}
-
-	// Real mode: send actual transaction
 	privateKey, err := crypto.ToECDSA(c.privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert private key: %w", err)
@@ -243,7 +210,7 @@ func (c *Client) UpdateClusterBalance(
 	)
 
 	// Encode function call
-	data, err := c.contractABI.Pack("updateClusterBalance", blockNum, owner, operatorIds, cluster, effectiveBalance, proof)
+	data, err := SSVNetworkABI.Pack("updateClusterBalance", blockNum, owner, operatorIds, cluster, effectiveBalance, merkleProof)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack function call: %w", err)
 	}
@@ -289,38 +256,19 @@ func (c *Client) UpdateClusterBalance(
 }
 
 // GetClusterEffectiveBalance reads the current effective balance for a cluster from the contract.
-// In mock mode, returns 0 (always triggers update).
+// TODO: Currently returns 0 (always triggers update) because getClusterEffectiveBalance
+// is not yet available in the contract ABI. Implement when contract team adds the function.
 func (c *Client) GetClusterEffectiveBalance(ctx context.Context, clusterID [32]byte) (uint64, error) {
-	// Mock mode: return 0 to always trigger updates
-	if c.mockMode {
-		return 0, nil
-	}
-
-	// Real mode: call contract view method
-	data, err := c.contractABI.Pack("getClusterEffectiveBalance", clusterID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to pack function call: %w", err)
-	}
-
-	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{
-		To:   &c.contractAddress,
-		Data: data,
-	}, nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to call contract: %w", err)
-	}
-
-	var balance uint64
-	if err := c.contractABI.UnpackIntoInterface(&balance, "getClusterEffectiveBalance", result); err != nil {
-		return 0, fmt.Errorf("failed to unpack result: %w", err)
-	}
-
-	return balance, nil
+	// Always return 0 to trigger updates - contract function not available yet
+	return 0, nil
 }
 
-// Close closes the Ethereum client connection.
+// Close closes the Ethereum client connections.
 func (c *Client) Close() {
 	if c.ethClient != nil {
 		c.ethClient.Close()
+	}
+	if c.wsClient != nil {
+		c.wsClient.Close()
 	}
 }

@@ -324,66 +324,7 @@ func (s *PostgresStorage) InsertOracleCommit(ctx context.Context, roundID, targe
 	if err != nil {
 		return fmt.Errorf("failed to insert oracle commit: %w", err)
 	}
-
-	logger.Debugw("Sending NOTIFY", "channel", "new_oracle_commit", "block", referenceBlock)
-	_, err = s.db.ExecContext(ctx, "SELECT pg_notify('new_oracle_commit', $1)", fmt.Sprintf("%d", referenceBlock))
-	if err != nil {
-		logger.Warnw("Failed to send NOTIFY", "error", err)
-	}
 	return nil
-}
-
-// ListenForCommits subscribes to PostgreSQL NOTIFY for new oracle commits.
-// Used by updater in mock mode to process commits as they happen.
-// Returns a channel of reference block numbers.
-func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString string) (<-chan uint64, error) {
-	listener := pq.NewListener(connString, 10*time.Second, time.Minute, func(ev pq.ListenerEventType, err error) {
-		if err != nil {
-			logger.Errorw("Listener event error", "error", err)
-		}
-	})
-
-	if err := listener.Listen("new_oracle_commit"); err != nil {
-		listener.Close()
-		return nil, fmt.Errorf("failed to listen: %w", err)
-	}
-
-	blockChan := make(chan uint64, 10)
-
-	go func() {
-		defer close(blockChan)
-		defer listener.Close()
-
-		pingTicker := time.NewTicker(30 * time.Second)
-		defer pingTicker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-pingTicker.C:
-				if err := listener.Ping(); err != nil {
-					logger.Warnw("Listener ping failed", "error", err)
-				}
-			case notification := <-listener.Notify:
-				if notification == nil {
-					continue
-				}
-				var blockNum uint64
-				if _, err := fmt.Sscanf(notification.Extra, "%d", &blockNum); err != nil {
-					logger.Warnw("Failed to parse block number", "payload", notification.Extra, "error", err)
-					continue
-				}
-				select {
-				case blockChan <- blockNum:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-
-	return blockChan, nil
 }
 
 func (s *PostgresStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {

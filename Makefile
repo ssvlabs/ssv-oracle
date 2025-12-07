@@ -95,7 +95,6 @@ db-up: ## Start PostgreSQL only
 	@echo "Starting PostgreSQL..."
 	@docker-compose up -d postgres
 	@echo "✓ PostgreSQL started"
-	@echo "Connection: host=localhost port=5432 dbname=ssv_oracle user=oracle password=oracle123"
 
 db-down: ## Stop PostgreSQL
 	@echo "Stopping PostgreSQL..."

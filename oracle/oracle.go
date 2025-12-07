@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"go.uber.org/zap"
 
 	"ssv-oracle/contract"
@@ -142,22 +141,11 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		return 0, fmt.Errorf("transaction reverted")
 	}
 
-	var txHashBytes []byte
-	var txHashStr string
-	if tx != nil {
-		txHashBytes = tx.Hash().Bytes()
-		txHashStr = tx.Hash().Hex()
-	} else {
-		mockHash := common.BytesToHash([]byte(fmt.Sprintf("mock-tx-block-%d", checkpoint.BlockNum)))
-		txHashBytes = mockHash.Bytes()
-		txHashStr = mockHash.Hex()
-	}
-
-	if err := o.storage.InsertOracleCommit(ctx, round, targetEpoch, merkleRoot[:], checkpoint.BlockNum, txHashBytes, clusterBalances); err != nil {
+	if err := o.storage.InsertOracleCommit(ctx, round, targetEpoch, merkleRoot[:], checkpoint.BlockNum, tx.Hash().Bytes(), clusterBalances); err != nil {
 		log.Warnw("Failed to store commit", "error", err)
 	}
 
-	log.Infow("Committed", "txHash", txHashStr)
+	log.Infow("Committed", "txHash", tx.Hash().Hex())
 	return targetEpoch, nil
 }
 

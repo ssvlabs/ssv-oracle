@@ -43,11 +43,11 @@ ssv-oracle/
 4. Check finalization via beacon API
 5. Fetch effective balances from beacon
 6. Build Merkle tree
-7. Commit root to contract (mock mode for PoC)
+7. Commit root to SSV Network contract
 
 ### Cluster Updater (updater/)
 Listens for RootCommitted events and updates cluster balances on-chain:
-1. Listen for commits (PostgreSQL NOTIFY in mock mode, contract events in real mode)
+1. Listen for RootCommitted events from SSV Network contract
 2. Rebuild merkle tree from stored cluster balances
 3. Validate computed root matches committed root
 4. Generate merkle proof for each cluster
@@ -81,21 +81,11 @@ Key tables:
 ## Configuration
 
 ```yaml
-eth_rpc: "http://localhost:8545"      # Execution layer RPC
+eth_rpc: "http://localhost:8545"      # Execution layer RPC (HTTP)
+eth_ws_rpc: "ws://localhost:8546"     # Execution layer WebSocket (for updater)
 beacon_rpc: "http://localhost:5052"   # Beacon node RPC
-ssv_contract: "0x..."                 # SSV contract address
-mock_mode: true                       # PoC - no real contract calls
+ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
 ```
 
-Chain ID is auto-detected from RPC.
-
-## Mock Mode (PoC)
-
-Currently runs in mock mode:
-- Syncs real SSV events
-- Fetches real validator balances
-- Builds real Merkle trees
-- Logs commits instead of sending transactions
-- Stores state in PostgreSQL
-
-Set `mock_mode: false` when oracle contract is deployed.
+- Chain ID is auto-detected from RPC
+- `eth_ws_rpc` is required when running with `--updater` (event subscriptions need WebSocket)

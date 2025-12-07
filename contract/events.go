@@ -19,20 +19,21 @@ type RootCommittedEvent struct {
 	Timestamp  uint64 // block.timestamp when commit was made
 }
 
-// SubscribeRootCommitted subscribes to RootCommitted events from the oracle contract.
+// SubscribeRootCommitted subscribes to RootCommitted events from the SSV Network contract.
 // Returns a channel that receives events and an error channel for subscription errors.
 // The caller should handle reconnection on error.
 // If fromBlock is nil, subscribes to new events only (from "latest").
+// Requires WebSocket client to be configured (eth_ws_rpc in config).
 func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) (<-chan *RootCommittedEvent, <-chan error, error) {
-	if c.mockMode {
-		return nil, nil, fmt.Errorf("SubscribeRootCommitted not available in mock mode")
+	if c.wsClient == nil {
+		return nil, nil, fmt.Errorf("WebSocket client not configured (set eth_ws_rpc in config)")
 	}
 
 	eventChan := make(chan *RootCommittedEvent, 10)
 	errChan := make(chan error, 1)
 
 	// Get the event signature for RootCommitted
-	event, ok := c.contractABI.Events["RootCommitted"]
+	event, ok := SSVNetworkABI.Events["RootCommitted"]
 	if !ok {
 		return nil, nil, fmt.Errorf("RootCommitted event not found in ABI")
 	}
@@ -46,9 +47,9 @@ func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) 
 		query.FromBlock = big.NewInt(int64(*fromBlock))
 	}
 
-	// Subscribe to logs
+	// Subscribe to logs using WebSocket client
 	logs := make(chan types.Log, 10) // Buffer to prevent blocking during slow processing
-	sub, err := c.ethClient.SubscribeFilterLogs(ctx, query, logs)
+	sub, err := c.wsClient.SubscribeFilterLogs(ctx, query, logs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to subscribe to logs: %w", err)
 	}
@@ -88,38 +89,41 @@ func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) 
 }
 
 // parseRootCommittedEvent parses a log into a RootCommittedEvent.
+// New ABI: RootCommitted(bytes32 indexed merkleRoot, uint64 indexed blockNum, uint256 timestamp)
+// Topic[0] = event signature
+// Topic[1] = merkleRoot (indexed)
+// Topic[2] = blockNum (indexed)
+// Data = [timestamp]
 func (c *Client) parseRootCommittedEvent(vLog types.Log) (*RootCommittedEvent, error) {
-	event, ok := c.contractABI.Events["RootCommitted"]
+	event, ok := SSVNetworkABI.Events["RootCommitted"]
 	if !ok {
 		return nil, fmt.Errorf("RootCommitted event not found in ABI")
 	}
 
-	// Parse indexed parameter (blockNum) from topics
-	if len(vLog.Topics) < 2 {
-		return nil, fmt.Errorf("invalid log: expected 2 topics, got %d", len(vLog.Topics))
+	// Parse indexed parameters from topics
+	if len(vLog.Topics) < 3 {
+		return nil, fmt.Errorf("invalid log: expected 3 topics, got %d", len(vLog.Topics))
 	}
 
-	// Topic[0] is the event signature, Topic[1] is the indexed blockNum
-	blockNum := new(big.Int).SetBytes(vLog.Topics[1].Bytes()).Uint64()
+	// Topic[1] is the indexed merkleRoot
+	var merkleRoot [32]byte
+	copy(merkleRoot[:], vLog.Topics[1].Bytes())
 
-	// Parse non-indexed parameters from data (merkleRoot, targetEpoch)
+	// Topic[2] is the indexed blockNum
+	blockNum := new(big.Int).SetBytes(vLog.Topics[2].Bytes()).Uint64()
+
+	// Parse non-indexed parameters from data (timestamp only)
 	unpacked, err := event.Inputs.NonIndexed().Unpack(vLog.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack event data: %w", err)
 	}
 
-	if len(unpacked) != 2 {
-		return nil, fmt.Errorf("expected 2 non-indexed params, got %d", len(unpacked))
-	}
-
-	// merkleRoot is [32]byte
-	merkleRoot, ok := unpacked[0].([32]byte)
-	if !ok {
-		return nil, fmt.Errorf("merkleRoot is not [32]byte")
+	if len(unpacked) != 1 {
+		return nil, fmt.Errorf("expected 1 non-indexed param, got %d", len(unpacked))
 	}
 
 	// timestamp is *big.Int (uint256 in Solidity)
-	timestampBig, ok := unpacked[1].(*big.Int)
+	timestampBig, ok := unpacked[0].(*big.Int)
 	if !ok {
 		return nil, fmt.Errorf("timestamp is not *big.Int")
 	}

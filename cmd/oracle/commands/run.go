@@ -48,11 +48,11 @@ func init() {
 type Config struct {
 	// Network
 	EthRPC    string `yaml:"eth_rpc"`
+	EthWSRPC  string `yaml:"eth_ws_rpc"` // WebSocket RPC for event subscriptions (required for updater)
 	BeaconRPC string `yaml:"beacon_rpc"`
 
-	// Contracts
-	SSVContract    string `yaml:"ssv_contract"`
-	OracleContract string `yaml:"oracle_contract"`
+	// Contract (unified SSV Network contract with oracle functionality)
+	SSVContract string `yaml:"ssv_contract"`
 
 	// Event Syncing
 	SyncFromBlock  uint64 `yaml:"sync_from_block"`
@@ -99,15 +99,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	logger.Infow("SSV Oracle starting",
 		"version", Version,
-		"ssvContract", cfg.SSVContract,
-		"oracleContract", cfg.OracleContract,
+		"contract", cfg.SSVContract,
 		"updater", withUpdater)
-
-	// Enable mock mode if oracle contract is zero address
-	mockMode := cfg.OracleContract == "0x0000000000000000000000000000000000000000"
-	if mockMode {
-		logger.Info("Oracle contract is zero address, running in mock mode")
-	}
 
 	// 1. Create PostgreSQL storage
 	connString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
@@ -205,18 +198,13 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"firstStartEpoch", currentPhase.StartEpoch,
 		"firstInterval", currentPhase.Interval)
 
-	// Create Ethereum client for oracle commits
-	var ethClient *contract.Client
-	if mockMode {
-		ethClient = contract.NewMockClient()
-	} else {
-		var err error
-		ethClient, err = contract.NewClient(cfg.EthRPC, cfg.OracleContract, privateKey)
-		if err != nil {
-			return fmt.Errorf("failed to create Ethereum client: %w", err)
-		}
-		defer ethClient.Close()
+	// Create Ethereum client for oracle commits (uses SSV Network contract)
+	// Pass WebSocket URL for event subscriptions (required if running with --updater)
+	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, privateKey)
+	if err != nil {
+		return fmt.Errorf("failed to create Ethereum client: %w", err)
 	}
+	defer ethClient.Close()
 
 	// Create oracle
 	oracleCfg := &oracle.Config{
@@ -250,7 +238,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	g, gCtx := errgroup.WithContext(ctx)
 
 	// Run oracle
-	logger.Info("Starting oracle commit loop")
 	g.Go(func() error {
 		return oracleInstance.Run(gCtx, syncer, beaconClient)
 	})
@@ -260,10 +247,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		updaterInstance := updater.New(&updater.Config{
 			Storage:        storage,
 			ContractClient: ethClient,
-			MockMode:       mockMode,
-			DBConnString:   connString,
 		})
-		logger.Info("Starting cluster updater")
 		g.Go(func() error {
 			return updaterInstance.Run(gCtx)
 		})

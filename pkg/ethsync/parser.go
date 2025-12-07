@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+
+	"ssv-oracle/contract"
 )
 
 // EventParser parses SSV contract events.
@@ -16,119 +17,9 @@ type EventParser struct {
 	abi abi.ABI
 }
 
-// NewEventParser creates a new event parser.
+// NewEventParser creates a new event parser using the shared SSVNetwork ABI.
 func NewEventParser() (*EventParser, error) {
-	// Define minimal ABI for SSV events
-	abiJSON := `[
-		{
-			"anonymous": false,
-			"inputs": [
-				{"indexed": true, "name": "owner", "type": "address"},
-				{"indexed": false, "name": "operatorIds", "type": "uint64[]"},
-				{"indexed": false, "name": "publicKey", "type": "bytes"},
-				{"indexed": false, "name": "shares", "type": "bytes"},
-				{"indexed": false, "name": "cluster", "type": "tuple", "components": [
-					{"name": "validatorCount", "type": "uint32"},
-					{"name": "networkFeeIndex", "type": "uint64"},
-					{"name": "index", "type": "uint64"},
-					{"name": "active", "type": "bool"},
-					{"name": "balance", "type": "uint256"}
-				]}
-			],
-			"name": "ValidatorAdded",
-			"type": "event"
-		},
-		{
-			"anonymous": false,
-			"inputs": [
-				{"indexed": true, "name": "owner", "type": "address"},
-				{"indexed": false, "name": "operatorIds", "type": "uint64[]"},
-				{"indexed": false, "name": "publicKey", "type": "bytes"},
-				{"indexed": false, "name": "cluster", "type": "tuple", "components": [
-					{"name": "validatorCount", "type": "uint32"},
-					{"name": "networkFeeIndex", "type": "uint64"},
-					{"name": "index", "type": "uint64"},
-					{"name": "active", "type": "bool"},
-					{"name": "balance", "type": "uint256"}
-				]}
-			],
-			"name": "ValidatorRemoved",
-			"type": "event"
-		},
-		{
-			"anonymous": false,
-			"inputs": [
-				{"indexed": true, "name": "owner", "type": "address"},
-				{"indexed": false, "name": "operatorIds", "type": "uint64[]"},
-				{"indexed": false, "name": "cluster", "type": "tuple", "components": [
-					{"name": "validatorCount", "type": "uint32"},
-					{"name": "networkFeeIndex", "type": "uint64"},
-					{"name": "index", "type": "uint64"},
-					{"name": "active", "type": "bool"},
-					{"name": "balance", "type": "uint256"}
-				]}
-			],
-			"name": "ClusterLiquidated",
-			"type": "event"
-		},
-		{
-			"anonymous": false,
-			"inputs": [
-				{"indexed": true, "name": "owner", "type": "address"},
-				{"indexed": false, "name": "operatorIds", "type": "uint64[]"},
-				{"indexed": false, "name": "cluster", "type": "tuple", "components": [
-					{"name": "validatorCount", "type": "uint32"},
-					{"name": "networkFeeIndex", "type": "uint64"},
-					{"name": "index", "type": "uint64"},
-					{"name": "active", "type": "bool"},
-					{"name": "balance", "type": "uint256"}
-				]}
-			],
-			"name": "ClusterReactivated",
-			"type": "event"
-		},
-		{
-			"anonymous": false,
-			"inputs": [
-				{"indexed": true, "name": "owner", "type": "address"},
-				{"indexed": false, "name": "operatorIds", "type": "uint64[]"},
-				{"indexed": false, "name": "value", "type": "uint256"},
-				{"indexed": false, "name": "cluster", "type": "tuple", "components": [
-					{"name": "validatorCount", "type": "uint32"},
-					{"name": "networkFeeIndex", "type": "uint64"},
-					{"name": "index", "type": "uint64"},
-					{"name": "active", "type": "bool"},
-					{"name": "balance", "type": "uint256"}
-				]}
-			],
-			"name": "ClusterWithdrawn",
-			"type": "event"
-		},
-		{
-			"anonymous": false,
-			"inputs": [
-				{"indexed": true, "name": "owner", "type": "address"},
-				{"indexed": false, "name": "operatorIds", "type": "uint64[]"},
-				{"indexed": false, "name": "value", "type": "uint256"},
-				{"indexed": false, "name": "cluster", "type": "tuple", "components": [
-					{"name": "validatorCount", "type": "uint32"},
-					{"name": "networkFeeIndex", "type": "uint64"},
-					{"name": "index", "type": "uint64"},
-					{"name": "active", "type": "bool"},
-					{"name": "balance", "type": "uint256"}
-				]}
-			],
-			"name": "ClusterDeposited",
-			"type": "event"
-		}
-	]`
-
-	parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse ABI: %w", err)
-	}
-
-	return &EventParser{abi: parsedABI}, nil
+	return &EventParser{abi: contract.SSVNetworkABI}, nil
 }
 
 // ParseLog parses an Ethereum log into a structured event.

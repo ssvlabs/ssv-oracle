@@ -4,12 +4,17 @@ import (
 	"testing"
 )
 
-func TestOracleABI_Loaded(t *testing.T) {
-	if oracleABI == "" {
-		t.Fatal("Oracle ABI not loaded")
+func TestSSVNetworkABI_Loaded(t *testing.T) {
+	if ssvNetworkABIJSON == "" {
+		t.Fatal("SSVNetwork ABI not loaded")
 	}
 
-	t.Logf("Oracle ABI loaded successfully (%d bytes)", len(oracleABI))
+	// Verify ABI was parsed successfully (happens in init())
+	if len(SSVNetworkABI.Methods) == 0 {
+		t.Fatal("SSVNetwork ABI has no methods")
+	}
+
+	t.Logf("SSVNetwork ABI loaded successfully (%d bytes, %d methods)", len(ssvNetworkABIJSON), len(SSVNetworkABI.Methods))
 }
 
 func TestCluster(t *testing.T) {

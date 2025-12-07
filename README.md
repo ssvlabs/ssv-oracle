@@ -8,7 +8,7 @@ Off-chain oracle client that publishes Merkle roots of SSV cluster effective bal
 - **Epoch-aligned timing** - Waits for epoch finalization before committing roots
 - **OpenZeppelin-compatible Merkle trees** - Deterministic root computation with standardized sibling ordering
 - **Beacon chain integration** - Fetches validator effective balances directly from consensus layer
-- **Mock mode** - PoC testing without real contract deployment
+- **Unified contract** - Uses SSV Network contract with integrated oracle functionality
 
 ## Quick Start
 
@@ -29,8 +29,7 @@ cp config.yaml.example config.yaml
 # Edit config.yaml with your endpoints
 # - eth_rpc: Execution layer RPC
 # - beacon_rpc: Beacon node API
-# - ssv_contract: SSV contract address
-# - oracle_contract: Oracle contract address (or 0x0... for mock mode)
+# - ssv_contract: SSV Network contract address (includes oracle functionality)
 
 # Load environment variables
 source .env
@@ -68,12 +67,12 @@ Edit `config.yaml`:
 
 ```yaml
 # Network
-eth_rpc: "http://localhost:8545"
+eth_rpc: "http://localhost:8545"       # HTTP RPC for transactions
+eth_ws_rpc: "ws://localhost:8546"      # WebSocket for subscriptions (required for --updater)
 beacon_rpc: "http://localhost:5052"
 
-# Contracts
+# Contract (SSV Network with integrated oracle functionality)
 ssv_contract: "0x..."
-oracle_contract: "0x..."  # Use 0x0000... for mock mode
 
 # Syncing
 sync_from_block: 17507487  # SSV contract deployment block (mainnet example)
@@ -89,7 +88,6 @@ db_password_env: "DB_PASSWORD"
 
 # Oracle
 private_key_env: "PRIVATE_KEY"
-mock_mode: true           # Set false for production
 ```
 
 ## Oracle Cycle
@@ -107,7 +105,7 @@ The oracle executes the following steps each round:
 
 The updater runs alongside the oracle (enabled with `--updater` flag) and updates individual cluster balances on-chain:
 
-1. **Listen for commits** - Watches for RootCommitted events (or PostgreSQL NOTIFY in mock mode)
+1. **Listen for commits** - Subscribes to RootCommitted events from SSV Network contract
 2. **Rebuild merkle tree** - Reconstructs tree from stored cluster balances
 3. **Validate root** - Ensures computed root matches the committed root
 4. **Check balances** - Reads current on-chain balance for each cluster (skips unchanged)

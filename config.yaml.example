@@ -5,21 +5,22 @@
 # Ethereum & Beacon Chain
 # ============================================================================
 
-# Ethereum Execution Layer RPC endpoint (for SSV contract events)
+# Ethereum Execution Layer RPC endpoint (HTTP - for transactions and queries)
 eth_rpc: "http://127.0.0.1:8545"
+
+# Ethereum Execution Layer WebSocket endpoint (for event subscriptions)
+# Required if running with --updater flag
+eth_ws_rpc: "ws://127.0.0.1:8546"
 
 # Beacon Chain (Consensus Layer) API endpoint (for effective balances and finalization)
 beacon_rpc: "http://127.0.0.1:5052"
 
 # ============================================================================
-# Contracts
+# Contract
 # ============================================================================
 
-# SSV Network contract address
+# SSV Network contract address (includes oracle functionality)
 ssv_contract: "0x..."
-
-# Oracle contract address (set to zero address for mock/PoC mode)
-oracle_contract: "0x0000000000000000000000000000000000000000"
 
 # ============================================================================
 # Event Syncing Configuration

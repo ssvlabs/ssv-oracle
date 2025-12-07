@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"time"
 
 	"go.uber.org/zap"
@@ -19,79 +20,22 @@ import (
 type Updater struct {
 	storage        *ethsync.PostgresStorage
 	contractClient *contract.Client
-	mockMode       bool
-	dbConnString   string
 }
 
 type Config struct {
 	Storage        *ethsync.PostgresStorage
 	ContractClient *contract.Client
-	MockMode       bool
-	DBConnString   string
 }
 
 func New(cfg *Config) *Updater {
 	return &Updater{
 		storage:        cfg.Storage,
 		contractClient: cfg.ContractClient,
-		mockMode:       cfg.MockMode,
-		dbConnString:   cfg.DBConnString,
 	}
 }
 
 func (u *Updater) Run(ctx context.Context) error {
 	logger.Info("Updater starting")
-
-	if u.mockMode {
-		return u.runMockMode(ctx)
-	}
-	return u.runRealMode(ctx)
-}
-
-func (u *Updater) runMockMode(ctx context.Context) error {
-	logger.Info("Running in mock mode (LISTEN/NOTIFY)")
-
-	blockChan, err := u.storage.ListenForCommits(ctx, u.dbConnString)
-	if err != nil {
-		return fmt.Errorf("failed to start listener: %w", err)
-	}
-
-	logger.Info("Listening for new oracle commits")
-
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("Updater stopping")
-			return ctx.Err()
-
-		case blockNum, ok := <-blockChan:
-			if !ok {
-				logger.Warn("Listener channel closed")
-				return fmt.Errorf("listener closed")
-			}
-
-			log := logger.With("blockNum", blockNum)
-			log.Info("Received notification")
-
-			commit, err := u.storage.GetCommitByBlock(ctx, blockNum)
-			if err != nil {
-				log.Errorw("Failed to get commit", "error", err)
-				continue
-			}
-			if commit == nil {
-				log.Warn("Commit not found")
-				continue
-			}
-
-			if err := u.processCommit(ctx, commit); err != nil {
-				log.Errorw("Failed to process commit", "error", err)
-			}
-		}
-	}
-}
-
-func (u *Updater) runRealMode(ctx context.Context) error {
-	logger.Info("Running in real mode (event subscription)")
 
 	for {
 		events, errChan, err := u.contractClient.SubscribeRootCommitted(ctx, nil)
@@ -247,39 +191,36 @@ func (u *Updater) processCluster(ctx context.Context, log *zap.SugaredLogger, bl
 		Balance:         cluster.Balance,
 	}
 
+	// Convert uint64 to *big.Int for contract call
+	effectiveBalanceBig := new(big.Int).SetUint64(leaf.EffectiveBalance)
+
 	tx, err := u.contractClient.UpdateClusterBalance(
 		ctx,
 		blockNum,
 		owner,
 		cluster.OperatorIDs,
 		contractCluster,
-		leaf.EffectiveBalance,
+		effectiveBalanceBig,
 		proof,
 	)
 	if err != nil {
 		return fmt.Errorf("contract call failed: %w", err)
 	}
 
-	if u.mockMode {
-		log.Debugw("Updated (mock)",
-			"effectiveBalance", leaf.EffectiveBalance,
-			"proofSize", len(proof))
-	} else {
-		log.Infow("Submitted tx, waiting for confirmation",
-			"txHash", tx.Hash().Hex(),
-			"effectiveBalance", leaf.EffectiveBalance)
+	log.Infow("Submitted tx, waiting for confirmation",
+		"txHash", tx.Hash().Hex(),
+		"effectiveBalance", leaf.EffectiveBalance)
 
-		receipt, err := u.contractClient.WaitForReceipt(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("tx failed to mine: %w", err)
-		}
-		if receipt.Status != 1 {
-			return fmt.Errorf("tx reverted")
-		}
-		log.Infow("Tx confirmed",
-			"txHash", tx.Hash().Hex(),
-			"block", receipt.BlockNumber.Uint64())
+	receipt, err := u.contractClient.WaitForReceipt(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("tx failed to mine: %w", err)
 	}
+	if receipt.Status != 1 {
+		return fmt.Errorf("tx reverted")
+	}
+	log.Infow("Tx confirmed",
+		"txHash", tx.Hash().Hex(),
+		"block", receipt.BlockNumber.Uint64())
 
 	return nil
 }
