@@ -38,6 +38,8 @@ require (
 	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/zap v1.27.1 // indirect
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/term v0.30.0 // indirect

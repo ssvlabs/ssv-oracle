@@ -3,11 +3,12 @@ package ethsync
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/schollz/progressbar/v3"
+
+	"ssv-oracle/pkg/logger"
 )
 
 // EventSyncer continuously syncs SSV contract events to the database.
@@ -62,7 +63,7 @@ func (s *EventSyncer) SyncToFinalized(ctx context.Context, fromBlock uint64) err
 			return fmt.Errorf("sync_from_block must be set to the SSV contract deployment block")
 		}
 
-		log.Printf("First run: setting initial sync position to block %d", fromBlock-1)
+		logger.Infow("First run: setting initial sync position", "block", fromBlock-1)
 		err = s.storage.UpdateLastSyncedBlock(ctx, fromBlock-1)
 		if err != nil {
 			return fmt.Errorf("failed to set initial sync block: %w", err)
@@ -140,7 +141,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	_ = bar.Finish()
 	fmt.Println() // New line after progress bar
-	log.Printf("Events: synced to block %d (%d new)", targetBlock, totalEvents)
+	logger.Infow("Events synced", "block", targetBlock, "newEvents", totalEvents)
 	return nil
 }
 
@@ -160,7 +161,7 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 
 	// Nothing to sync?
 	if fromBlock >= finalizedBlock {
-		log.Printf("Events: already synced to block %d", fromBlock)
+		logger.Infow("Events already synced", "block", fromBlock)
 		return nil
 	}
 
@@ -212,7 +213,7 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 
 	_ = bar.Finish()
 	fmt.Println() // New line after progress bar
-	log.Printf("Events: synced to block %d (%d new)", finalizedBlock, totalEvents)
+	logger.Infow("Events synced", "block", finalizedBlock, "newEvents", totalEvents)
 	return nil
 }
 

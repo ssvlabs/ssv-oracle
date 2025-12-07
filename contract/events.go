@@ -3,12 +3,13 @@ package contract
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+
+	"ssv-oracle/pkg/logger"
 )
 
 // RootCommittedEvent represents a RootCommitted event from the Oracle contract.
@@ -70,7 +71,7 @@ func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) 
 			case vLog := <-logs:
 				parsedEvent, err := c.parseRootCommittedEvent(vLog)
 				if err != nil {
-					log.Printf("Warning: failed to parse RootCommitted event: %v", err)
+					logger.Warnw("Failed to parse RootCommitted event", "error", err)
 					continue
 				}
 

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"ssv-oracle/cmd/oracle/commands"
+	"ssv-oracle/pkg/logger"
 )
 
 var (
@@ -15,6 +16,10 @@ var (
 )
 
 func main() {
+	// Initialize logger
+	logger.InitFromEnv()
+	defer logger.Sync()
+
 	// Set version info for commands
 	commands.Version = Version
 	commands.GitCommit = GitCommit

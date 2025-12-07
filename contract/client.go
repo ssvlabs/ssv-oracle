@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 
@@ -15,6 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"ssv-oracle/pkg/logger"
 )
 
 //go:embed Oracle.abi
@@ -138,7 +139,9 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum u
 		Data: data,
 	})
 	if err != nil {
-		log.Printf("Warning: gas estimation failed for commitRoot, using default 200000: %v", err)
+		logger.Warnw("Gas estimation failed for commitRoot, using default",
+			"defaultGas", 200000,
+			"error", err)
 		gasLimit = 200000
 	}
 
@@ -252,7 +255,9 @@ func (c *Client) UpdateClusterBalance(
 		Data: data,
 	})
 	if err != nil {
-		log.Printf("Warning: gas estimation failed for updateClusterBalance, using default 300000: %v", err)
+		logger.Warnw("Gas estimation failed for updateClusterBalance, using default",
+			"defaultGas", 300000,
+			"error", err)
 		gasLimit = 300000
 	}
 

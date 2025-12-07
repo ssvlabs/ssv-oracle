@@ -137,6 +137,27 @@ ssv-oracle/
 └── pkg/ethsync/        Event syncing, beacon client, storage
 ```
 
+## Logging
+
+The oracle uses structured logging (zap). Configure via environment variables:
+
+| Variable | Values | Default | Description |
+|----------|--------|---------|-------------|
+| `LOG_LEVEL` | `debug`, `info`, `warn`, `error` | `info` (prod) / `debug` (dev) | Minimum log level |
+| `DEV` | `true`, `false` | `false` | Development mode: colored output, human-readable timestamps |
+
+**Examples:**
+```bash
+# Production (JSON logs, info level)
+LOG_LEVEL=info ./ssv-oracle run
+
+# Development (colored console, debug level)
+DEV=true ./ssv-oracle run
+
+# Production with debug logging
+LOG_LEVEL=debug ./ssv-oracle run
+```
+
 ## Development
 
 ```bash

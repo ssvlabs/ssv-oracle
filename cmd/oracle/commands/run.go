@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,6 +16,7 @@ import (
 	"ssv-oracle/contract"
 	"ssv-oracle/oracle"
 	"ssv-oracle/pkg/ethsync"
+	"ssv-oracle/pkg/logger"
 )
 
 var (
@@ -90,14 +90,15 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
 	}
 
-	log.Printf("SSV Oracle %s", Version)
-	log.Printf("SSV Contract: %s", cfg.SSVContract)
-	log.Printf("Oracle Contract: %s", cfg.OracleContract)
+	logger.Infow("SSV Oracle starting",
+		"version", Version,
+		"ssvContract", cfg.SSVContract,
+		"oracleContract", cfg.OracleContract)
 
 	// Enable mock mode if oracle contract is zero address
 	mockMode := cfg.OracleContract == "0x0000000000000000000000000000000000000000"
 	if mockMode {
-		log.Println("Oracle contract is zero address, running in mock mode")
+		logger.Info("Oracle contract is zero address, running in mock mode")
 	}
 
 	// 1. Create PostgreSQL storage
@@ -110,13 +111,13 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	}
 	defer func() {
 		if err := storage.Close(); err != nil {
-			log.Printf("Warning: failed to close storage: %v", err)
+			logger.Warnw("Failed to close storage", "error", err)
 		}
 	}()
 
 	// Handle fresh start flag
 	if freshStart {
-		log.Println("Fresh start: clearing database...")
+		logger.Info("Fresh start: clearing database")
 		ctx := context.Background()
 		if err := storage.ClearAllState(ctx); err != nil {
 			return fmt.Errorf("failed to clear database state: %w", err)
@@ -140,7 +141,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get chain ID: %w", err)
 	}
-	log.Printf("Chain ID: %d", chainID)
+	logger.Infow("Connected to chain", "chainID", chainID)
 
 	// Validate chain ID matches database (prevents accidental network changes)
 	ctx := context.Background()
@@ -154,7 +155,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		if err := storage.SetChainID(ctx, chainID.Uint64()); err != nil {
 			return fmt.Errorf("failed to store chain ID: %w", err)
 		}
-		log.Printf("Stored chain ID: %d", chainID)
+		logger.Infow("Stored chain ID", "chainID", chainID)
 	} else if *dbChainID != chainID.Uint64() {
 		return fmt.Errorf("chain ID mismatch: database has %d, RPC has %d. Use --fresh to start with new chain", *dbChainID, chainID)
 	}
@@ -172,8 +173,10 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get beacon spec: %w", err)
 	}
-	log.Printf("Beacon spec: genesis=%s, slotsPerEpoch=%d, slotDuration=%v",
-		spec.GenesisTime.Format(time.RFC3339), spec.SlotsPerEpoch, spec.SlotDuration)
+	logger.Infow("Beacon spec loaded",
+		"genesis", spec.GenesisTime.Format(time.RFC3339),
+		"slotsPerEpoch", spec.SlotsPerEpoch,
+		"slotDuration", spec.SlotDuration)
 
 	// Create event syncer
 	ssvContract := common.HexToAddress(cfg.SSVContract)
@@ -189,8 +192,10 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	// Log timing configuration
 	currentPhase := oracle.GetTimingForEpoch(cfg.OracleTiming, 0)
-	log.Printf("Oracle timing: %d phases configured, first phase: startEpoch=%d, interval=%d",
-		len(cfg.OracleTiming), currentPhase.StartEpoch, currentPhase.Interval)
+	logger.Infow("Oracle timing configured",
+		"phases", len(cfg.OracleTiming),
+		"firstStartEpoch", currentPhase.StartEpoch,
+		"firstInterval", currentPhase.Interval)
 
 	// Create Ethereum client for oracle commits
 	var ethClient *contract.Client
@@ -223,24 +228,24 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	go func() {
 		sig := <-sigChan
-		log.Printf("Received signal %v, shutting down gracefully...", sig)
+		logger.Infow("Received signal, shutting down", "signal", sig)
 		cancel()
 	}()
 
 	// Perform initial sync (blocking, sequential)
-	log.Println("Syncing SSV contract events...")
+	logger.Info("Syncing SSV contract events")
 	if err := syncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
 		return fmt.Errorf("initial sync failed: %w", err)
 	}
 
 	// Run oracle loop (which will do incremental syncs and balance fetching)
-	log.Println("Starting oracle commit loop...")
+	logger.Info("Starting oracle commit loop")
 
 	if err := oracleInstance.Run(ctx, syncer, beaconClient); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("oracle error: %w", err)
 	}
 
-	log.Println("Oracle shutdown complete")
+	logger.Info("Oracle shutdown complete")
 	return nil
 }
 

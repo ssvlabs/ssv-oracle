@@ -6,11 +6,12 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"time"
 
 	"github.com/lib/pq"
+
+	"ssv-oracle/pkg/logger"
 )
 
 // Storage defines the interface for persisting SSV event data and state.
@@ -167,7 +168,7 @@ func NewPostgresStorage(connString string) (*PostgresStorage, error) {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("failed to apply schema: %w", err)
 	}
-	log.Println("✓ Database schema applied")
+	logger.Info("Database schema applied")
 
 	return &PostgresStorage{db: db}, nil
 }
@@ -226,13 +227,13 @@ func (s *PostgresStorage) InsertOracleCommit(ctx context.Context, roundID, targe
 	}
 
 	// Notify listeners (for updater in mock mode)
-	log.Printf("Sending NOTIFY new_oracle_commit with payload: %d", roundID)
+	logger.Debugw("Sending NOTIFY", "channel", "new_oracle_commit", "round", roundID)
 	_, err = s.db.ExecContext(ctx, "SELECT pg_notify('new_oracle_commit', $1)", fmt.Sprintf("%d", roundID))
 	if err != nil {
 		// Log but don't fail - notification is best-effort
-		log.Printf("Warning: failed to send NOTIFY: %v", err)
+		logger.Warnw("Failed to send NOTIFY", "error", err)
 	} else {
-		log.Printf("NOTIFY sent successfully for round %d", roundID)
+		logger.Debugw("NOTIFY sent", "round", roundID)
 	}
 
 	return nil
@@ -245,17 +246,17 @@ func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString strin
 	// Create a dedicated listener connection
 	listener := pq.NewListener(connString, 10*time.Second, time.Minute, func(ev pq.ListenerEventType, err error) {
 		if err != nil {
-			log.Printf("Listener event error: %v", err)
+			logger.Errorw("Listener event error", "error", err)
 		}
 		switch ev {
 		case pq.ListenerEventConnected:
-			log.Println("PostgreSQL listener connected")
+			logger.Debug("PostgreSQL listener connected")
 		case pq.ListenerEventDisconnected:
-			log.Println("PostgreSQL listener disconnected")
+			logger.Debug("PostgreSQL listener disconnected")
 		case pq.ListenerEventReconnected:
-			log.Println("PostgreSQL listener reconnected")
+			logger.Debug("PostgreSQL listener reconnected")
 		case pq.ListenerEventConnectionAttemptFailed:
-			log.Println("PostgreSQL listener connection attempt failed")
+			logger.Warn("PostgreSQL listener connection attempt failed")
 		}
 	})
 
@@ -264,7 +265,7 @@ func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString strin
 		return nil, fmt.Errorf("failed to listen: %w", err)
 	}
 
-	log.Println("Subscribed to PostgreSQL channel: new_oracle_commit")
+	logger.Debug("Subscribed to PostgreSQL channel: new_oracle_commit")
 
 	roundChan := make(chan uint64, 10)
 
@@ -279,28 +280,31 @@ func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString strin
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("Listener context cancelled, closing...")
+				logger.Debug("Listener context cancelled")
 				return
 
 			case <-pingTicker.C:
 				if err := listener.Ping(); err != nil {
-					log.Printf("Listener ping failed: %v", err)
+					logger.Warnw("Listener ping failed", "error", err)
 				}
 
 			case notification := <-listener.Notify:
 				if notification == nil {
 					// Connection lost or reconnecting
-					log.Println("Received nil notification (connection issue), waiting...")
+					logger.Warn("Received nil notification (connection issue), waiting")
 					continue
 				}
 
-				log.Printf("Received PostgreSQL notification: channel=%s, payload=%s",
-					notification.Channel, notification.Extra)
+				logger.Debugw("Received PostgreSQL notification",
+					"channel", notification.Channel,
+					"payload", notification.Extra)
 
 				// Parse round ID from payload
 				var roundID uint64
 				if _, err := fmt.Sscanf(notification.Extra, "%d", &roundID); err != nil {
-					log.Printf("Warning: failed to parse round ID from payload %q: %v", notification.Extra, err)
+					logger.Warnw("Failed to parse round ID from payload",
+						"payload", notification.Extra,
+						"error", err)
 					continue
 				}
 
@@ -405,7 +409,7 @@ func (s *PostgresStorage) ClearAllState(ctx context.Context) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Println("✓ Database cleared")
+	logger.Info("Database cleared")
 	return nil
 }
 

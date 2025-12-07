@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +14,7 @@ import (
 
 	"ssv-oracle/contract"
 	"ssv-oracle/pkg/ethsync"
+	"ssv-oracle/pkg/logger"
 	"ssv-oracle/updater"
 )
 
@@ -80,11 +80,10 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
 	}
 
-	log.Printf("SSV Cluster Updater %s", Version)
-	log.Printf("Oracle Contract: %s", cfg.OracleContract)
-	if mockMode {
-		log.Println("Running in mock mode (oracle contract is zero address)")
-	}
+	logger.Infow("SSV Cluster Updater starting",
+		"version", Version,
+		"oracleContract", cfg.OracleContract,
+		"mockMode", mockMode)
 
 	// Build connection string
 	connString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
@@ -97,7 +96,7 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 	}
 	defer func() {
 		if err := storage.Close(); err != nil {
-			log.Printf("Warning: failed to close storage: %v", err)
+			logger.Warnw("Failed to close storage", "error", err)
 		}
 	}()
 
@@ -113,7 +112,7 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get beacon spec: %w", err)
 	}
-	log.Printf("Beacon spec: slotsPerEpoch=%d", spec.SlotsPerEpoch)
+	logger.Infow("Beacon spec loaded", "slotsPerEpoch", spec.SlotsPerEpoch)
 
 	// Create contract client
 	var ethClient *contract.Client
@@ -146,18 +145,18 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 
 	go func() {
 		sig := <-sigChan
-		log.Printf("Received signal %v, shutting down gracefully...", sig)
+		logger.Infow("Received signal, shutting down", "signal", sig)
 		cancel()
 	}()
 
 	// Run updater
-	log.Println("Starting cluster updater...")
+	logger.Info("Starting cluster updater")
 
 	if err := updaterInstance.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("updater error: %w", err)
 	}
 
-	log.Println("Updater shutdown complete")
+	logger.Info("Updater shutdown complete")
 	return nil
 }
 
