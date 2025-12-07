@@ -75,22 +75,22 @@ func With(keysAndValues ...any) *zap.SugaredLogger {
 
 // Convenience functions that use the global logger
 
-func Debug(args ...any)                        { L.Debug(args...) }
-func Debugf(template string, args ...any)      { L.Debugf(template, args...) }
-func Debugw(msg string, keysAndValues ...any)  { L.Debugw(msg, keysAndValues...) }
+func Debug(args ...any)                       { L.Debug(args...) }
+func Debugf(template string, args ...any)     { L.Debugf(template, args...) }
+func Debugw(msg string, keysAndValues ...any) { L.Debugw(msg, keysAndValues...) }
 
-func Info(args ...any)                         { L.Info(args...) }
-func Infof(template string, args ...any)       { L.Infof(template, args...) }
-func Infow(msg string, keysAndValues ...any)   { L.Infow(msg, keysAndValues...) }
+func Info(args ...any)                       { L.Info(args...) }
+func Infof(template string, args ...any)     { L.Infof(template, args...) }
+func Infow(msg string, keysAndValues ...any) { L.Infow(msg, keysAndValues...) }
 
-func Warn(args ...any)                         { L.Warn(args...) }
-func Warnf(template string, args ...any)       { L.Warnf(template, args...) }
-func Warnw(msg string, keysAndValues ...any)   { L.Warnw(msg, keysAndValues...) }
+func Warn(args ...any)                       { L.Warn(args...) }
+func Warnf(template string, args ...any)     { L.Warnf(template, args...) }
+func Warnw(msg string, keysAndValues ...any) { L.Warnw(msg, keysAndValues...) }
 
-func Error(args ...any)                        { L.Error(args...) }
-func Errorf(template string, args ...any)      { L.Errorf(template, args...) }
-func Errorw(msg string, keysAndValues ...any)  { L.Errorw(msg, keysAndValues...) }
+func Error(args ...any)                       { L.Error(args...) }
+func Errorf(template string, args ...any)     { L.Errorf(template, args...) }
+func Errorw(msg string, keysAndValues ...any) { L.Errorw(msg, keysAndValues...) }
 
-func Fatal(args ...any)                        { L.Fatal(args...) }
-func Fatalf(template string, args ...any)      { L.Fatalf(template, args...) }
-func Fatalw(msg string, keysAndValues ...any)  { L.Fatalw(msg, keysAndValues...) }
+func Fatal(args ...any)                       { L.Fatal(args...) }
+func Fatalf(template string, args ...any)     { L.Fatalf(template, args...) }
+func Fatalw(msg string, keysAndValues ...any) { L.Fatalw(msg, keysAndValues...) }

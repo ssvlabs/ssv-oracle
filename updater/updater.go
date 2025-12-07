@@ -17,8 +17,14 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// storage defines the interface the updater needs for persistence.
+type storage interface {
+	GetCluster(ctx context.Context, clusterID []byte) (*ethsync.ClusterRow, error)
+	GetCommitByBlock(ctx context.Context, blockNum uint64) (*ethsync.OracleCommit, error)
+}
+
 type Updater struct {
-	storage        *ethsync.PostgresStorage
+	storage        storage
 	contractClient *contract.Client
 }
 

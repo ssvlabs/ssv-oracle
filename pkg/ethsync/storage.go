@@ -14,30 +14,7 @@ import (
 	"ssv-oracle/pkg/logger"
 )
 
-// Storage defines the interface for persisting SSV oracle state.
-type Storage interface {
-	// Sync progress
-	GetLastSyncedBlock(ctx context.Context) (uint64, error)
-	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
-	GetChainID(ctx context.Context) (*uint64, error)
-	SetChainID(ctx context.Context, chainID uint64) error
-
-	// Events and state
-	InsertEvent(ctx context.Context, event *ContractEvent) error
-	UpsertCluster(ctx context.Context, cluster *ClusterRow) error
-	DeleteCluster(ctx context.Context, clusterID []byte) error
-	GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow, error)
-	InsertValidator(ctx context.Context, clusterID, pubkey []byte) error
-	DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error
-	GetActiveValidators(ctx context.Context) ([]ActiveValidator, error)
-
-	// Oracle commits
-	InsertOracleCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, txHash []byte, clusterBalances []ClusterBalance) error
-
-	BeginTx(ctx context.Context) (Tx, error)
-	Close() error
-}
-
+// Tx defines the interface for database transactions.
 type Tx interface {
 	Commit() error
 	Rollback() error
@@ -49,7 +26,12 @@ type Tx interface {
 	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
 }
 
-// ContractEvent represents a raw SSV contract event stored for audit.
+// executor is the common interface for *sql.DB and *sql.Tx
+type executor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 type ContractEvent struct {
 	EventType        string
 	Slot             uint64
@@ -65,7 +47,6 @@ type ContractEvent struct {
 	Error            *string
 }
 
-// ClusterRow represents current cluster state in the database.
 type ClusterRow struct {
 	ClusterID       []byte
 	OwnerAddress    []byte
@@ -78,19 +59,16 @@ type ClusterRow struct {
 	LastUpdatedSlot uint64
 }
 
-// ActiveValidator represents a validator in an active cluster.
 type ActiveValidator struct {
 	ClusterID       []byte
 	ValidatorPubkey []byte
 }
 
-// ClusterBalance represents aggregated effective balance for a cluster.
 type ClusterBalance struct {
 	ClusterID        []byte
 	EffectiveBalance uint64
 }
 
-// OracleCommit represents a committed merkle root with its cluster balances.
 type OracleCommit struct {
 	RoundID         uint64
 	TargetEpoch     uint64
@@ -155,69 +133,19 @@ func (s *PostgresStorage) GetLastSyncedBlock(ctx context.Context) (uint64, error
 }
 
 func (s *PostgresStorage) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sync_progress SET last_synced_block = $1, updated_at = NOW() WHERE id = 1`, blockNum)
-	if err != nil {
-		return fmt.Errorf("failed to update last synced block: %w", err)
-	}
-	return nil
+	return updateLastSyncedBlock(ctx, s.db, blockNum)
 }
 
 func (s *PostgresStorage) InsertEvent(ctx context.Context, event *ContractEvent) error {
-	query := `
-		INSERT INTO contract_events (
-			block_number, log_index, event_type, slot, block_hash, block_time,
-			transaction_hash, transaction_index, cluster_id, raw_log, raw_event, error
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (block_number, log_index) DO NOTHING
-	`
-	_, err := s.db.ExecContext(ctx, query,
-		event.BlockNumber, event.LogIndex, event.EventType, event.Slot,
-		event.BlockHash, event.BlockTime, event.TransactionHash, event.TransactionIndex,
-		event.ClusterID, event.RawLog, event.RawEvent, event.Error,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert event: %w", err)
-	}
-	return nil
+	return insertEvent(ctx, s.db, event)
 }
 
 func (s *PostgresStorage) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
-	query := `
-		INSERT INTO clusters (
-			cluster_id, owner_address, operator_ids, validator_count,
-			network_fee_index, index, is_active, balance, last_updated_slot
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (cluster_id) DO UPDATE SET
-			owner_address = EXCLUDED.owner_address,
-			operator_ids = EXCLUDED.operator_ids,
-			validator_count = EXCLUDED.validator_count,
-			network_fee_index = EXCLUDED.network_fee_index,
-			index = EXCLUDED.index,
-			is_active = EXCLUDED.is_active,
-			balance = EXCLUDED.balance,
-			last_updated_slot = EXCLUDED.last_updated_slot
-	`
-	operatorIDs := make([]int64, len(cluster.OperatorIDs))
-	for i, id := range cluster.OperatorIDs {
-		operatorIDs[i] = int64(id)
-	}
-	_, err := s.db.ExecContext(ctx, query,
-		cluster.ClusterID, cluster.OwnerAddress, pq.Array(operatorIDs),
-		cluster.ValidatorCount, cluster.NetworkFeeIndex, cluster.Index,
-		cluster.IsActive, cluster.Balance.String(), cluster.LastUpdatedSlot,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to upsert cluster: %w", err)
-	}
-	return nil
+	return upsertCluster(ctx, s.db, cluster)
 }
 
 func (s *PostgresStorage) DeleteCluster(ctx context.Context, clusterID []byte) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM clusters WHERE cluster_id = $1`, clusterID)
-	if err != nil {
-		return fmt.Errorf("failed to delete cluster: %w", err)
-	}
-	return nil
+	return deleteCluster(ctx, s.db, clusterID)
 }
 
 func (s *PostgresStorage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow, error) {
@@ -253,31 +181,13 @@ func (s *PostgresStorage) GetCluster(ctx context.Context, clusterID []byte) (*Cl
 }
 
 func (s *PostgresStorage) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
-	if len(pubkey) != 48 {
-		return fmt.Errorf("invalid validator pubkey length: got %d, expected 48", len(pubkey))
-	}
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO validators (cluster_id, validator_pubkey) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		clusterID, pubkey,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert validator: %w", err)
-	}
-	return nil
+	return insertValidator(ctx, s.db, clusterID, pubkey)
 }
 
 func (s *PostgresStorage) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM validators WHERE cluster_id = $1 AND validator_pubkey = $2`,
-		clusterID, pubkey,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to delete validator: %w", err)
-	}
-	return nil
+	return deleteValidator(ctx, s.db, clusterID, pubkey)
 }
 
-// GetActiveValidators returns all validators in active (non-liquidated) clusters.
 func (s *PostgresStorage) GetActiveValidators(ctx context.Context) ([]ActiveValidator, error) {
 	query := `
 		SELECT v.cluster_id, v.validator_pubkey
@@ -310,15 +220,8 @@ func (s *PostgresStorage) InsertOracleCommit(ctx context.Context, roundID, targe
 	}
 
 	query := `
-		INSERT INTO oracle_commits (round_id, target_epoch, merkle_root, reference_block, cluster_balances, tx_hash, tx_status, submitted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', NOW())
-		ON CONFLICT (round_id) DO UPDATE SET
-			merkle_root = EXCLUDED.merkle_root,
-			reference_block = EXCLUDED.reference_block,
-			cluster_balances = EXCLUDED.cluster_balances,
-			tx_hash = EXCLUDED.tx_hash,
-			tx_status = 'confirmed',
-			confirmed_at = NOW()
+		INSERT INTO oracle_commits (round_id, target_epoch, merkle_root, reference_block, cluster_balances, tx_hash)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`
 	_, err = s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, txHash)
 	if err != nil {
@@ -330,7 +233,7 @@ func (s *PostgresStorage) InsertOracleCommit(ctx context.Context, roundID, targe
 func (s *PostgresStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
 	query := `
 		SELECT round_id, target_epoch, merkle_root, reference_block, cluster_balances
-		FROM oracle_commits WHERE reference_block = $1 AND tx_status = 'confirmed'
+		FROM oracle_commits WHERE reference_block = $1
 	`
 	var c OracleCommit
 	var balancesJSON []byte
@@ -356,7 +259,7 @@ func (s *PostgresStorage) ClearAllState(ctx context.Context) error {
 	}
 	defer func() {
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 		}
 	}()
 
@@ -387,6 +290,7 @@ func (s *PostgresStorage) BeginTx(ctx context.Context) (Tx, error) {
 	return &postgresTx{tx: tx}, nil
 }
 
+// postgresTx wraps sql.Tx to implement Tx interface
 type postgresTx struct {
 	tx *sql.Tx
 }
@@ -395,6 +299,32 @@ func (t *postgresTx) Commit() error   { return t.tx.Commit() }
 func (t *postgresTx) Rollback() error { return t.tx.Rollback() }
 
 func (t *postgresTx) InsertEvent(ctx context.Context, event *ContractEvent) error {
+	return insertEvent(ctx, t.tx, event)
+}
+
+func (t *postgresTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
+	return upsertCluster(ctx, t.tx, cluster)
+}
+
+func (t *postgresTx) DeleteCluster(ctx context.Context, clusterID []byte) error {
+	return deleteCluster(ctx, t.tx, clusterID)
+}
+
+func (t *postgresTx) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
+	return insertValidator(ctx, t.tx, clusterID, pubkey)
+}
+
+func (t *postgresTx) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
+	return deleteValidator(ctx, t.tx, clusterID, pubkey)
+}
+
+func (t *postgresTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
+	return updateLastSyncedBlock(ctx, t.tx, blockNum)
+}
+
+// Shared implementations
+
+func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 	query := `
 		INSERT INTO contract_events (
 			block_number, log_index, event_type, slot, block_hash, block_time,
@@ -402,7 +332,7 @@ func (t *postgresTx) InsertEvent(ctx context.Context, event *ContractEvent) erro
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
-	_, err := t.tx.ExecContext(ctx, query,
+	_, err := e.ExecContext(ctx, query,
 		event.BlockNumber, event.LogIndex, event.EventType, event.Slot,
 		event.BlockHash, event.BlockTime, event.TransactionHash, event.TransactionIndex,
 		event.ClusterID, event.RawLog, event.RawEvent, event.Error,
@@ -413,7 +343,7 @@ func (t *postgresTx) InsertEvent(ctx context.Context, event *ContractEvent) erro
 	return nil
 }
 
-func (t *postgresTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
+func upsertCluster(ctx context.Context, e executor, cluster *ClusterRow) error {
 	query := `
 		INSERT INTO clusters (
 			cluster_id, owner_address, operator_ids, validator_count,
@@ -433,7 +363,7 @@ func (t *postgresTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) err
 	for i, id := range cluster.OperatorIDs {
 		operatorIDs[i] = int64(id)
 	}
-	_, err := t.tx.ExecContext(ctx, query,
+	_, err := e.ExecContext(ctx, query,
 		cluster.ClusterID, cluster.OwnerAddress, pq.Array(operatorIDs),
 		cluster.ValidatorCount, cluster.NetworkFeeIndex, cluster.Index,
 		cluster.IsActive, cluster.Balance.String(), cluster.LastUpdatedSlot,
@@ -444,19 +374,19 @@ func (t *postgresTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) err
 	return nil
 }
 
-func (t *postgresTx) DeleteCluster(ctx context.Context, clusterID []byte) error {
-	_, err := t.tx.ExecContext(ctx, `DELETE FROM clusters WHERE cluster_id = $1`, clusterID)
+func deleteCluster(ctx context.Context, e executor, clusterID []byte) error {
+	_, err := e.ExecContext(ctx, `DELETE FROM clusters WHERE cluster_id = $1`, clusterID)
 	if err != nil {
 		return fmt.Errorf("failed to delete cluster: %w", err)
 	}
 	return nil
 }
 
-func (t *postgresTx) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
+func insertValidator(ctx context.Context, e executor, clusterID, pubkey []byte) error {
 	if len(pubkey) != 48 {
 		return fmt.Errorf("invalid validator pubkey length: got %d, expected 48", len(pubkey))
 	}
-	_, err := t.tx.ExecContext(ctx,
+	_, err := e.ExecContext(ctx,
 		`INSERT INTO validators (cluster_id, validator_pubkey) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		clusterID, pubkey,
 	)
@@ -466,8 +396,8 @@ func (t *postgresTx) InsertValidator(ctx context.Context, clusterID, pubkey []by
 	return nil
 }
 
-func (t *postgresTx) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
-	_, err := t.tx.ExecContext(ctx,
+func deleteValidator(ctx context.Context, e executor, clusterID, pubkey []byte) error {
+	_, err := e.ExecContext(ctx,
 		`DELETE FROM validators WHERE cluster_id = $1 AND validator_pubkey = $2`,
 		clusterID, pubkey,
 	)
@@ -477,8 +407,8 @@ func (t *postgresTx) DeleteValidator(ctx context.Context, clusterID, pubkey []by
 	return nil
 }
 
-func (t *postgresTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
-	_, err := t.tx.ExecContext(ctx, `UPDATE sync_progress SET last_synced_block = $1, updated_at = NOW() WHERE id = 1`, blockNum)
+func updateLastSyncedBlock(ctx context.Context, e executor, blockNum uint64) error {
+	_, err := e.ExecContext(ctx, `UPDATE sync_progress SET last_synced_block = $1, updated_at = NOW() WHERE id = 1`, blockNum)
 	if err != nil {
 		return fmt.Errorf("failed to update last synced block: %w", err)
 	}

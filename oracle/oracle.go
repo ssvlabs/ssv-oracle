@@ -13,14 +13,20 @@ import (
 	"ssv-oracle/pkg/logger"
 )
 
+// storage defines the interface the oracle needs for persistence.
+type storage interface {
+	GetActiveValidators(ctx context.Context) ([]ethsync.ActiveValidator, error)
+	InsertOracleCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, txHash []byte, clusterBalances []ethsync.ClusterBalance) error
+}
+
 type Oracle struct {
-	storage        ethsync.Storage
+	storage        storage
 	contractClient *contract.Client
 	timingPhases   []TimingPhase
 }
 
 type Config struct {
-	Storage        ethsync.Storage
+	Storage        *ethsync.PostgresStorage
 	ContractClient *contract.Client
 	TimingPhases   []TimingPhase
 }
@@ -162,11 +168,18 @@ func (o *Oracle) waitForFinalization(ctx context.Context, beaconClient *ethsync.
 
 		checkpoint, err := beaconClient.GetFinalizedCheckpoint(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			checkpointRetries++
 			logger.Warnw("Failed to get checkpoint, retrying",
 				"attempt", checkpointRetries,
 				"error", err)
-			time.Sleep(spec.SlotDuration)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(spec.SlotDuration):
+			}
 			continue
 		}
 		checkpointRetries = 0
@@ -271,7 +284,9 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, log *zap.SugaredLogge
 	var result []ethsync.ClusterBalance
 	for clusterKey, total := range clusterTotals {
 		var clusterID []byte
-		fmt.Sscanf(clusterKey, "%x", &clusterID)
+		if _, err := fmt.Sscanf(clusterKey, "%x", &clusterID); err != nil {
+			return nil, fmt.Errorf("failed to parse cluster ID %s: %w", clusterKey, err)
+		}
 		result = append(result, ethsync.ClusterBalance{
 			ClusterID:        clusterID,
 			EffectiveBalance: total,

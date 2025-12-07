@@ -62,10 +62,8 @@ CREATE TABLE IF NOT EXISTS oracle_commits (
     merkle_root BYTEA NOT NULL,
     reference_block BIGINT NOT NULL,
     cluster_balances JSONB,
-    tx_hash BYTEA,
-    tx_status TEXT DEFAULT 'pending',
-    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    confirmed_at TIMESTAMP
+    tx_hash BYTEA NOT NULL,
+    committed_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_oracle_commits_epoch ON oracle_commits(target_epoch);

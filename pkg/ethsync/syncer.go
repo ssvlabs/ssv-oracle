@@ -11,10 +11,17 @@ import (
 	"ssv-oracle/pkg/logger"
 )
 
+// storage defines the interface the syncer needs for persistence.
+type storage interface {
+	GetLastSyncedBlock(ctx context.Context) (uint64, error)
+	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
+	BeginTx(ctx context.Context) (Tx, error)
+}
+
 // EventSyncer continuously syncs SSV contract events to the database.
 type EventSyncer struct {
 	client      *ExecutionClient
-	storage     Storage
+	storage     storage
 	parser      *EventParser
 	ssvContract common.Address
 	spec        *Spec
@@ -23,7 +30,7 @@ type EventSyncer struct {
 // EventSyncerConfig holds configuration for the event syncer.
 type EventSyncerConfig struct {
 	ExecutionClient *ExecutionClient
-	Storage         Storage
+	Storage         *PostgresStorage
 	SSVContract     common.Address
 	Spec            *Spec // Beacon chain spec for slot/epoch calculations
 }
