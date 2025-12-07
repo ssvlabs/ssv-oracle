@@ -90,6 +90,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	// Already synced past target?
 	if fromBlock >= targetBlock {
+		logger.Debugw("Events already synced", "lastSynced", fromBlock, "target", targetBlock)
 		return nil
 	}
 
@@ -145,76 +146,13 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	return nil
 }
 
-// syncOnce performs a single sync iteration.
+// syncOnce syncs to the current finalized block.
 func (s *EventSyncer) syncOnce(ctx context.Context) error {
-	// Get last synced block
-	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get last synced block: %w", err)
-	}
-
-	// Get finalized block
 	finalizedBlock, err := s.client.GetFinalizedBlock(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get finalized block: %w", err)
 	}
-
-	// Nothing to sync?
-	if fromBlock >= finalizedBlock {
-		logger.Infow("Events already synced", "block", fromBlock)
-		return nil
-	}
-
-	totalBlocks := int(finalizedBlock - fromBlock)
-
-	// Create progress bar
-	bar := progressbar.NewOptions(totalBlocks,
-		progressbar.OptionSetDescription("Syncing events"),
-		progressbar.OptionSetWidth(40),
-		progressbar.OptionShowCount(),
-		progressbar.OptionShowIts(),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "=",
-			SaucerHead:    ">",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}),
-	)
-
-	// Fetch and process logs
-	totalEvents := 0
-	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, finalizedBlock, func(batchEnd uint64, logs []BlockLogs) error {
-		// Process each block's logs
-		for _, blockLogs := range logs {
-			if err := s.processBlockLogs(ctx, blockLogs); err != nil {
-				return fmt.Errorf("failed to process block %d: %w", blockLogs.BlockNumber, err)
-			}
-			totalEvents += len(blockLogs.Logs)
-		}
-
-		// Update progress bar
-		_ = bar.Set(int(batchEnd - fromBlock))
-
-		// Advance sync progress to batch end.
-		// This is needed for batches with no events (or sparse events) to ensure
-		// we don't re-scan empty block ranges on restart.
-		// Note: Per-block tx already updates progress for blocks WITH events.
-		if err := s.storage.UpdateLastSyncedBlock(ctx, batchEnd); err != nil {
-			return fmt.Errorf("failed to update sync progress: %w", err)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to fetch logs: %w", err)
-	}
-
-	_ = bar.Finish()
-	fmt.Println() // New line after progress bar
-	logger.Infow("Events synced", "block", finalizedBlock, "newEvents", totalEvents)
-	return nil
+	return s.SyncToBlock(ctx, finalizedBlock)
 }
 
 // processBlockLogs processes all logs from a single block.
