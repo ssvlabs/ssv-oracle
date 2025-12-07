@@ -7,8 +7,6 @@ import (
 	"math/big"
 	"time"
 
-	"go.uber.org/zap"
-
 	"ssv-oracle/contract"
 	"ssv-oracle/merkle"
 	"ssv-oracle/pkg/ethsync"
@@ -145,10 +143,10 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 	errors := 0
 
 	for _, leaf := range tree.Leaves {
-		clusterLog := log.With("clusterID", fmt.Sprintf("%x", leaf.ClusterID[:8]))
-
-		if err := u.processCluster(ctx, clusterLog, commit.ReferenceBlock, leaf, tree); err != nil {
-			clusterLog.Warnw("Failed to process cluster", "error", err)
+		if err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree); err != nil {
+			logger.Warnw("Failed to process cluster",
+				"clusterID", fmt.Sprintf("%x", leaf.ClusterID[:8]),
+				"error", err)
 			errors++
 			continue
 		}
@@ -162,13 +160,15 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 	return nil
 }
 
-func (u *Updater) processCluster(ctx context.Context, log *zap.SugaredLogger, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) error {
+func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) error {
+	clusterID := fmt.Sprintf("%x", leaf.ClusterID[:8])
+
 	cluster, err := u.storage.GetCluster(ctx, leaf.ClusterID[:])
 	if err != nil {
 		return fmt.Errorf("failed to get cluster: %w", err)
 	}
 	if cluster == nil {
-		log.Warn("Cluster not found")
+		logger.Warnw("Cluster not found", "clusterID", clusterID)
 		return nil
 	}
 
@@ -177,14 +177,17 @@ func (u *Updater) processCluster(ctx context.Context, log *zap.SugaredLogger, bl
 		return fmt.Errorf("failed to get proof: %w", err)
 	}
 
-	// Check if balance has changed before updating (saves gas)
 	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, leaf.ClusterID)
 	if err != nil {
-		log.Warnw("Failed to check current balance, skipping cluster", "error", err)
+		logger.Warnw("Failed to check current balance, skipping",
+			"clusterID", clusterID,
+			"error", err)
 		return nil
 	}
 	if currentBalance == leaf.EffectiveBalance {
-		log.Debugw("Balance unchanged, skipping", "balance", currentBalance)
+		logger.Debugw("Balance unchanged, skipping",
+			"clusterID", clusterID,
+			"balance", currentBalance)
 		return nil
 	}
 
@@ -197,7 +200,6 @@ func (u *Updater) processCluster(ctx context.Context, log *zap.SugaredLogger, bl
 		Balance:         cluster.Balance,
 	}
 
-	// Convert uint64 to *big.Int for contract call
 	effectiveBalanceBig := new(big.Int).SetUint64(leaf.EffectiveBalance)
 
 	tx, err := u.contractClient.UpdateClusterBalance(
@@ -213,7 +215,8 @@ func (u *Updater) processCluster(ctx context.Context, log *zap.SugaredLogger, bl
 		return fmt.Errorf("contract call failed: %w", err)
 	}
 
-	log.Infow("Submitted tx, waiting for confirmation",
+	logger.Infow("Submitted tx",
+		"clusterID", clusterID,
 		"txHash", tx.Hash().Hex(),
 		"effectiveBalance", leaf.EffectiveBalance)
 
@@ -224,7 +227,8 @@ func (u *Updater) processCluster(ctx context.Context, log *zap.SugaredLogger, bl
 	if receipt.Status != 1 {
 		return fmt.Errorf("tx reverted")
 	}
-	log.Infow("Tx confirmed",
+	logger.Infow("Tx confirmed",
+		"clusterID", clusterID,
 		"txHash", tx.Hash().Hex(),
 		"block", receipt.BlockNumber.Uint64())
 

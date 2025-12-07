@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
-	"go.uber.org/zap"
 
 	"ssv-oracle/contract"
 	"ssv-oracle/merkle"
@@ -117,7 +116,7 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		return 0, fmt.Errorf("failed to sync to block %d: %w", checkpoint.BlockNum, err)
 	}
 
-	clusterBalances, err := o.fetchClusterBalances(ctx, log, beaconClient)
+	clusterBalances, err := o.fetchClusterBalances(ctx, beaconClient)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch balances: %w", err)
 	}
@@ -244,15 +243,14 @@ func (o *Oracle) waitForFinalization(ctx context.Context, beaconClient *ethsync.
 	}
 }
 
-// fetchClusterBalances fetches validator balances from beacon and aggregates by cluster.
-func (o *Oracle) fetchClusterBalances(ctx context.Context, log *zap.SugaredLogger, beaconClient *ethsync.BeaconClient) ([]ethsync.ClusterBalance, error) {
+func (o *Oracle) fetchClusterBalances(ctx context.Context, beaconClient *ethsync.BeaconClient) ([]ethsync.ClusterBalance, error) {
 	validators, err := o.storage.GetActiveValidators(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active validators: %w", err)
 	}
 
 	if len(validators) == 0 {
-		log.Info("No active validators")
+		logger.Info("No active validators")
 		return nil, nil
 	}
 
@@ -295,7 +293,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, log *zap.SugaredLogge
 		})
 	}
 
-	log.Infow("Balances fetched",
+	logger.Infow("Balances fetched",
 		"validators", len(validators),
 		"fromBeacon", len(balanceMap),
 		"clusters", len(result))
