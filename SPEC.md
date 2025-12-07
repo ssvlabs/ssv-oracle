@@ -1,19 +1,21 @@
 # SSV Cluster Effective Balance Oracle – Offchain Client Spec
 
-## 1. Scope
+## 1. Summary
 
 This document specifies the **offchain oracle client** that periodically publishes a Merkle root of **effective balances of all SSV clusters** to an onchain oracle contract.
 
-Out of scope: onchain logic for thresholds, weighted majority, and fee distribution.
 
-The client must:
+**TBD** Out of scope: onchain logic for thresholds, weighted majority, and fee distribution.
 
-- Read **timing configuration** (`startEpoch`, `epoch_interval`) from the contract.
-- Determine the **current target epoch** and corresponding **roundId**.
+The client will:
+
+- Read **timing configuration** (`startEpoch`, `epoch_interval`) from a universal configuration shared on github.
+- Determine the **current target epoch** and corresponding **round**.
 - Ensure the **target epoch is finalized**.
 - Fetch effective balances changes of all clusters from the previous target epoch to the new one.
 - Build a **deterministic Merkle root** with an empty leaf rule.
 - Submit a **commit transaction** and ensure it is successful (with retries).
+- Optionally **submit cluster effective balance** directly to contract.
 
 ---
 
@@ -33,7 +35,7 @@ Procedure getOracleTimingConfig(referenceEpoch) returns (startEpoch, epochInterv
 The client reads these values at startup from a configuration.
 The client should support a dynamic transition of configuration changes.
 
-So given a configuration:
+So given a configuration with algebraic value placeholders:
 ```yml
 # Do not edit default values
 - timing-config:
@@ -58,12 +60,21 @@ else:
 The client maintains a `round` variable. To compute the target epoch for this round, use:
 
 ```
-Procedure getTargetEpoch(round) {
-	return startEpoch + round * epochInterval
+Procedure getTargetEpoch() {
+	targetEpoch = startEpoch + round * epochInterval
+  if targetEpoch >= secondStartEpoch:
+    targetEpoch = secondStartEpoch
+    round = 0
+    secondStartEpoch = inf
+
+ return targetEpoch
 }
 ```
 
-The client should use this formula to find the `targetEpoch` associated with whatever `currentRound` it is currently working on.
+The client should use this formula to find the `targetEpoch` associated with whatever `round` it is currently working on.
+Round keeps on incrementing by one after each commit has been performed.
+
+However, once the calculated `targetEpoch` becomes greater to or equal to `secondStartEpoch` reset `round=0` and `targetEpoch = secondStartEpoch`.
 
 ---
 
@@ -71,18 +82,16 @@ The client should use this formula to find the `targetEpoch` associated with wha
 
 ### 3.1 Finalization Requirement
 
-Every time data is polled for an `epoch` it must be finalized. Finality check can be done with a simple beacon api check: `/eth/v1/beacon/states/finalized/finality_checkpoints`.
+Every time data is polled for an `epoch` it must be finalized. Finality check can be done with a simple beacon api check: `/eth/v1/beacon/states/head/finality_checkpoints`.
 
-If `epoch <= finalizedEpoch` then it is eligible for data polling. 
+If `epoch <= finalizedEpoch` then it is eligible for data polling.
+Only epochs calculated as targets will be polled.
 
 ### 3.2 Data Sources
 
 The client obtains `(clusterId, effectiveBalance)` for `epoch` from Ethereum Node:
-   - Reads SSV protocol contracts for:
-     - Cluster registry.
-     - Cluster effective balances at `targetEpoch` (or corresponding `referenceBlock`).
-
-Primary source of truth is **onchain SSV state**;
+   - Syncs SSV network events to build a mapping of validators to clusters.
+   - Fetch the effective balance for SSV validators via "TBD codex"
 
 ---
 
@@ -110,7 +119,7 @@ For each cluster:
 - `clusterId` encoded as `bytes32`. It should be calculated like in the contract: `clusterId = keccak256(abi.encodePacked(msg.sender, operatorIds));`
 - `effectiveBalance` encoded as fixed-width integer (`uint64`).
 
-The exact encoding (types & order) is **part of the protocol** and must be identical across implementations.
+The exact encoding (types & order) is **part of the protocol** and must be identical across implementations and contract.
 
 ### 5.2 Ordering
 
@@ -122,8 +131,8 @@ This guarantees deterministic leaf ordering.
 
 ### 5.3 Empty Tree  
 If there are zero clusters, the Merkle root is defined as:  
-`merkleRoot = keccak256("")`  
-(i.e., keccak256 of zero bytes, resulting in 0xc5d2...bf8b)  
+`merkleRoot = keccak256([]byte{})`  
+(i.e., keccak256 of zero bytes, resulting in 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470)  
 
 
 ---
@@ -145,10 +154,11 @@ function commitRoot(
 - `blockNum` – The blockNumber that maps to the checkpoint of the `targetEpoch`.
 
 
+TBD: maybe delete when there is an oracle section.
 Contract responsibilities (out of scope for client):
 
 - Require a **threshold** of oracle commits per `blockNum`.
-- Perform **weighted majority** to decide the canonical root.
+- Perform **weighted majority** to decide the canonical root (TBD which one? Wait for Lior for clarifications).
 - Handle storage and further use of that root.
 
 ---
@@ -158,25 +168,25 @@ Contract responsibilities (out of scope for client):
 ### 7.1 Components
 
 1. **Scheduler**
-   - Triggers the main loop at a fixed wall-clock interval (e.g. every N seconds).
+   - Triggers the main loop at a fixed wall-clock interval.
    - Ensures no overlapping runs.
 
 2. **Config & Timing Manager**
    - Reads `startEpoch` and `epoch_interval` from the oracle contract.
    - Caches the values and refreshes them periodically or upon error.
-   - Computes `(roundId, targetEpoch)` based on `finalizedEpoch` and config.
+   - Computes `(round, targetEpoch)` according to configuarations.
 
 3. **Finalization & Epoch Manager**
    - Queries beacon/consensus RPC to get `finalizedEpoch`.
    - Checks `isFinalized(targetEpoch)` (or verifies `targetEpoch <= finalizedEpoch`).
-   - Resolves `referenceBlock` (or slot) corresponding to `targetEpoch`.
+   - Resolves `referenceBlock` (or slot) corresponding to the Ethereum checkpoint of `targetEpoch`.
 
 4. **Data Fetcher**
    - Calls SSV node API to obtain `(clusterId, effectiveBalance)` for `targetEpoch`.
    - Optionally verifies a subset directly from SSV contracts via Ethereum RPC.
 
 5. **Merkle Builder**
-   - Normalizes, sorts, and encodes cluster data.
+   - Sorts and encodes cluster data.
    - Applies empty-leaf rule.
    - Produces `merkleRoot`, and optionally a structure for proof generation.
 
@@ -206,7 +216,7 @@ Contract responsibilities (out of scope for client):
   - `eth_rpc_url`
   - `beacon_rpc_url`
   - `ssv_node_rpc_url`
-  - `oracle_contract_address`
+  - `ssv_network_contract_address`
 - Wallet:
   - `keystore_path` or `private_key_env`
 - TX policy:
@@ -214,8 +224,7 @@ Contract responsibilities (out of scope for client):
   - `max_retry_attempts`
   - `gas_bump_factor` (e.g. 1.1)
   - `max_gas_price`
-- Behavior:
-  - `skip_if_root_unchanged` (optional optimization)
+
 
 ---
 
@@ -227,7 +236,7 @@ Contract responsibilities (out of scope for client):
 
 2. **Calculate Current Round**:
         a. Finding `latestFinalizedEpoch` from beacon node.
-		    b. `if LatestFinalized<=initialEpoch: round = 0`
+		    b. `if latestFinalizedEpoch<=initialEpoch: round = 0`
         c. Calculate `round = RoundUp((latestFinalized-initialEpoch)/epochInterval)`.
 
 4. **Compute targetEpoch & roundId**
@@ -287,10 +296,9 @@ Contract responsibilities (out of scope for client):
   - `startEpoch`, `epoch_interval` are read from the same contract for all oracles.
   - `targetEpoch`, `round`, leaf encoding, sorting rule, and empty leaf definition must be globally agreed.
 - **Finalization safety**
-  - Using only epochs derived from `finalizedEpoch` avoids reorg issues.
+  - Using only finalized epochs avoids reorg issues.
 - **Data correctness**
-  - Onchain SSV contracts are ultimate source of truth.
-  - SSV node data should be sanity-checked regularly.
+  - Ultimate source of truth: Onchain vaidator balances alongside SSV contract data and events are ultimate source of truth.
 - **Key management**
   - Keys should be stored and used via secure mechanisms (HSM, KMS, or encrypted keystores).
 - **Liveness**
@@ -340,8 +348,3 @@ The oracle must provide the contract with cluster data.
 The contract is able to independently validate it.
 
 The oracle client may optionally have tooling to generate Merkle proofs but is not required to do so. This feature will be useful for fee collectors.
-
-## BulkClustersBalancesUpdate
-
-TBD
-```
