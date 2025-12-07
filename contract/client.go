@@ -288,6 +288,36 @@ func (c *Client) UpdateClusterBalance(
 	return signedTx, nil
 }
 
+// GetClusterEffectiveBalance reads the current effective balance for a cluster from the contract.
+// In mock mode, returns 0 (always triggers update).
+func (c *Client) GetClusterEffectiveBalance(ctx context.Context, clusterID [32]byte) (uint64, error) {
+	// Mock mode: return 0 to always trigger updates
+	if c.mockMode {
+		return 0, nil
+	}
+
+	// Real mode: call contract view method
+	data, err := c.contractABI.Pack("getClusterEffectiveBalance", clusterID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to pack function call: %w", err)
+	}
+
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{
+		To:   &c.contractAddress,
+		Data: data,
+	}, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to call contract: %w", err)
+	}
+
+	var balance uint64
+	if err := c.contractABI.UnpackIntoInterface(&balance, "getClusterEffectiveBalance", result); err != nil {
+		return 0, fmt.Errorf("failed to unpack result: %w", err)
+	}
+
+	return balance, nil
+}
+
 // Close closes the Ethereum client connection.
 func (c *Client) Close() {
 	if c.ethClient != nil {

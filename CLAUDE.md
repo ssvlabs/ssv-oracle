@@ -14,8 +14,7 @@ go test ./...           # Test
 go fmt ./...            # Format
 go vet ./...            # Lint
 make fresh              # Fresh start (clear DB)
-make start-oracle       # Start oracle (resume from last state)
-make start-updater      # Start cluster updater
+make start-oracle       # Start oracle (add --updater for full mode)
 ```
 
 ## Project Structure

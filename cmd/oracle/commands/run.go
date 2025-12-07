@@ -11,30 +11,37 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
 	"ssv-oracle/contract"
 	"ssv-oracle/oracle"
 	"ssv-oracle/pkg/ethsync"
 	"ssv-oracle/pkg/logger"
+	"ssv-oracle/updater"
 )
 
 var (
-	configPath string
-	freshStart bool
+	configPath  string
+	freshStart  bool
+	withUpdater bool
 )
 
 // runCmd represents the run command
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Start the oracle service",
-	Long:  `Start the SSV oracle service and begin monitoring cluster effective balances.`,
-	RunE:  runOracle,
+	Long: `Start the SSV oracle service and begin monitoring cluster effective balances.
+
+Use --updater flag to also run the cluster updater, which listens for
+committed roots and updates cluster balances on-chain using merkle proofs.`,
+	RunE: runOracle,
 }
 
 func init() {
 	runCmd.Flags().StringVarP(&configPath, "config", "c", "config.yaml", "Path to configuration file")
 	runCmd.Flags().BoolVar(&freshStart, "fresh", false, "Start fresh: clear all database state and sync from SSV contract genesis")
+	runCmd.Flags().BoolVar(&withUpdater, "updater", false, "Also run the cluster updater")
 }
 
 // Config represents the oracle configuration file
@@ -93,7 +100,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	logger.Infow("SSV Oracle starting",
 		"version", Version,
 		"ssvContract", cfg.SSVContract,
-		"oracleContract", cfg.OracleContract)
+		"oracleContract", cfg.OracleContract,
+		"updater", withUpdater)
 
 	// Enable mock mode if oracle contract is zero address
 	mockMode := cfg.OracleContract == "0x0000000000000000000000000000000000000000"
@@ -238,14 +246,35 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("initial sync failed: %w", err)
 	}
 
-	// Run oracle loop (which will do incremental syncs and balance fetching)
-	logger.Info("Starting oracle commit loop")
+	// Create errgroup for running oracle and optionally updater
+	g, gCtx := errgroup.WithContext(ctx)
 
-	if err := oracleInstance.Run(ctx, syncer, beaconClient); err != nil && !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("oracle error: %w", err)
+	// Run oracle
+	logger.Info("Starting oracle commit loop")
+	g.Go(func() error {
+		return oracleInstance.Run(gCtx, syncer, beaconClient)
+	})
+
+	// Optionally run updater
+	if withUpdater {
+		updaterInstance := updater.New(&updater.Config{
+			Storage:        storage,
+			ContractClient: ethClient,
+			MockMode:       mockMode,
+			DBConnString:   connString,
+		})
+		logger.Info("Starting cluster updater")
+		g.Go(func() error {
+			return updaterInstance.Run(gCtx)
+		})
 	}
 
-	logger.Info("Oracle shutdown complete")
+	// Wait for completion - first error cancels all
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("error: %w", err)
+	}
+
+	logger.Info("Shutdown complete")
 	return nil
 }
 

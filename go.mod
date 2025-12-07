@@ -9,7 +9,9 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/spf13/cobra v1.10.1
+	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.36.0
+	golang.org/x/sync v0.18.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -39,8 +41,6 @@ require (
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.27.1 // indirect
-	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/term v0.30.0 // indirect
 )

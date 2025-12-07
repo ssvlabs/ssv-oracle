@@ -87,8 +87,8 @@ docker-logs: ## View logs from all oracle instances
 run-oracle: build ## Build and run the oracle locally
 	@./ssv-oracle run --config config.yaml
 
-run-updater: build ## Build and run the cluster updater locally
-	@./ssv-oracle updater --config config.yaml
+run-oracle-updater: build ## Build and run the oracle with updater
+	@./ssv-oracle run --config config.yaml --updater
 
 # PostgreSQL management
 db-up: ## Start PostgreSQL only
@@ -128,5 +128,5 @@ fresh: build ## Fresh start: reset DB and run from scratch
 start-oracle: db-up ## Quick start: start DB and run oracle (resume from last state)
 	@$(MAKE) run-oracle
 
-start-updater: db-up ## Quick start: start DB and run updater (resume from last state)
-	@$(MAKE) run-updater
+start-oracle-updater: db-up ## Quick start: start DB and run oracle with updater
+	@$(MAKE) run-oracle-updater

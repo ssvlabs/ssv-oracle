@@ -42,9 +42,10 @@ make fresh
 ## Usage
 
 ```bash
-make fresh       # First run: reset DB and sync from genesis
-make start       # Normal run: resume from last synced block
-make test        # Run tests
+make fresh                # First run: reset DB and sync from genesis
+make start-oracle         # Run oracle only (resume from last state)
+make start-oracle-updater # Run oracle + cluster updater (single process)
+make test                 # Run tests
 ```
 
 **Additional commands:**
@@ -52,6 +53,13 @@ make test        # Run tests
 make db-shell    # Open PostgreSQL shell
 make db-logs     # View database logs
 make docker-down # Stop all services
+```
+
+**CLI flags:**
+```bash
+./ssv-oracle run --config config.yaml            # Oracle only
+./ssv-oracle run --config config.yaml --updater  # Oracle + updater
+./ssv-oracle run --config config.yaml --fresh    # Clear DB and start fresh
 ```
 
 ## Configuration
@@ -95,6 +103,20 @@ The oracle executes the following steps each round:
 5. **Commit root** - Submit transaction with Merkle root and metadata
 6. **Wait for confirmation** - Ensure transaction is mined successfully
 
+## Cluster Updater
+
+The updater runs alongside the oracle (enabled with `--updater` flag) and updates individual cluster balances on-chain:
+
+1. **Listen for commits** - Watches for RootCommitted events (or PostgreSQL NOTIFY in mock mode)
+2. **Rebuild merkle tree** - Reconstructs tree from stored cluster balances
+3. **Validate root** - Ensures computed root matches the committed root
+4. **Check balances** - Reads current on-chain balance for each cluster (skips unchanged)
+5. **Submit proofs** - Calls `UpdateClusterBalance` with merkle proof for each changed cluster
+
+**Gas optimization:** The updater checks each cluster's current on-chain balance before submitting. Clusters with unchanged balances are skipped, saving gas.
+
+**Fail-fast behavior:** If either the oracle or updater encounters a fatal error, both stop. This ensures consistency - other oracles in the network can process commits if one instance fails.
+
 ## Merkle Tree Specification
 
 The oracle builds an OpenZeppelin-compatible Merkle tree:
@@ -132,6 +154,7 @@ ssv-oracle/
 ├── contract/           Ethereum client & contract ABI
 ├── merkle/             Merkle tree construction & encoding
 ├── oracle/             Oracle cycle logic
+├── updater/            Cluster balance updater
 └── pkg/ethsync/        Event syncing, beacon client, storage
 ```
 

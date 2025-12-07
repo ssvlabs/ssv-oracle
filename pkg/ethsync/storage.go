@@ -325,8 +325,8 @@ func (s *PostgresStorage) InsertOracleCommit(ctx context.Context, roundID, targe
 		return fmt.Errorf("failed to insert oracle commit: %w", err)
 	}
 
-	logger.Debugw("Sending NOTIFY", "channel", "new_oracle_commit", "round", roundID)
-	_, err = s.db.ExecContext(ctx, "SELECT pg_notify('new_oracle_commit', $1)", fmt.Sprintf("%d", roundID))
+	logger.Debugw("Sending NOTIFY", "channel", "new_oracle_commit", "block", referenceBlock)
+	_, err = s.db.ExecContext(ctx, "SELECT pg_notify('new_oracle_commit', $1)", fmt.Sprintf("%d", referenceBlock))
 	if err != nil {
 		logger.Warnw("Failed to send NOTIFY", "error", err)
 	}
@@ -335,6 +335,7 @@ func (s *PostgresStorage) InsertOracleCommit(ctx context.Context, roundID, targe
 
 // ListenForCommits subscribes to PostgreSQL NOTIFY for new oracle commits.
 // Used by updater in mock mode to process commits as they happen.
+// Returns a channel of reference block numbers.
 func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString string) (<-chan uint64, error) {
 	listener := pq.NewListener(connString, 10*time.Second, time.Minute, func(ev pq.ListenerEventType, err error) {
 		if err != nil {
@@ -347,10 +348,10 @@ func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString strin
 		return nil, fmt.Errorf("failed to listen: %w", err)
 	}
 
-	roundChan := make(chan uint64, 10)
+	blockChan := make(chan uint64, 10)
 
 	go func() {
-		defer close(roundChan)
+		defer close(blockChan)
 		defer listener.Close()
 
 		pingTicker := time.NewTicker(30 * time.Second)
@@ -368,13 +369,13 @@ func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString strin
 				if notification == nil {
 					continue
 				}
-				var roundID uint64
-				if _, err := fmt.Sscanf(notification.Extra, "%d", &roundID); err != nil {
-					logger.Warnw("Failed to parse round ID", "payload", notification.Extra, "error", err)
+				var blockNum uint64
+				if _, err := fmt.Sscanf(notification.Extra, "%d", &blockNum); err != nil {
+					logger.Warnw("Failed to parse block number", "payload", notification.Extra, "error", err)
 					continue
 				}
 				select {
-				case roundChan <- roundID:
+				case blockChan <- blockNum:
 				case <-ctx.Done():
 					return
 				}
@@ -382,32 +383,10 @@ func (s *PostgresStorage) ListenForCommits(ctx context.Context, connString strin
 		}
 	}()
 
-	return roundChan, nil
+	return blockChan, nil
 }
 
-func (s *PostgresStorage) GetCommitByRound(ctx context.Context, roundID uint64) (*OracleCommit, error) {
-	query := `
-		SELECT round_id, target_epoch, merkle_root, reference_block, cluster_balances
-		FROM oracle_commits WHERE round_id = $1 AND tx_status = 'confirmed'
-	`
-	var c OracleCommit
-	var balancesJSON []byte
-	err := s.db.QueryRowContext(ctx, query, roundID).Scan(&c.RoundID, &c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get commit: %w", err)
-	}
-	if balancesJSON != nil {
-		if err := json.Unmarshal(balancesJSON, &c.ClusterBalances); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal cluster balances: %w", err)
-		}
-	}
-	return &c, nil
-}
-
-func (s *PostgresStorage) GetCommitByReferenceBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
+func (s *PostgresStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
 	query := `
 		SELECT round_id, target_epoch, merkle_root, reference_block, cluster_balances
 		FROM oracle_commits WHERE reference_block = $1 AND tx_status = 'confirmed'

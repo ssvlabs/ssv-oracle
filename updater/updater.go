@@ -51,7 +51,7 @@ func (u *Updater) Run(ctx context.Context) error {
 func (u *Updater) runMockMode(ctx context.Context) error {
 	logger.Info("Running in mock mode (LISTEN/NOTIFY)")
 
-	roundChan, err := u.storage.ListenForCommits(ctx, u.dbConnString)
+	blockChan, err := u.storage.ListenForCommits(ctx, u.dbConnString)
 	if err != nil {
 		return fmt.Errorf("failed to start listener: %w", err)
 	}
@@ -64,16 +64,16 @@ func (u *Updater) runMockMode(ctx context.Context) error {
 			logger.Info("Updater stopping")
 			return ctx.Err()
 
-		case roundID, ok := <-roundChan:
+		case blockNum, ok := <-blockChan:
 			if !ok {
 				logger.Warn("Listener channel closed")
 				return fmt.Errorf("listener closed")
 			}
 
-			log := logger.With("round", roundID)
+			log := logger.With("blockNum", blockNum)
 			log.Info("Received notification")
 
-			commit, err := u.storage.GetCommitByRound(ctx, roundID)
+			commit, err := u.storage.GetCommitByBlock(ctx, blockNum)
 			if err != nil {
 				log.Errorw("Failed to get commit", "error", err)
 				continue
@@ -128,7 +128,7 @@ func (u *Updater) runRealMode(ctx context.Context) error {
 				log.Infow("Received RootCommitted",
 					"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot[:8]))
 
-				commit, err := u.storage.GetCommitByReferenceBlock(ctx, event.BlockNum)
+				commit, err := u.storage.GetCommitByBlock(ctx, event.BlockNum)
 				if err != nil {
 					log.Errorw("Failed to lookup commit", "error", err)
 					continue
@@ -225,6 +225,17 @@ func (u *Updater) processCluster(ctx context.Context, log *zap.SugaredLogger, bl
 	proof, err := tree.GetProof(leaf.ClusterID)
 	if err != nil {
 		return fmt.Errorf("failed to get proof: %w", err)
+	}
+
+	// Check if balance has changed before updating (saves gas)
+	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, leaf.ClusterID)
+	if err != nil {
+		log.Warnw("Failed to check current balance, skipping cluster", "error", err)
+		return nil
+	}
+	if currentBalance == leaf.EffectiveBalance {
+		log.Debugw("Balance unchanged, skipping", "balance", currentBalance)
+		return nil
 	}
 
 	owner := common.BytesToAddress(cluster.OwnerAddress)
