@@ -235,9 +235,9 @@ Contract responsibilities (out of scope for client):
    - If `epochInterval == 0`, log error and abort (misconfiguration).
 
 2. **Calculate Current Round**:
+    - Only if not in memory
         a. Finding `latestFinalizedEpoch` from beacon node.
-		    b. `if latestFinalizedEpoch<=initialEpoch: round = 0`
-        c. Calculate `round = RoundUp((latestFinalized-initialEpoch)/epochInterval)`.
+        b. Calculate `round = RoundUp((latestFinalized-initialEpoch)/epochInterval)`.
 
 4. **Compute targetEpoch & roundId**
    - Compute:
