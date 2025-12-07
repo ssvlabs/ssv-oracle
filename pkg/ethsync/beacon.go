@@ -3,7 +3,6 @@ package ethsync
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -135,10 +134,10 @@ const (
 )
 
 // GetFinalizedValidatorBalances returns effective balances (in Gwei) for validators.
-// Returns map of pubkey (0x-prefixed lowercase hex) -> balance.
-func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[string]uint64, error) {
+// Returns map of BLS pubkey -> effective balance.
+func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
-		return make(map[string]uint64), nil
+		return make(map[phase0.BLSPubKey]uint64), nil
 	}
 
 	validatorsProvider, ok := c.client.(eth2client.ValidatorsProvider)
@@ -164,7 +163,7 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 	g.SetLimit(maxParallelRequests)
 
 	var mu sync.Mutex
-	merged := make(map[string]uint64, len(pubkeys))
+	merged := make(map[phase0.BLSPubKey]uint64, len(pubkeys))
 
 	for _, batch := range batches {
 		g.Go(func() error {
@@ -178,8 +177,7 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 
 			mu.Lock()
 			for _, v := range resp.Data {
-				pubkeyHex := fmt.Sprintf("0x%x", v.Validator.PublicKey[:])
-				merged[strings.ToLower(pubkeyHex)] = uint64(v.Validator.EffectiveBalance)
+				merged[v.Validator.PublicKey] = uint64(v.Validator.EffectiveBalance)
 			}
 			mu.Unlock()
 			return nil

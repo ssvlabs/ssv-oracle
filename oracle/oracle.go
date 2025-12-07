@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"go.uber.org/zap"
 
 	"ssv-oracle/contract"
@@ -255,12 +256,14 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, log *zap.SugaredLogge
 		return nil, nil
 	}
 
-	pubkeySet := make(map[string]struct{})
+	// Deduplicate pubkeys
+	pubkeySet := make(map[phase0.BLSPubKey]struct{})
 	var pubkeys [][]byte
 	for _, v := range validators {
-		pubkeyHex := fmt.Sprintf("0x%x", v.ValidatorPubkey)
-		if _, exists := pubkeySet[pubkeyHex]; !exists {
-			pubkeySet[pubkeyHex] = struct{}{}
+		var pk phase0.BLSPubKey
+		copy(pk[:], v.ValidatorPubkey)
+		if _, exists := pubkeySet[pk]; !exists {
+			pubkeySet[pk] = struct{}{}
 			pubkeys = append(pubkeys, v.ValidatorPubkey)
 		}
 	}
@@ -270,25 +273,24 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, log *zap.SugaredLogge
 		return nil, fmt.Errorf("failed to fetch validator balances: %w", err)
 	}
 
-	clusterTotals := make(map[string]uint64)
+	// Aggregate by cluster ID
+	clusterTotals := make(map[[32]byte]uint64)
 	for _, v := range validators {
-		pubkeyHex := fmt.Sprintf("0x%x", v.ValidatorPubkey)
-		balance, onBeacon := balanceMap[pubkeyHex]
+		var pk phase0.BLSPubKey
+		copy(pk[:], v.ValidatorPubkey)
+		balance, onBeacon := balanceMap[pk]
 		if !onBeacon {
 			continue
 		}
-		clusterKey := fmt.Sprintf("%x", v.ClusterID)
-		clusterTotals[clusterKey] += balance
+		var clusterID [32]byte
+		copy(clusterID[:], v.ClusterID)
+		clusterTotals[clusterID] += balance
 	}
 
 	var result []ethsync.ClusterBalance
-	for clusterKey, total := range clusterTotals {
-		var clusterID []byte
-		if _, err := fmt.Sscanf(clusterKey, "%x", &clusterID); err != nil {
-			return nil, fmt.Errorf("failed to parse cluster ID %s: %w", clusterKey, err)
-		}
+	for clusterID, total := range clusterTotals {
 		result = append(result, ethsync.ClusterBalance{
-			ClusterID:        clusterID,
+			ClusterID:        clusterID[:],
 			EffectiveBalance: total,
 		})
 	}
