@@ -54,13 +54,11 @@ db_password_env: "DB_PASSWORD"  # Read password from this environment variable
 private_key_env: "PRIVATE_KEY"
 
 # ============================================================================
-# Oracle Timing Configuration
+# Commit Phases
 # ============================================================================
 
-# Timing phases define when oracle commits should happen.
-# Each phase has a start_epoch and interval (in epochs).
-# Phases must be sorted by start_epoch ascending.
-# Multiple phases allow changing interval over time.
-oracle_timing:
-  - start_epoch: 0       # First epoch where oracle should commit
-    interval: 225        # Commit every 225 epochs (~1 day on mainnet)
+# Phases define when oracle commits happen. Each has start_epoch and interval.
+# Multiple phases allow changing interval over time (must be sorted by start_epoch).
+commit_phases:
+  - start_epoch: 0  # First epoch where oracle should commit
+    interval: 225   # Commit every 225 epochs

@@ -69,8 +69,8 @@ type Config struct {
 	// Oracle
 	PrivateKeyEnv string `yaml:"private_key_env"`
 
-	// Oracle Timing Configuration
-	OracleTiming []oracle.TimingPhase `yaml:"oracle_timing"`
+	// Commit Phases
+	CommitPhases []oracle.CommitPhase `yaml:"commit_phases"`
 }
 
 func runOracle(_ *cobra.Command, _ []string) error {
@@ -80,9 +80,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Validate timing configuration
-	if err := oracle.ValidateTimingPhases(cfg.OracleTiming); err != nil {
-		return fmt.Errorf("invalid timing configuration: %w", err)
+	if err := oracle.ValidatePhases(cfg.CommitPhases); err != nil {
+		return fmt.Errorf("invalid commit phases: %w", err)
 	}
 
 	// Get private key from environment
@@ -192,10 +191,9 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to create event syncer: %w", err)
 	}
 
-	// Log timing configuration
-	currentPhase := oracle.GetTimingForEpoch(cfg.OracleTiming, 0)
-	logger.Infow("Oracle timing configured",
-		"phases", len(cfg.OracleTiming),
+	currentPhase := oracle.GetPhaseForEpoch(cfg.CommitPhases, 0)
+	logger.Infow("Commit phases configured",
+		"phases", len(cfg.CommitPhases),
 		"firstStartEpoch", currentPhase.StartEpoch,
 		"firstInterval", currentPhase.Interval)
 
@@ -207,11 +205,10 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	}
 	defer ethClient.Close()
 
-	// Create oracle
 	oracleCfg := &oracle.Config{
 		Storage:        storage,
 		ContractClient: ethClient,
-		TimingPhases:   cfg.OracleTiming,
+		Phases:         cfg.CommitPhases,
 	}
 
 	oracleInstance := oracle.New(oracleCfg)

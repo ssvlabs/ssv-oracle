@@ -23,20 +23,20 @@ type storage interface {
 type Oracle struct {
 	storage        storage
 	contractClient *contract.Client
-	timingPhases   []TimingPhase
+	phases         []CommitPhase
 }
 
 type Config struct {
 	Storage        *ethsync.PostgresStorage
 	ContractClient *contract.Client
-	TimingPhases   []TimingPhase
+	Phases         []CommitPhase
 }
 
 func New(cfg *Config) *Oracle {
 	return &Oracle{
 		storage:        cfg.Storage,
 		contractClient: cfg.ContractClient,
-		timingPhases:   cfg.TimingPhases,
+		phases:         cfg.Phases,
 	}
 }
 
@@ -52,9 +52,9 @@ func (o *Oracle) Run(ctx context.Context, syncer *ethsync.EventSyncer, beaconCli
 		"slotsPerEpoch", spec.SlotsPerEpoch,
 		"slotDuration", spec.SlotDuration)
 
-	firstPhase := o.timingPhases[0]
-	logger.Infow("Oracle timing configured",
-		"phases", len(o.timingPhases),
+	firstPhase := o.phases[0]
+	logger.Infow("Commit phases configured",
+		"phases", len(o.phases),
 		"firstStartEpoch", firstPhase.StartEpoch,
 		"firstInterval", firstPhase.Interval)
 
@@ -80,7 +80,7 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		return 0, fmt.Errorf("failed to get checkpoint: %w", err)
 	}
 
-	targetEpoch := NextTargetEpoch(o.timingPhases, checkpoint.Epoch)
+	targetEpoch := NextTargetEpoch(o.phases, checkpoint.Epoch)
 
 	if targetEpoch <= lastTargetEpoch && lastTargetEpoch > 0 {
 		_, err := o.waitForFinalization(ctx, beaconClient, spec, lastTargetEpoch+1)
@@ -91,10 +91,10 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		if err != nil {
 			return 0, fmt.Errorf("failed to get checkpoint: %w", err)
 		}
-		targetEpoch = NextTargetEpoch(o.timingPhases, checkpoint.Epoch)
+		targetEpoch = NextTargetEpoch(o.phases, checkpoint.Epoch)
 	}
 
-	phase := GetTimingForEpoch(o.timingPhases, targetEpoch)
+	phase := GetPhaseForEpoch(o.phases, targetEpoch)
 	round := RoundInPhase(phase, targetEpoch)
 
 	log := logger.With("targetEpoch", targetEpoch, "round", round)

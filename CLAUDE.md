@@ -38,12 +38,11 @@ ssv-oracle/
 
 ### Oracle Loop (oracle/)
 1. Sync events incrementally
-2. Get timing config (startEpoch, epochInterval)
-3. Calculate target epoch and round ID
-4. Check finalization via beacon API
-5. Fetch effective balances from beacon
-6. Build Merkle tree
-7. Commit root to SSV Network contract
+2. Calculate target epoch from commit phases
+3. Wait for epoch finalization via beacon API
+4. Fetch effective balances from beacon
+5. Build Merkle tree
+6. Commit root to SSV Network contract
 
 ### Cluster Updater (updater/)
 Listens for RootCommitted events and updates cluster balances on-chain:
