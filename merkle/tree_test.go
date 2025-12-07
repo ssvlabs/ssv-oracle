@@ -3,6 +3,7 @@ package merkle
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -37,22 +38,16 @@ func TestBuildMerkleTree_SingleCluster(t *testing.T) {
 
 	root := BuildMerkleTree(clusters)
 
-	// Single cluster should be: keccak256(leaf || emptyLeaf)
+	// Single cluster: root is just the leaf hash (no parent computation needed)
 	leaf := EncodeMerkleLeaf(clusterID, 32000000000)
-	emptyLeaf := EncodeEmptyLeaf()
 
-	combined := make([]byte, 64)
-	copy(combined[0:32], leaf[:])
-	copy(combined[32:64], emptyLeaf[:])
-
-	// This is NOT the final root - just for reference
-	// expectedRoot := crypto.Keccak256Hash(combined)
+	if root != leaf {
+		t.Errorf("Single cluster root should equal leaf hash")
+		t.Logf("Expected: 0x%x", leaf)
+		t.Logf("Got: 0x%x", root)
+	}
 
 	t.Logf("Single cluster root: 0x%x", root)
-	t.Logf("Leaf: 0x%x", leaf)
-	t.Logf("Empty leaf: 0x%x", emptyLeaf)
-
-	// TODO: Verify against Solidity test
 }
 
 func TestBuildMerkleTree_TwoClusters(t *testing.T) {
@@ -186,11 +181,11 @@ func TestBuildMerkleTree_DifferentOrderSameRoot(t *testing.T) {
 }
 
 func TestBuildMerkleTree_PowerOfTwo(t *testing.T) {
-	// Test with 2, 4, 8 clusters (powers of 2 - no empty leaf needed except for initial pairing)
+	// Test with 2, 4, 8 clusters (powers of 2 - no duplication needed)
 	testCases := []int{2, 4, 8}
 
 	for _, numClusters := range testCases {
-		t.Run(string(rune(numClusters))+" clusters", func(t *testing.T) {
+		t.Run(fmt.Sprintf("%d clusters", numClusters), func(t *testing.T) {
 			clusters := make(map[[32]byte]uint64)
 
 			for i := 0; i < numClusters; i++ {
@@ -213,11 +208,11 @@ func TestBuildMerkleTree_PowerOfTwo(t *testing.T) {
 }
 
 func TestBuildMerkleTree_NonPowerOfTwo(t *testing.T) {
-	// Test with 3, 5, 7 clusters (requires empty leaf padding)
+	// Test with 3, 5, 7 clusters (odd counts use duplication)
 	testCases := []int{3, 5, 7}
 
 	for _, numClusters := range testCases {
-		t.Run(string(rune(numClusters))+" clusters", func(t *testing.T) {
+		t.Run(fmt.Sprintf("%d clusters", numClusters), func(t *testing.T) {
 			clusters := make(map[[32]byte]uint64)
 
 			for i := 0; i < numClusters; i++ {

@@ -22,13 +22,6 @@ type Leaf struct {
 	Hash             [32]byte
 }
 
-// leafData holds cluster ID and its encoded leaf hash for sorting (internal use)
-type leafData struct {
-	clusterID [32]byte
-	balance   uint64
-	leafHash  [32]byte
-}
-
 // BuildMerkleTree constructs a Merkle tree from cluster balances.
 // Returns the Merkle root.
 func BuildMerkleTree(clusters map[[32]byte]uint64) [32]byte {
@@ -53,32 +46,25 @@ func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint64) *MerkleTree {
 		}
 	}
 
-	// 1. Encode leaves and collect them with cluster IDs for sorting
-	leafDataList := make([]leafData, 0, len(clusters))
+	// 1. Encode leaves
+	leaves := make([]Leaf, 0, len(clusters))
 	for clusterID, balance := range clusters {
-		leafHash := EncodeMerkleLeaf(clusterID, balance)
-		leafDataList = append(leafDataList, leafData{
-			clusterID: clusterID,
-			balance:   balance,
-			leafHash:  leafHash,
+		leaves = append(leaves, Leaf{
+			ClusterID:        clusterID,
+			EffectiveBalance: balance,
+			Hash:             EncodeMerkleLeaf(clusterID, balance),
 		})
 	}
 
 	// 2. Sort leaves by clusterID ascending
-	sort.Slice(leafDataList, func(i, j int) bool {
-		return bytes.Compare(leafDataList[i].clusterID[:], leafDataList[j].clusterID[:]) < 0
+	sort.Slice(leaves, func(i, j int) bool {
+		return bytes.Compare(leaves[i].ClusterID[:], leaves[j].ClusterID[:]) < 0
 	})
 
-	// 3. Build Leaf structs and extract hashes
-	leaves := make([]Leaf, len(leafDataList))
-	hashes := make([][32]byte, len(leafDataList))
-	for i, ld := range leafDataList {
-		leaves[i] = Leaf{
-			ClusterID:        ld.clusterID,
-			EffectiveBalance: ld.balance,
-			Hash:             ld.leafHash,
-		}
-		hashes[i] = ld.leafHash
+	// 3. Extract hashes for tree construction
+	hashes := make([][32]byte, len(leaves))
+	for i, leaf := range leaves {
+		hashes[i] = leaf.Hash
 	}
 
 	// 4. Build tree layers (for proof generation)

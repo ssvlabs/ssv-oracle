@@ -76,31 +76,6 @@ func TestEncodeMerkleLeaf(t *testing.T) {
 	}
 }
 
-func TestEncodeEmptyLeaf(t *testing.T) {
-	result := EncodeEmptyLeaf()
-
-	t.Logf("Empty Leaf Hash: 0x%x", result)
-
-	// Verify we got a hash
-	zeroHash := [32]byte{}
-	if result == zeroHash {
-		t.Error("Got zero hash for empty leaf")
-	}
-
-	// The empty leaf should always be the same
-	result2 := EncodeEmptyLeaf()
-	if result != result2 {
-		t.Error("Empty leaf is not deterministic")
-	}
-
-	// TODO: Add expected hash after Solidity verification
-	// Expected: keccak256(40 bytes of zeros)
-	// expectedHash := "..."
-	// if hex.EncodeToString(result[:]) != expectedHash {
-	//     t.Errorf("Empty leaf hash mismatch")
-	// }
-}
-
 func TestEncodeMerkleLeaf_Deterministic(t *testing.T) {
 	clusterID := [32]byte{0x12, 0x34, 0x56}
 	balance := uint64(32000000000)

@@ -44,17 +44,3 @@ func EncodeMerkleLeaf(clusterID [32]byte, effectiveBalance uint64) [32]byte {
 	hash := crypto.Keccak256Hash(encoded)
 	return hash
 }
-
-// EncodeEmptyLeaf returns the empty leaf hash.
-// Uses Solidity keccak256(abi.encodePacked(bytes32(0), uint64(0)))
-//
-// Note: abi.encodePacked does NOT pad values, so this is:
-// keccak256(0x0000...0000 || 0x0000000000000000)
-// = keccak256(32 bytes of zeros || 8 bytes of zeros)
-// = keccak256(40 bytes of zeros)
-func EncodeEmptyLeaf() [32]byte {
-	// Create 40 bytes of zeros (32 + 8)
-	emptyData := make([]byte, 40)
-	hash := crypto.Keccak256Hash(emptyData)
-	return hash
-}
