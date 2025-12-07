@@ -162,12 +162,13 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	}
 
 	// Create beacon client
-	beaconClient := ethsync.NewBeaconClient(ethsync.BeaconClientConfig{
-		URL:        cfg.BeaconRPC,
-		Timeout:    30 * time.Second,
-		MaxRetries: 3,
-		RetryDelay: 5 * time.Second,
+	beaconClient, err := ethsync.NewBeaconClient(ctx, ethsync.BeaconClientConfig{
+		URL:     cfg.BeaconRPC,
+		Timeout: 30 * time.Second,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create beacon client: %w", err)
+	}
 
 	// Fetch genesis time to create beacon spec for slot/epoch calculations
 	spec, err := beaconClient.GetSpec(context.Background())
