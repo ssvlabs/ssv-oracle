@@ -118,13 +118,11 @@ where operator IDs are sorted ascending.
 ## Database Schema
 
 PostgreSQL tables:
-- `contract_events` - Raw SSV contract events (source of truth)
-- `validator_events` - Validator membership changes (Added/Removed)
-- `cluster_events` - Cluster status changes (Liquidated/Reactivated)
-- `validator_balances` - Effective balance snapshots (epoch-based)
-- `cluster_state` - Current cluster metadata
-- `oracle_commits` - History of committed roots
 - `sync_progress` - Sync state and chain ID validation
+- `contract_events` - Raw SSV contract events (audit log)
+- `clusters` - Current cluster state
+- `validators` - Validator membership (cluster_id, pubkey)
+- `oracle_commits` - History of committed roots with cluster balances
 
 ## Project Structure
 

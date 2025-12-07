@@ -274,7 +274,6 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx Tx, log *types.Log, 
 	return tx.InsertEvent(ctx, contractEvent)
 }
 
-// updateState updates validator and cluster state based on event.
 func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, eventData interface{}, slot uint64, logIndex uint32) error {
 	switch eventType {
 	case EventValidatorAdded:
@@ -282,9 +281,9 @@ func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, 
 	case EventValidatorRemoved:
 		return s.handleValidatorRemoved(ctx, tx, eventData.(*ValidatorRemovedEvent), slot, logIndex)
 	case EventClusterLiquidated:
-		return s.handleClusterLiquidated(ctx, tx, eventData.(*ClusterLiquidatedEvent), slot, logIndex)
+		return s.handleClusterLiquidated(ctx, tx, eventData.(*ClusterLiquidatedEvent), slot)
 	case EventClusterReactivated:
-		return s.handleClusterReactivated(ctx, tx, eventData.(*ClusterReactivatedEvent), slot, logIndex)
+		return s.handleClusterReactivated(ctx, tx, eventData.(*ClusterReactivatedEvent), slot)
 	case EventClusterWithdrawn:
 		return s.handleClusterWithdrawn(ctx, tx, eventData.(*ClusterWithdrawnEvent), slot)
 	case EventClusterDeposited:
@@ -297,21 +296,7 @@ func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, 
 func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx Tx, event *ValidatorAddedEvent, slot uint64, logIndex uint32) error {
 	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
 
-	// Insert validator event (Added)
-	validatorEvent := &ValidatorEvent{
-		ClusterID:       clusterID[:],
-		ValidatorPubkey: event.PublicKey,
-		Slot:            slot,
-		LogIndex:        logIndex,
-		IsActive:        true, // Added = active
-	}
-
-	if err := tx.InsertValidatorEvent(ctx, validatorEvent); err != nil {
-		return err
-	}
-
-	// Upsert cluster state
-	cluster := &ClusterState{
+	cluster := &ClusterRow{
 		ClusterID:       clusterID[:],
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
@@ -320,30 +305,29 @@ func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx Tx, event *Va
 		Index:           event.Cluster.Index,
 		IsActive:        event.Cluster.Active,
 		Balance:         event.Cluster.Balance,
-		LastUpdatedSlot: slot, // Use slot for tracking
+		LastUpdatedSlot: slot,
+	}
+	if err := tx.UpsertCluster(ctx, cluster); err != nil {
+		return err
 	}
 
-	return tx.UpsertClusterState(ctx, cluster)
+	return tx.InsertValidator(ctx, clusterID[:], event.PublicKey)
 }
 
+// handleValidatorRemoved deletes the validator and removes the cluster if empty.
 func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx Tx, event *ValidatorRemovedEvent, slot uint64, logIndex uint32) error {
 	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
 
-	// Insert validator event (Removed)
-	validatorEvent := &ValidatorEvent{
-		ClusterID:       clusterID[:],
-		ValidatorPubkey: event.PublicKey,
-		Slot:            slot,
-		LogIndex:        logIndex,
-		IsActive:        false, // Removed = inactive
-	}
-
-	if err := tx.InsertValidatorEvent(ctx, validatorEvent); err != nil {
+	if err := tx.DeleteValidator(ctx, clusterID[:], event.PublicKey); err != nil {
 		return err
 	}
 
-	// Update cluster state
-	cluster := &ClusterState{
+	// Delete cluster when last validator is removed
+	if event.Cluster.ValidatorCount == 0 {
+		return tx.DeleteCluster(ctx, clusterID[:])
+	}
+
+	cluster := &ClusterRow{
 		ClusterID:       clusterID[:],
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
@@ -354,77 +338,47 @@ func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx Tx, event *
 		Balance:         event.Cluster.Balance,
 		LastUpdatedSlot: slot,
 	}
-
-	return tx.UpsertClusterState(ctx, cluster)
+	return tx.UpsertCluster(ctx, cluster)
 }
 
-func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx Tx, event *ClusterLiquidatedEvent, slot uint64, logIndex uint32) error {
+func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx Tx, event *ClusterLiquidatedEvent, slot uint64) error {
 	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
 
-	// Insert cluster event (Liquidated)
-	clusterEvent := &ClusterEvent{
-		ClusterID: clusterID[:],
-		Slot:      slot,
-		LogIndex:  logIndex,
-		IsActive:  false, // Liquidated = inactive
-	}
-
-	if err := tx.InsertClusterEvent(ctx, clusterEvent); err != nil {
-		return err
-	}
-
-	// Update cluster state (inactive)
-	cluster := &ClusterState{
+	cluster := &ClusterRow{
 		ClusterID:       clusterID[:],
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
 		ValidatorCount:  event.Cluster.ValidatorCount,
 		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
 		Index:           event.Cluster.Index,
-		IsActive:        false, // Liquidated = inactive
+		IsActive:        event.Cluster.Active,
 		Balance:         event.Cluster.Balance,
 		LastUpdatedSlot: slot,
 	}
-
-	return tx.UpsertClusterState(ctx, cluster)
+	return tx.UpsertCluster(ctx, cluster)
 }
 
-func (s *EventSyncer) handleClusterReactivated(ctx context.Context, tx Tx, event *ClusterReactivatedEvent, slot uint64, logIndex uint32) error {
+func (s *EventSyncer) handleClusterReactivated(ctx context.Context, tx Tx, event *ClusterReactivatedEvent, slot uint64) error {
 	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
 
-	// Insert cluster event (Reactivated)
-	clusterEvent := &ClusterEvent{
-		ClusterID: clusterID[:],
-		Slot:      slot,
-		LogIndex:  logIndex,
-		IsActive:  true, // Reactivated = active
-	}
-
-	if err := tx.InsertClusterEvent(ctx, clusterEvent); err != nil {
-		return err
-	}
-
-	// Update cluster state (active again)
-	cluster := &ClusterState{
+	cluster := &ClusterRow{
 		ClusterID:       clusterID[:],
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
 		ValidatorCount:  event.Cluster.ValidatorCount,
 		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
 		Index:           event.Cluster.Index,
-		IsActive:        true, // Reactivated
+		IsActive:        event.Cluster.Active,
 		Balance:         event.Cluster.Balance,
 		LastUpdatedSlot: slot,
 	}
-
-	return tx.UpsertClusterState(ctx, cluster)
+	return tx.UpsertCluster(ctx, cluster)
 }
 
 func (s *EventSyncer) handleClusterWithdrawn(ctx context.Context, tx Tx, event *ClusterWithdrawnEvent, slot uint64) error {
 	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
 
-	// Update cluster state with new balance (no cluster_events entry needed - just balance change)
-	cluster := &ClusterState{
+	cluster := &ClusterRow{
 		ClusterID:       clusterID[:],
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
@@ -435,15 +389,13 @@ func (s *EventSyncer) handleClusterWithdrawn(ctx context.Context, tx Tx, event *
 		Balance:         event.Cluster.Balance,
 		LastUpdatedSlot: slot,
 	}
-
-	return tx.UpsertClusterState(ctx, cluster)
+	return tx.UpsertCluster(ctx, cluster)
 }
 
 func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *ClusterDepositedEvent, slot uint64) error {
 	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
 
-	// Update cluster state with new balance (no cluster_events entry needed - just balance change)
-	cluster := &ClusterState{
+	cluster := &ClusterRow{
 		ClusterID:       clusterID[:],
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
@@ -454,8 +406,7 @@ func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *
 		Balance:         event.Cluster.Balance,
 		LastUpdatedSlot: slot,
 	}
-
-	return tx.UpsertClusterState(ctx, cluster)
+	return tx.UpsertCluster(ctx, cluster)
 }
 
 // computeClusterIDFromEvent extracts owner and operatorIDs from event data and computes cluster ID.

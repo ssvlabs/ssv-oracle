@@ -73,16 +73,11 @@ keccak256(abi.encodePacked(owner, uint256(op1), uint256(op2), ...))
 ## Database Schema
 
 Key tables:
-- `contract_events` - Raw SSV events (never deleted)
-- `validator_events` - Validator membership changes
-- `cluster_events` - Cluster operational status changes
-- `validator_balances` - Effective balance snapshots
-- `cluster_state` - Current cluster metadata
-
-Key functions:
-- `get_cluster_effective_balances(epoch)` - For Merkle tree
-- `get_active_validators_with_clusters(epoch)` - For balance fetching
-- `is_ready_to_commit(epoch)` - Check readiness
+- `sync_progress` - Chain ID and last synced block
+- `contract_events` - Raw SSV events (append-only)
+- `clusters` - Current cluster state (deleted when validator_count = 0)
+- `validators` - Validator membership (cascade delete with cluster)
+- `oracle_commits` - Commit history with cluster balances for merkle reconstruction
 
 ## Configuration
 

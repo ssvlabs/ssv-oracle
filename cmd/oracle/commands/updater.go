@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -100,20 +99,6 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 		}
 	}()
 
-	// Create beacon client for spec
-	beaconClient := ethsync.NewBeaconClient(ethsync.BeaconClientConfig{
-		URL:        cfg.BeaconRPC,
-		Timeout:    30 * time.Second,
-		MaxRetries: 3,
-		RetryDelay: 5 * time.Second,
-	})
-
-	spec, err := beaconClient.GetSpec(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get beacon spec: %w", err)
-	}
-	logger.Infow("Beacon spec loaded", "slotsPerEpoch", spec.SlotsPerEpoch)
-
 	// Create contract client
 	var ethClient *contract.Client
 	if mockMode {
@@ -131,7 +116,6 @@ func runUpdater(_ *cobra.Command, _ []string) error {
 	updaterInstance := updater.New(&updater.Config{
 		Storage:        storage,
 		ContractClient: ethClient,
-		Spec:           spec,
 		MockMode:       mockMode,
 		DBConnString:   connString,
 	})

@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-// getTestConnString returns a PostgreSQL connection string for testing.
-// IMPORTANT: Uses a separate test database to avoid polluting production data.
 func getTestConnString() string {
 	host := os.Getenv("TEST_DB_HOST")
 	if host == "" {
@@ -24,7 +22,7 @@ func getTestConnString() string {
 	}
 	dbname := os.Getenv("TEST_DB_NAME")
 	if dbname == "" {
-		dbname = "ssv_oracle_test" // Use separate test database!
+		dbname = "ssv_oracle_test"
 	}
 	user := os.Getenv("TEST_DB_USER")
 	if user == "" {
@@ -47,14 +45,12 @@ func TestPostgresStorage_Connection(t *testing.T) {
 	}
 	defer storage.Close()
 
-	// Test basic query
 	ctx := context.Background()
 	lastBlock, err := storage.GetLastSyncedBlock(ctx)
 	if err != nil {
 		t.Fatalf("Failed to get last synced block: %v", err)
 	}
 
-	// Should be 0 on fresh database
 	if lastBlock != 0 {
 		t.Logf("Last synced block: %d (expected 0 for fresh DB)", lastBlock)
 	}
@@ -70,13 +66,11 @@ func TestPostgresStorage_SyncProgress(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Update sync progress
 	err = storage.UpdateLastSyncedBlock(ctx, 12345)
 	if err != nil {
 		t.Fatalf("Failed to update last synced block: %v", err)
 	}
 
-	// Read it back
 	lastBlock, err := storage.GetLastSyncedBlock(ctx)
 	if err != nil {
 		t.Fatalf("Failed to get last synced block: %v", err)
@@ -87,121 +81,7 @@ func TestPostgresStorage_SyncProgress(t *testing.T) {
 	}
 }
 
-func TestPostgresStorage_ValidatorEvent(t *testing.T) {
-	connString := getTestConnString()
-	storage, err := NewPostgresStorage(connString)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer storage.Close()
-
-	ctx := context.Background()
-
-	clusterID := make([]byte, 32)
-	clusterID[0] = 0x01
-	clusterID[1] = 0x02
-
-	// Valid 48-byte BLS public key
-	pubkey := make([]byte, 48)
-	pubkey[0] = 0xaa
-	pubkey[1] = 0xbb
-
-	event := &ValidatorEvent{
-		ClusterID:       clusterID,
-		ValidatorPubkey: pubkey,
-		Slot:            3200, // epoch 100 * 32
-		LogIndex:        0,
-		IsActive:        true,
-	}
-
-	// Insert validator event
-	err = storage.InsertValidatorEvent(ctx, event)
-	if err != nil {
-		t.Fatalf("Failed to insert validator event: %v", err)
-	}
-
-	// Insert again (should be idempotent)
-	err = storage.InsertValidatorEvent(ctx, event)
-	if err != nil {
-		t.Fatalf("Failed to insert duplicate validator event: %v", err)
-	}
-}
-
-func TestPostgresStorage_ValidatorBalance(t *testing.T) {
-	connString := getTestConnString()
-	storage, err := NewPostgresStorage(connString)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer storage.Close()
-
-	ctx := context.Background()
-
-	clusterID := make([]byte, 32)
-	clusterID[0] = 0x02
-	clusterID[1] = 0x03
-
-	// Valid 48-byte BLS public key
-	pubkey := make([]byte, 48)
-	pubkey[0] = 0xcc
-	pubkey[1] = 0xdd
-
-	balance := &ValidatorBalance{
-		ClusterID:        clusterID,
-		ValidatorPubkey:  pubkey,
-		Epoch:            100,
-		EffectiveBalance: 32000000000, // 32 ETH in Gwei
-	}
-
-	// Insert validator balance
-	err = storage.InsertValidatorBalance(ctx, balance)
-	if err != nil {
-		t.Fatalf("Failed to insert validator balance: %v", err)
-	}
-
-	// Update balance (same epoch)
-	balance.EffectiveBalance = 31000000000
-	err = storage.InsertValidatorBalance(ctx, balance)
-	if err != nil {
-		t.Fatalf("Failed to update validator balance: %v", err)
-	}
-}
-
-func TestPostgresStorage_ClusterEvent(t *testing.T) {
-	connString := getTestConnString()
-	storage, err := NewPostgresStorage(connString)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer storage.Close()
-
-	ctx := context.Background()
-
-	clusterID := make([]byte, 32)
-	clusterID[0] = 0x03
-	clusterID[1] = 0x04
-
-	event := &ClusterEvent{
-		ClusterID: clusterID,
-		Slot:      6400, // epoch 200 * 32
-		LogIndex:  1,
-		IsActive:  false, // Liquidated
-	}
-
-	// Insert cluster event
-	err = storage.InsertClusterEvent(ctx, event)
-	if err != nil {
-		t.Fatalf("Failed to insert cluster event: %v", err)
-	}
-
-	// Insert again (should be idempotent)
-	err = storage.InsertClusterEvent(ctx, event)
-	if err != nil {
-		t.Fatalf("Failed to insert duplicate cluster event: %v", err)
-	}
-}
-
-func TestPostgresStorage_ClusterState(t *testing.T) {
+func TestPostgresStorage_Cluster(t *testing.T) {
 	connString := getTestConnString()
 	storage, err := NewPostgresStorage(connString)
 	if err != nil {
@@ -219,7 +99,7 @@ func TestPostgresStorage_ClusterState(t *testing.T) {
 
 	ownerAddress := []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44}
 
-	cluster := &ClusterState{
+	cluster := &ClusterRow{
 		ClusterID:       clusterID,
 		OwnerAddress:    ownerAddress,
 		OperatorIDs:     []uint64{1, 2, 3, 4},
@@ -227,24 +107,129 @@ func TestPostgresStorage_ClusterState(t *testing.T) {
 		NetworkFeeIndex: 12345,
 		Index:           67890,
 		IsActive:        true,
-		Balance:         big.NewInt(1000000000000000000), // 1 SSV token
+		Balance:         big.NewInt(1000000000000000000),
 		LastUpdatedSlot: 100,
 	}
 
-	// Upsert cluster state
-	err = storage.UpsertClusterState(ctx, cluster)
+	err = storage.UpsertCluster(ctx, cluster)
 	if err != nil {
-		t.Fatalf("Failed to upsert cluster state: %v", err)
+		t.Fatalf("Failed to upsert cluster: %v", err)
 	}
 
-	// Update the cluster
+	retrieved, err := storage.GetCluster(ctx, clusterID)
+	if err != nil {
+		t.Fatalf("Failed to get cluster: %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("Expected cluster, got nil")
+	}
+	if retrieved.ValidatorCount != 2 {
+		t.Errorf("Expected validator count 2, got %d", retrieved.ValidatorCount)
+	}
+
 	cluster.ValidatorCount = 3
 	cluster.IsActive = false
 	cluster.LastUpdatedSlot = 101
 
-	err = storage.UpsertClusterState(ctx, cluster)
+	err = storage.UpsertCluster(ctx, cluster)
 	if err != nil {
-		t.Fatalf("Failed to update cluster state: %v", err)
+		t.Fatalf("Failed to update cluster: %v", err)
+	}
+
+	retrieved, err = storage.GetCluster(ctx, clusterID)
+	if err != nil {
+		t.Fatalf("Failed to get updated cluster: %v", err)
+	}
+	if retrieved.ValidatorCount != 3 {
+		t.Errorf("Expected validator count 3, got %d", retrieved.ValidatorCount)
+	}
+	if retrieved.IsActive {
+		t.Error("Expected cluster to be inactive")
+	}
+}
+
+func TestPostgresStorage_Validator(t *testing.T) {
+	connString := getTestConnString()
+	storage, err := NewPostgresStorage(connString)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer storage.Close()
+
+	ctx := context.Background()
+
+	clusterID := make([]byte, 32)
+	clusterID[0] = 0x10
+	clusterID[1] = 0x20
+
+	ownerAddress := make([]byte, 20)
+	ownerAddress[0] = 0x11
+
+	cluster := &ClusterRow{
+		ClusterID:       clusterID,
+		OwnerAddress:    ownerAddress,
+		OperatorIDs:     []uint64{1, 2, 3, 4},
+		ValidatorCount:  1,
+		NetworkFeeIndex: 0,
+		Index:           0,
+		IsActive:        true,
+		Balance:         big.NewInt(0),
+		LastUpdatedSlot: 0,
+	}
+	err = storage.UpsertCluster(ctx, cluster)
+	if err != nil {
+		t.Fatalf("Failed to upsert cluster: %v", err)
+	}
+
+	pubkey := make([]byte, 48)
+	pubkey[0] = 0xaa
+	pubkey[1] = 0xbb
+
+	err = storage.InsertValidator(ctx, clusterID, pubkey)
+	if err != nil {
+		t.Fatalf("Failed to insert validator: %v", err)
+	}
+
+	err = storage.InsertValidator(ctx, clusterID, pubkey)
+	if err != nil {
+		t.Fatalf("Failed to insert duplicate validator: %v", err)
+	}
+
+	validators, err := storage.GetActiveValidators(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get active validators: %v", err)
+	}
+
+	found := false
+	for _, v := range validators {
+		if v.ClusterID[0] == 0x10 && v.ValidatorPubkey[0] == 0xaa {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected to find our validator in active validators")
+	}
+
+	err = storage.DeleteValidator(ctx, clusterID, pubkey)
+	if err != nil {
+		t.Fatalf("Failed to delete validator: %v", err)
+	}
+
+	validators, err = storage.GetActiveValidators(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get active validators after delete: %v", err)
+	}
+
+	found = false
+	for _, v := range validators {
+		if v.ClusterID[0] == 0x10 && v.ValidatorPubkey[0] == 0xaa {
+			found = true
+			break
+		}
+	}
+	if found {
+		t.Error("Should NOT find deleted validator")
 	}
 }
 
@@ -258,7 +243,6 @@ func TestPostgresStorage_Transaction(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Start transaction
 	tx, err := storage.BeginTx(ctx)
 	if err != nil {
 		t.Fatalf("Failed to begin transaction: %v", err)
@@ -268,27 +252,35 @@ func TestPostgresStorage_Transaction(t *testing.T) {
 	clusterID[0] = 0xaa
 	clusterID[1] = 0xbb
 
-	// Valid 48-byte BLS public key
+	ownerAddress := make([]byte, 20)
+
+	cluster := &ClusterRow{
+		ClusterID:       clusterID,
+		OwnerAddress:    ownerAddress,
+		OperatorIDs:     []uint64{1, 2, 3, 4},
+		ValidatorCount:  1,
+		NetworkFeeIndex: 0,
+		Index:           0,
+		IsActive:        true,
+		Balance:         big.NewInt(0),
+		LastUpdatedSlot: 0,
+	}
+	err = tx.UpsertCluster(ctx, cluster)
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("Failed to upsert in tx: %v", err)
+	}
+
 	pubkey := make([]byte, 48)
 	pubkey[0] = 0xcc
 	pubkey[1] = 0xdd
 
-	event := &ValidatorEvent{
-		ClusterID:       clusterID,
-		ValidatorPubkey: pubkey,
-		Slot:            6400, // epoch 200 * 32
-		LogIndex:        0,
-		IsActive:        true,
-	}
-
-	// Insert in transaction
-	err = tx.InsertValidatorEvent(ctx, event)
+	err = tx.InsertValidator(ctx, clusterID, pubkey)
 	if err != nil {
 		tx.Rollback()
-		t.Fatalf("Failed to insert in tx: %v", err)
+		t.Fatalf("Failed to insert validator in tx: %v", err)
 	}
 
-	// Commit
 	err = tx.Commit()
 	if err != nil {
 		t.Fatalf("Failed to commit tx: %v", err)
@@ -324,14 +316,13 @@ func TestPostgresStorage_InsertEvent(t *testing.T) {
 		t.Fatalf("Failed to insert event: %v", err)
 	}
 
-	// Insert same event again (should be idempotent)
 	err = storage.InsertEvent(ctx, event)
 	if err != nil {
 		t.Fatalf("Failed to insert duplicate event: %v", err)
 	}
 }
 
-func TestPostgresStorage_GetActiveValidatorsWithClusters(t *testing.T) {
+func TestPostgresStorage_OracleCommit(t *testing.T) {
 	connString := getTestConnString()
 	storage, err := NewPostgresStorage(connString)
 	if err != nil {
@@ -341,88 +332,46 @@ func TestPostgresStorage_GetActiveValidatorsWithClusters(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Clear previous test data for this specific cluster
-	clusterID := make([]byte, 32)
-	clusterID[0] = 0xf0
-	clusterID[1] = 0xf1
-	clusterID[2] = 0xf2
+	roundID := uint64(999)
+	targetEpoch := uint64(100)
+	merkleRoot := make([]byte, 32)
+	merkleRoot[0] = 0xff
+	referenceBlock := uint64(1000000)
+	txHash := make([]byte, 32)
+	txHash[0] = 0xee
 
-	// Valid 48-byte BLS public key
-	pubkey := make([]byte, 48)
-	pubkey[0] = 0xe0
-	pubkey[1] = 0xe1
-	pubkey[2] = 0xe2
-
-	// Use epoch 1000, slot = 1000 * 32 = 32000
-	addSlot := uint64(32000)
-	addEpoch := uint64(1000)
-
-	// Insert validator event (Added) at slot 32000 (epoch 1000)
-	event := &ValidatorEvent{
-		ClusterID:       clusterID,
-		ValidatorPubkey: pubkey,
-		Slot:            addSlot,
-		LogIndex:        0,
-		IsActive:        true,
+	clusterBalances := []ClusterBalance{
+		{ClusterID: []byte{0x01, 0x02}, EffectiveBalance: 32000000000},
+		{ClusterID: []byte{0x03, 0x04}, EffectiveBalance: 64000000000},
 	}
 
-	err = storage.InsertValidatorEvent(ctx, event)
+	err = storage.InsertOracleCommit(ctx, roundID, targetEpoch, merkleRoot, referenceBlock, txHash, clusterBalances)
 	if err != nil {
-		t.Fatalf("Failed to insert validator event: %v", err)
+		t.Fatalf("Failed to insert oracle commit: %v", err)
 	}
 
-	// Get active validators at epoch 1000 (using 32 slots per epoch for test)
-	slotsPerEpoch := uint64(32)
-	validators, err := storage.GetActiveValidatorsWithClusters(ctx, addEpoch, slotsPerEpoch)
+	commit, err := storage.GetCommitByRound(ctx, roundID)
 	if err != nil {
-		t.Fatalf("Failed to get active validators: %v", err)
+		t.Fatalf("Failed to get commit by round: %v", err)
+	}
+	if commit == nil {
+		t.Fatal("Expected commit, got nil")
+	}
+	if commit.TargetEpoch != targetEpoch {
+		t.Errorf("Expected target epoch %d, got %d", targetEpoch, commit.TargetEpoch)
+	}
+	if len(commit.ClusterBalances) != 2 {
+		t.Errorf("Expected 2 cluster balances, got %d", len(commit.ClusterBalances))
 	}
 
-	// Should contain our validator
-	found := false
-	for _, v := range validators {
-		if v.ClusterID[0] == 0xf0 && v.ValidatorPubkey[0] == 0xe0 {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("Expected to find our validator in active validators")
-	}
-
-	// Now remove the validator at slot 32032 (epoch 1001)
-	removeSlot := uint64(32032)
-	removeEpoch := uint64(1001)
-	removeEvent := &ValidatorEvent{
-		ClusterID:       clusterID,
-		ValidatorPubkey: pubkey,
-		Slot:            removeSlot,
-		LogIndex:        0,
-		IsActive:        false,
-	}
-
-	err = storage.InsertValidatorEvent(ctx, removeEvent)
+	commit2, err := storage.GetCommitByReferenceBlock(ctx, referenceBlock)
 	if err != nil {
-		t.Fatalf("Failed to insert remove event: %v", err)
+		t.Fatalf("Failed to get commit by reference block: %v", err)
 	}
-
-	// Get active validators at epoch 1001
-	validators, err = storage.GetActiveValidatorsWithClusters(ctx, removeEpoch, slotsPerEpoch)
-	if err != nil {
-		t.Fatalf("Failed to get active validators after removal: %v", err)
+	if commit2 == nil {
+		t.Fatal("Expected commit, got nil")
 	}
-
-	// Should NOT contain our validator
-	found = false
-	for _, v := range validators {
-		if v.ClusterID[0] == 0xf0 && v.ValidatorPubkey[0] == 0xe0 {
-			found = true
-			break
-		}
-	}
-
-	if found {
-		t.Error("Should NOT find removed validator in active validators")
+	if commit2.RoundID != roundID {
+		t.Errorf("Expected round ID %d, got %d", roundID, commit2.RoundID)
 	}
 }
