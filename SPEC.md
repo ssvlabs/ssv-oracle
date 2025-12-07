@@ -146,16 +146,49 @@ function commitRoot(
     uint64  blockNum,
 ) external;
 ```
+It fires upon success:
+```solidity
+event RootCommitted(merkleRoot, blockNum)
+```
 
 - `merkleRoot` – Merkle root of all cluster effective balances for `targetEpoch`.
 - `blockNum` – The blockNumber that maps to the checkpoint of the `targetEpoch`.
 
 
-(TBD: maybe move when there is a contract section)
-Contract responsibilities (out of scope for client):
+Contract responsibilities:
 
 - Require a **threshold** of oracle commits per `blockNum`.
 - Handle storage and further use of that root.
+
+
+### 6.2 UpdateClusterBalance
+
+The contract supports per-cluster updates:
+
+```solidity
+/**
+ * @notice Update a cluster's effective balance and trigger index updates
+ * @param blockNum RBlock number that matches a committed root
+ * @param clusterOwner Owner address of the cluster
+ * @param operatorIds Array of operator IDs in the cluster
+ * @param cluster Current cluster state (provided by oracle)
+ * @param effectiveBalance Total cluster EB in wei (sum of all validators)
+ * @param merkleProof Merkle proof validating the EB value
+ */
+function UpdateClusterBalance(
+    uint64 blockNum,
+    address clusterOwner,
+    uint64[] operatorIds,
+    Cluster cluster,
+    uint64 effectiveBalance,
+    bytes32[] calldata merkleProof
+) external;
+```
+
+The client must provide the contract with cluster data.
+The contract is able to independently validate it.
+
+The client shall have tooling to generate Merkle proofs. This feature will be useful for fee collectors, but not all oracle clients will use it.
 
 ---
 
@@ -264,7 +297,7 @@ Contract responsibilities (out of scope for client):
 8. **Construct and sign TX**
    - Call `commitRoot`.
    - Estimate gas and set EIP-1559 parameters (maxFee, maxPriorityFee).
-   - Sign with the oracle key.
+   - Sign with the oracle key.   
 
 9. **Broadcast TX**
     - Send TX to Ethereum node.
@@ -284,6 +317,11 @@ Contract responsibilities (out of scope for client):
       3. If still not committed after max retries:
          - Log permanent failure for this round. Wait for manual intervention. 
 
+11. **Optional: update cluster balance**:
+    - Listen to `RootCommitted(merkleRoot, blockNum, block.timestamp)` event and validate the correct `merkleRoot` is constructed for `blockNum`.
+    - Call `updateClusterBalance` per cluster in internal configuration.
+    - Use the same practices as in steps 8-10 to ensure a successful transaction.
+
 ---
 
 ## 9. Security & Correctness Notes
@@ -299,48 +337,3 @@ Contract responsibilities (out of scope for client):
   - Keys should be stored and used via secure mechanisms (HSM, KMS, or encrypted keystores).
 - **Liveness**
   - Retry + gas bump policy should be tuned so at least one TX from each oracle is likely to make it onchain per round.
-
-
-
-# Cluster Updater
-
-Cluster Updater is a separate role from the Effective Balance Oracle. 
-
-It has the following flow:
-
-1. Builds merkle trees like the oracle.
-2. Listen to `RootCommitted(merkleRoot, blockNum, block.timestamp)` event and validate the correct `merkleRoot` is constructed for `blockNum`.
-3. Call one of the following contract functions:
-    1. Call `updateClusterBalance` per cluster in internal configuration.
-    2. Call `BulkClustersBalancesUpdate` depending on internal configuration.
-
-## Contract interface
-
-### UpdateClusterBalance
-
-The contract may support per-cluster updates:
-
-```solidity
-/**
- * @notice Update a cluster's effective balance and trigger index updates
- * @param blockNum RBlock number that matches a committed root
- * @param clusterOwner Owner address of the cluster
- * @param operatorIds Array of operator IDs in the cluster
- * @param cluster Current cluster state (provided by oracle)
- * @param effectiveBalance Total cluster EB in wei (sum of all validators)
- * @param merkleProof Merkle proof validating the EB value
- */
-function UpdateClusterBalance(
-    uint64 blockNum,
-    address clusterOwner,
-    uint64[] operatorIds,
-    Cluster cluster,
-    uint64 effectiveBalance,
-    bytes32[] calldata merkleProof
-) external;
-```
-
-The oracle must provide the contract with cluster data.
-The contract is able to independently validate it.
-
-The oracle client may optionally have tooling to generate Merkle proofs but is not required to do so. This feature will be useful for fee collectors.
