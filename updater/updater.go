@@ -39,7 +39,7 @@ func New(cfg *Config) *Updater {
 }
 
 func (u *Updater) Run(ctx context.Context) error {
-	logger.Info("Updater starting")
+	logger.Info("Updater started")
 
 	for {
 		events, errChan, err := u.contractClient.SubscribeRootCommitted(ctx, nil)
@@ -108,7 +108,7 @@ func (u *Updater) Run(ctx context.Context) error {
 // processCommit rebuilds the merkle tree from stored balances, validates the root, and submits proofs.
 func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommit) error {
 	log := logger.With("blockNum", commit.ReferenceBlock, "targetEpoch", commit.TargetEpoch)
-	log.Infow("Processing commit",
+	log.Infow("Processing root",
 		"committedRoot", fmt.Sprintf("0x%x", commit.MerkleRoot[:8]))
 
 	if len(commit.ClusterBalances) == 0 {

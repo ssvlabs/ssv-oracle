@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -164,7 +165,7 @@ func (s *PostgresStorage) GetCluster(ctx context.Context, clusterID []byte) (*Cl
 		&cluster.IsActive, &balanceStr, &cluster.LastUpdatedSlot,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get cluster: %w", err)
@@ -239,7 +240,7 @@ func (s *PostgresStorage) GetCommitByBlock(ctx context.Context, blockNum uint64)
 	var balancesJSON []byte
 	err := s.db.QueryRowContext(ctx, query, blockNum).Scan(&c.RoundID, &c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get commit: %w", err)

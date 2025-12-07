@@ -40,7 +40,7 @@ func New(cfg *Config) *Oracle {
 }
 
 func (o *Oracle) Run(ctx context.Context, syncer *ethsync.EventSyncer, beaconClient *ethsync.BeaconClient) error {
-	logger.Info("Oracle starting")
+	logger.Info("Oracle started")
 
 	spec, err := beaconClient.GetSpec(ctx)
 	if err != nil {

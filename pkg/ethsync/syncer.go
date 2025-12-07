@@ -43,7 +43,7 @@ func NewEventSyncer(cfg EventSyncerConfig) (*EventSyncer, error) {
 	}
 
 	if cfg.Spec == nil {
-		return nil, fmt.Errorf("Spec is required for epoch calculations")
+		return nil, fmt.Errorf("spec is required for epoch calculations")
 	}
 
 	return &EventSyncer{

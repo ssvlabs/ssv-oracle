@@ -25,6 +25,7 @@ func Init(development bool) {
 		config = zap.NewDevelopmentConfig()
 		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05")
+		config.DisableStacktrace = true // Stack traces only clutter normal error logs
 	} else {
 		config = zap.NewProductionConfig()
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
