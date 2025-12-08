@@ -50,7 +50,7 @@ func (s *EnvSigner) Address() common.Address {
 	return s.address
 }
 
-// Close zeros out the private key.
+// Close zeros out the private key (best-effort; Go's GC doesn't guarantee secure erasure).
 func (s *EnvSigner) Close() error {
 	if s.privateKey != nil && s.privateKey.D != nil {
 		s.privateKey.D.SetInt64(0)

@@ -243,6 +243,7 @@ func (s *PostgresStorage) InsertPendingCommit(ctx context.Context, roundID, targ
 	query := `
 		INSERT INTO oracle_commits (round_id, target_epoch, merkle_root, reference_block, cluster_balances, status)
 		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (round_id) DO NOTHING
 	`
 	_, err = s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
 	if err != nil {

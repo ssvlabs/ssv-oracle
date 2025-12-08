@@ -140,7 +140,9 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		if receipt != nil {
 			txHash = receipt.TxHash.Bytes()
 		}
-		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, txHash)
+		if statusErr := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, txHash); statusErr != nil {
+			log.Warnw("Failed to update commit status", "error", statusErr)
+		}
 		return 0, fmt.Errorf("failed to commit: %w", err)
 	}
 
@@ -263,10 +265,12 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, beaconClient *ethsync
 		}
 	}
 
+	start := time.Now()
 	balanceMap, err := beaconClient.GetFinalizedValidatorBalances(ctx, pubkeys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch validator balances: %w", err)
 	}
+	beaconDuration := time.Since(start)
 
 	// Aggregate by cluster ID
 	clusterTotals := make(map[[32]byte]uint64)
@@ -293,7 +297,8 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, beaconClient *ethsync
 	logger.Infow("Balances fetched",
 		"validators", len(validators),
 		"fromBeacon", len(balanceMap),
-		"clusters", len(result))
+		"clusters", len(result),
+		"took", beaconDuration.Round(time.Millisecond))
 
 	return result, nil
 }

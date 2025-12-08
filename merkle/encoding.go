@@ -31,6 +31,9 @@ func init() {
 // - 32 bytes: effectiveBalance (uint64 padded to 32 bytes)
 //
 // Then returns keccak256 of those 64 bytes.
+//
+// Panics on encoding failure, which indicates a programming error since the
+// ABI types are pre-validated at package init and inputs are strongly typed.
 func EncodeMerkleLeaf(clusterID [32]byte, effectiveBalance uint64) [32]byte {
 	encoded, err := leafArguments.Pack(clusterID, effectiveBalance)
 	if err != nil {

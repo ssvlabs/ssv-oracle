@@ -215,9 +215,11 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		newFeeCap.Div(newFeeCap, big.NewInt(100))
 
 		if m.maxFeePerGas != nil && newFeeCap.Cmp(m.maxFeePerGas) > 0 {
-			logger.Warnw("Max gas price reached, cancelling tx",
+			logger.Warnw("Transaction stuck at max gas, attempting cancel",
+				"nonce", nonce,
+				"maxFeePerGas", m.maxFeePerGas,
 				"currentFeeCap", lastGasFeeCap,
-				"maxFeePerGas", m.maxFeePerGas)
+				"attempt", attempt)
 
 			if err := m.cancelTx(ctx, nonce, lastGasFeeCap); err != nil {
 				logger.Errorw("Failed to cancel tx", "error", err)

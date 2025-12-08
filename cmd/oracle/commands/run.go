@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -106,7 +107,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"updater", withUpdater)
 
 	connString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		cfg.DBHost, cfg.DBPort, cfg.DBUser, dbPassword, cfg.DBName)
+		cfg.DBHost, cfg.DBPort, cfg.DBUser, url.QueryEscape(dbPassword), cfg.DBName)
 
 	storage, err := ethsync.NewPostgresStorage(connString)
 	if err != nil {
