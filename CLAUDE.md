@@ -9,12 +9,13 @@ This file provides guidance to Claude Code when working with this repository.
 ## Development Commands
 
 ```bash
-go build ./...          # Build
-go test ./...           # Test
-go fmt ./...            # Format
-go vet ./...            # Lint
-make fresh              # Fresh start (clear DB)
-make start-oracle       # Start oracle (add --updater for full mode)
+make build      # Build
+make test       # Test
+make lint       # Lint
+make run        # Run oracle
+make run-all    # Run oracle with updater
+make fresh      # Fresh start (reset DB)
+make fresh-all  # Fresh start with updater
 ```
 
 ## Project Structure

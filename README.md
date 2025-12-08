@@ -41,17 +41,13 @@ make fresh
 ## Usage
 
 ```bash
-make fresh                # First run: reset DB and sync from genesis
-make start-oracle         # Run oracle only (resume from last state)
-make start-oracle-updater # Run oracle + cluster updater (single process)
-make test                 # Run tests
-```
-
-**Additional commands:**
-```bash
-make db-shell    # Open PostgreSQL shell
-make db-logs     # View database logs
-make docker-down # Stop all services
+make              # Show available targets
+make run          # Run oracle
+make run-all      # Run oracle + cluster updater
+make fresh        # Fresh start (reset DB)
+make fresh-all    # Fresh start with updater
+make test         # Run tests
+make lint         # Run linters
 ```
 
 **CLI flags:**
@@ -180,17 +176,12 @@ LOG_LEVEL=debug ./ssv-oracle run
 ## Development
 
 ```bash
-# Run tests
-go test ./...
+make build    # Build binary
+make test     # Run tests
+make lint     # Run linters (vet, fmt, golangci-lint)
 
 # Run specific test
 go test -run TestMerkleTree ./merkle
-
-# Format code
-go fmt ./...
-
-# Lint
-go vet ./...
 ```
 
 ## Troubleshooting
@@ -198,7 +189,7 @@ go vet ./...
 **Database connection failed**
 ```bash
 docker ps  # Check if PostgreSQL is running
-make docker-down && make fresh  # Restart services
+make fresh  # Reset and restart
 ```
 
 **Execution client connection failed**
