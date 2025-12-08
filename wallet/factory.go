@@ -2,6 +2,7 @@ package wallet
 
 import "fmt"
 
+// Signer type constants.
 const (
 	TypeEnv      = "env"
 	TypeKeystore = "keystore"

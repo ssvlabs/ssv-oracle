@@ -64,14 +64,17 @@ func readPassword(passwordEnv, passwordFile string) (string, error) {
 	return "", fmt.Errorf("no password source provided: set password_env or password_file")
 }
 
+// Sign signs a transaction with the private key.
 func (s *KeystoreSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
 	return types.SignTx(tx, types.LatestSignerForChainID(chainID), s.privateKey)
 }
 
+// Address returns the signer's Ethereum address.
 func (s *KeystoreSigner) Address() common.Address {
 	return s.address
 }
 
+// Close zeros out the private key.
 func (s *KeystoreSigner) Close() error {
 	if s.privateKey != nil && s.privateKey.D != nil {
 		s.privateKey.D.SetInt64(0)

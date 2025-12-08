@@ -21,16 +21,19 @@ type storage interface {
 	GetCommitByBlock(ctx context.Context, blockNum uint64) (*ethsync.OracleCommit, error)
 }
 
+// Updater listens for RootCommitted events and updates cluster balances on-chain.
 type Updater struct {
 	storage        storage
 	contractClient *contract.Client
 }
 
+// Config holds Updater configuration.
 type Config struct {
 	Storage        *ethsync.PostgresStorage
 	ContractClient *contract.Client
 }
 
+// New creates a new Updater instance.
 func New(cfg *Config) *Updater {
 	return &Updater{
 		storage:        cfg.Storage,
@@ -38,6 +41,7 @@ func New(cfg *Config) *Updater {
 	}
 }
 
+// Run starts the updater main loop, listening for RootCommitted events.
 func (u *Updater) Run(ctx context.Context) error {
 	logger.Info("Updater started")
 

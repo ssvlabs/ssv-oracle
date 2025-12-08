@@ -10,9 +10,6 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// SSV Contract Events
-// Based on ssvlabs/ssv-network ISSVClusters interface
-
 const (
 	EventValidatorAdded        = "ValidatorAdded"
 	EventValidatorRemoved      = "ValidatorRemoved"
@@ -23,8 +20,7 @@ const (
 	EventClusterBalanceUpdated = "ClusterBalanceUpdated"
 )
 
-// Event signatures (keccak256 of event signature)
-// IMPORTANT: Use Solidity format for tuples: (type1,type2,...) NOT tuple(type1,type2,...)
+// Event signatures use Solidity tuple format: (type1,type2,...) NOT tuple(type1,type2,...)
 var (
 	EventSigValidatorAdded     = crypto.Keccak256Hash([]byte("ValidatorAdded(address,uint64[],bytes,bytes,(uint32,uint64,uint64,bool,uint256))"))
 	EventSigValidatorRemoved   = crypto.Keccak256Hash([]byte("ValidatorRemoved(address,uint64[],bytes,(uint32,uint64,uint64,bool,uint256))"))
@@ -40,20 +36,16 @@ var (
 	EventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(address,uint64[],uint256,uint64,(uint32,uint64,uint64,bool,uint256))"))
 )
 
-// Cluster represents an SSV cluster state.
-// Matches the Cluster struct from ISSVNetworkCore.sol
+// Cluster represents an SSV cluster state (matches ISSVNetworkCore.sol).
 type Cluster struct {
-	ValidatorCount  uint32   // The number of validators in the cluster
-	NetworkFeeIndex uint64   // The index of network fees related to this cluster
-	Index           uint64   // The last index calculated for the cluster
-	Active          bool     // Flag indicating whether the cluster is active
-	Balance         *big.Int // The balance of the cluster (uint256)
+	ValidatorCount  uint32
+	NetworkFeeIndex uint64
+	Index           uint64
+	Active          bool
+	Balance         *big.Int
 }
 
-// SSV Event Data Structures
-// These represent parsed event data from JSONB raw_event
-
-// ValidatorAddedEvent represents the ValidatorAdded event
+// ValidatorAddedEvent is emitted when a validator is registered.
 type ValidatorAddedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
@@ -62,7 +54,7 @@ type ValidatorAddedEvent struct {
 	Cluster     Cluster
 }
 
-// ValidatorRemovedEvent represents the ValidatorRemoved event
+// ValidatorRemovedEvent is emitted when a validator is removed.
 type ValidatorRemovedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
@@ -70,21 +62,21 @@ type ValidatorRemovedEvent struct {
 	Cluster     Cluster
 }
 
-// ClusterLiquidatedEvent represents the ClusterLiquidated event
+// ClusterLiquidatedEvent is emitted when a cluster is liquidated.
 type ClusterLiquidatedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
 	Cluster     Cluster
 }
 
-// ClusterReactivatedEvent represents the ClusterReactivated event
+// ClusterReactivatedEvent is emitted when a liquidated cluster is reactivated.
 type ClusterReactivatedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
 	Cluster     Cluster
 }
 
-// ClusterWithdrawnEvent represents the ClusterWithdrawn event
+// ClusterWithdrawnEvent is emitted when SSV tokens are withdrawn from a cluster.
 type ClusterWithdrawnEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
@@ -92,7 +84,7 @@ type ClusterWithdrawnEvent struct {
 	Cluster     Cluster
 }
 
-// ClusterDepositedEvent represents the ClusterDeposited event
+// ClusterDepositedEvent is emitted when SSV tokens are deposited to a cluster.
 type ClusterDepositedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
@@ -100,9 +92,8 @@ type ClusterDepositedEvent struct {
 	Cluster     Cluster
 }
 
-// ClusterBalanceUpdatedEvent represents the ClusterBalanceUpdated event.
-// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
-// Once updated, this event will be used to update cluster state after updateClusterBalance calls.
+// ClusterBalanceUpdatedEvent is emitted when a cluster's effective balance is updated.
+// TODO: Contract will be updated to include cluster struct in this event.
 type ClusterBalanceUpdatedEvent struct {
 	Owner            common.Address
 	OperatorIDs      []uint64
@@ -111,34 +102,24 @@ type ClusterBalanceUpdatedEvent struct {
 	Cluster          Cluster
 }
 
-// ComputeClusterID computes the cluster ID from owner address and operator IDs.
-// Matches SSV contract's cluster ID computation:
-// 1. Sort operator IDs in ascending order
-// 2. keccak256(abi.encodePacked(owner, uint256(operatorIds[0]), uint256(operatorIds[1]), ...))
+// ComputeClusterID computes keccak256(abi.encodePacked(owner, uint256(op1), uint256(op2), ...))
+// with operator IDs sorted ascending. Matches SSV contract's cluster ID computation.
 func ComputeClusterID(owner common.Address, operatorIDs []uint64) [32]byte {
-	// Sort operator IDs in ascending order (make a copy to avoid mutating input)
 	sortedIDs := make([]uint64, len(operatorIDs))
 	copy(sortedIDs, operatorIDs)
 	sort.Slice(sortedIDs, func(i, j int) bool {
 		return sortedIDs[i] < sortedIDs[j]
 	})
 
-	// Calculate total size: 20 bytes (address) + 32 bytes per operator ID
-	size := 20 + (32 * len(sortedIDs))
-	data := make([]byte, 0, size)
-
-	// Append owner address (20 bytes)
+	data := make([]byte, 0, 20+(32*len(sortedIDs)))
 	data = append(data, owner.Bytes()...)
 
-	// Append each operator ID as uint256 (32 bytes each)
 	for _, id := range sortedIDs {
-		// Convert uint64 to uint256 (big-endian)
 		idBytes := make([]byte, 32)
 		big.NewInt(int64(id)).FillBytes(idBytes)
 		data = append(data, idBytes...)
 	}
 
-	// Compute keccak256 hash
 	hash := sha3.NewLegacyKeccak256()
 	hash.Write(data)
 	var result [32]byte

@@ -20,18 +20,21 @@ type storage interface {
 	UpdateCommitStatus(ctx context.Context, roundID uint64, status ethsync.CommitStatus, txHash []byte) error
 }
 
+// Oracle commits merkle roots of cluster effective balances to the SSV contract.
 type Oracle struct {
 	storage        storage
 	contractClient *contract.Client
 	phases         []CommitPhase
 }
 
+// Config holds Oracle configuration.
 type Config struct {
 	Storage        *ethsync.PostgresStorage
 	ContractClient *contract.Client
 	Phases         []CommitPhase
 }
 
+// New creates a new Oracle instance.
 func New(cfg *Config) *Oracle {
 	return &Oracle{
 		storage:        cfg.Storage,
@@ -40,6 +43,7 @@ func New(cfg *Config) *Oracle {
 	}
 }
 
+// Run starts the oracle main loop, committing roots at each target epoch.
 func (o *Oracle) Run(ctx context.Context, syncer *ethsync.EventSyncer, beaconClient *ethsync.BeaconClient) error {
 	logger.Info("Oracle started")
 

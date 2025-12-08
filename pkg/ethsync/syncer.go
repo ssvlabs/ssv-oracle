@@ -55,11 +55,8 @@ func NewEventSyncer(cfg EventSyncerConfig) (*EventSyncer, error) {
 	}, nil
 }
 
-// SyncToFinalized performs a one-time sync from last synced block to current finalized block.
-// This is used for initial sync before starting the oracle loop.
-// If fromBlock is 0, it auto-detects the contract deployment block.
+// SyncToFinalized syncs from last synced block to current finalized block.
 func (s *EventSyncer) SyncToFinalized(ctx context.Context, fromBlock uint64) error {
-	// Set initial sync block if not already set
 	lastSynced, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get last synced block: %w", err)
@@ -77,7 +74,6 @@ func (s *EventSyncer) SyncToFinalized(ctx context.Context, fromBlock uint64) err
 		}
 	}
 
-	// Sync once to current finalized block
 	return s.syncOnce(ctx)
 }
 
@@ -86,16 +82,13 @@ func (s *EventSyncer) SyncIncremental(ctx context.Context) error {
 	return s.syncOnce(ctx)
 }
 
-// SyncToBlock syncs events from last synced block to a specific target block.
-// This is used by the oracle to ensure consistency between events and balances at a specific epoch.
+// SyncToBlock syncs events from last synced block to the target block.
 func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error {
-	// Get last synced block
 	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get last synced block: %w", err)
 	}
 
-	// Already synced past target?
 	if fromBlock >= targetBlock {
 		logger.Debugw("Events already synced", "lastSynced", fromBlock, "target", targetBlock)
 		return nil
@@ -103,7 +96,6 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	totalBlocks := int(targetBlock - fromBlock)
 
-	// Create progress bar
 	bar := progressbar.NewOptions(totalBlocks,
 		progressbar.OptionSetDescription("Syncing events"),
 		progressbar.OptionSetWidth(40),
@@ -118,10 +110,8 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 		}),
 	)
 
-	// Fetch and process logs
 	totalEvents := 0
 	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, targetBlock, func(batchEnd uint64, logs []BlockLogs) error {
-		// Process each block's logs
 		for _, blockLogs := range logs {
 			if err := s.processBlockLogs(ctx, blockLogs); err != nil {
 				return fmt.Errorf("failed to process block %d: %w", blockLogs.BlockNumber, err)
@@ -129,7 +119,6 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 			totalEvents += len(blockLogs.Logs)
 		}
 
-		// Update progress bar
 		_ = bar.Set(int(batchEnd - fromBlock))
 
 		// Advance sync progress to batch end.
@@ -162,16 +151,13 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 	return s.SyncToBlock(ctx, finalizedBlock)
 }
 
-// processBlockLogs processes all logs from a single block.
-// All events + sync progress update happen in a single transaction (all-or-nothing).
+// processBlockLogs processes all logs from a block in a single transaction.
 func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs) error {
-	// Start transaction
 	tx, err := s.storage.BeginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin tx: %w", err)
 	}
 
-	// Always rollback on error (no-op if already committed)
 	committed := false
 	defer func() {
 		if !committed {
@@ -179,19 +165,17 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs)
 		}
 	}()
 
-	// Process each log
 	for _, log := range blockLogs.Logs {
 		if err := s.processLog(ctx, tx, &log, blockLogs); err != nil {
 			return fmt.Errorf("failed to process log at index %d: %w", log.Index, err)
 		}
 	}
 
-	// Update sync progress (in same transaction - atomic with events)
+	// Update sync progress atomically with events
 	if err := tx.UpdateLastSyncedBlock(ctx, blockLogs.BlockNumber); err != nil {
 		return fmt.Errorf("failed to update sync progress: %w", err)
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit tx: %w", err)
 	}
@@ -202,14 +186,11 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs)
 
 // processLog processes a single log entry.
 func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blockLogs BlockLogs) error {
-	// Parse event
 	eventType, eventData, err := s.parser.ParseLog(log)
 	if err != nil {
-		// Store raw event with error
 		return s.storeRawEvent(ctx, tx, log, blockLogs, err)
 	}
 
-	// Encode raw log and event to JSON
 	rawLog, err := EncodeLogToJSON(log)
 	if err != nil {
 		return fmt.Errorf("failed to encode raw log: %w", err)
@@ -220,13 +201,9 @@ func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blo
 		return fmt.Errorf("failed to encode event: %w", err)
 	}
 
-	// Calculate slot from block time using beacon spec
 	slot := s.spec.SlotAt(blockLogs.BlockTime)
-
-	// Compute cluster ID from event data
 	clusterID := computeClusterIDFromEvent(eventData)
 
-	// Store contract event
 	contractEvent := &ContractEvent{
 		EventType:        eventType,
 		Slot:             slot,
@@ -245,7 +222,6 @@ func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blo
 		return fmt.Errorf("failed to insert event: %w", err)
 	}
 
-	// Update state tables based on event type
 	if err := s.updateState(ctx, tx, eventType, eventData, slot, uint32(log.Index)); err != nil {
 		return fmt.Errorf("failed to update state: %w", err)
 	}
@@ -260,7 +236,6 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx Tx, log *types.Log, 
 		return fmt.Errorf("failed to encode raw log: %w", err)
 	}
 
-	// Calculate slot from block time using beacon spec
 	slot := s.spec.SlotAt(blockLogs.BlockTime)
 
 	errMsg := parseErr.Error()
@@ -418,9 +393,7 @@ func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *
 	return tx.UpsertCluster(ctx, cluster)
 }
 
-// handleClusterBalanceUpdated updates the cluster state after an updateClusterBalance call.
-// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
-// Once updated, this handler will properly update cluster state after effective balance updates.
+// TODO: Update when contract includes cluster struct in ClusterBalanceUpdated event.
 func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, event *ClusterBalanceUpdatedEvent, slot uint64) error {
 	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
 
@@ -438,8 +411,7 @@ func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, ev
 	return tx.UpsertCluster(ctx, cluster)
 }
 
-// computeClusterIDFromEvent extracts owner and operatorIDs from event data and computes cluster ID.
-// Returns nil for unknown event types.
+// computeClusterIDFromEvent extracts cluster ID from event data, or nil if unknown type.
 func computeClusterIDFromEvent(eventData interface{}) []byte {
 	switch e := eventData.(type) {
 	case *ValidatorAddedEvent:

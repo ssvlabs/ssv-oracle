@@ -32,15 +32,9 @@ func init() {
 //
 // Then returns keccak256 of those 64 bytes.
 func EncodeMerkleLeaf(clusterID [32]byte, effectiveBalance uint64) [32]byte {
-
-	// Encode using abi.encode
 	encoded, err := leafArguments.Pack(clusterID, effectiveBalance)
 	if err != nil {
-		// This should never happen with valid inputs
 		panic("failed to encode merkle leaf: " + err.Error())
 	}
-
-	// Return keccak256 hash
-	hash := crypto.Keccak256Hash(encoded)
-	return hash
+	return crypto.Keccak256Hash(encoded)
 }

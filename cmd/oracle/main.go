@@ -16,11 +16,9 @@ var (
 )
 
 func main() {
-	// Initialize logger
 	logger.InitFromEnv()
 	defer logger.Sync()
 
-	// Set version info for commands
 	commands.Version = Version
 	commands.GitCommit = GitCommit
 	commands.BuildTime = BuildTime

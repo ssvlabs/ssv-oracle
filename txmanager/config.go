@@ -46,7 +46,6 @@ func (p *TxPolicy) ParseMaxFeePerGas() (*big.Int, error) {
 		return nil, fmt.Errorf("unknown unit: %s", unit)
 	}
 
-	// Convert float to big.Int with proper precision
 	valueWei := new(big.Float).SetFloat64(value)
 	valueWei.Mul(valueWei, new(big.Float).SetInt(multiplier))
 

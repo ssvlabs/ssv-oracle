@@ -39,7 +39,6 @@ func NewClient(rpcURL string, wsRPCURL string, contractAddress string, signer wa
 		return nil, fmt.Errorf("signer cannot be nil")
 	}
 
-	// Initialize txmanager error selectors from ABI
 	txmanager.SetErrorSelectors(ErrorSelectors)
 
 	ethClient, err := ethclient.Dial(rpcURL)
@@ -78,6 +77,7 @@ func NewClient(rpcURL string, wsRPCURL string, contractAddress string, signer wa
 	return client, nil
 }
 
+// CommitRoot submits a merkle root to the SSV Network contract.
 func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum uint64, roundID uint64, targetEpoch uint64) (*types.Receipt, error) {
 	data, err := SSVNetworkABI.Pack("commitRoot", merkleRoot, blockNum)
 	if err != nil {
@@ -111,11 +111,13 @@ func (c *Client) UpdateClusterBalance(
 	})
 }
 
+// GetClusterEffectiveBalance returns the effective balance for a cluster.
+// TODO: Implement when contract adds getClusterEffectiveBalance function.
 func (c *Client) GetClusterEffectiveBalance(ctx context.Context, clusterID [32]byte) (uint64, error) {
-	// TODO: Implement when contract adds getClusterEffectiveBalance function
 	return 0, nil
 }
 
+// Close closes all client connections.
 func (c *Client) Close() {
 	if c.ethClient != nil {
 		c.ethClient.Close()

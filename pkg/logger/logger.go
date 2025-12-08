@@ -31,7 +31,6 @@ func Init(development bool) {
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	}
 
-	// Apply log level from environment if set
 	if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
 		var level zapcore.Level
 		if err := level.UnmarshalText([]byte(strings.ToLower(levelStr))); err == nil {
@@ -39,13 +38,11 @@ func Init(development bool) {
 		}
 	}
 
-	// Log to stderr
 	config.OutputPaths = []string{"stderr"}
 	config.ErrorOutputPaths = []string{"stderr"}
 
 	logger, err := config.Build(zap.AddCallerSkip(1))
 	if err != nil {
-		// Fallback to no-op logger
 		L = zap.NewNop().Sugar()
 		return
 	}

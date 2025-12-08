@@ -83,7 +83,7 @@ func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint64) *MerkleTree {
 			if i+1 < len(currentLevel) {
 				right = currentLevel[i+1]
 			} else {
-				right = left // Duplicate last node
+				right = left
 			}
 
 			// OpenZeppelin sibling sorting: sort siblings before hashing
@@ -115,7 +115,6 @@ func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint64) *MerkleTree {
 // GetProof returns the merkle proof for a cluster (sibling hashes from leaf to root).
 // Returns error if cluster is not in the tree.
 func (t *MerkleTree) GetProof(clusterID [32]byte) ([][32]byte, error) {
-	// Find leaf index
 	leafIndex := -1
 	for i, leaf := range t.Leaves {
 		if leaf.ClusterID == clusterID {
@@ -127,14 +126,12 @@ func (t *MerkleTree) GetProof(clusterID [32]byte) ([][32]byte, error) {
 		return nil, fmt.Errorf("cluster %x not found in tree", clusterID[:8])
 	}
 
-	// Build proof by collecting siblings at each layer
 	var proof [][32]byte
 	index := leafIndex
 
 	for layer := 0; layer < len(t.Layers)-1; layer++ {
 		levelHashes := t.Layers[layer]
 
-		// Determine sibling index
 		var siblingIndex int
 		if index%2 == 0 {
 			siblingIndex = index + 1
@@ -142,17 +139,14 @@ func (t *MerkleTree) GetProof(clusterID [32]byte) ([][32]byte, error) {
 			siblingIndex = index - 1
 		}
 
-		// Get sibling hash (duplicate if out of bounds)
 		var sibling [32]byte
 		if siblingIndex < len(levelHashes) {
 			sibling = levelHashes[siblingIndex]
 		} else {
-			sibling = levelHashes[index] // Duplicate (odd count case)
+			sibling = levelHashes[index]
 		}
 
 		proof = append(proof, sibling)
-
-		// Move to parent index
 		index = index / 2
 	}
 

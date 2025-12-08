@@ -40,14 +40,17 @@ func NewEnvSigner(envVarName string) (*EnvSigner, error) {
 	}, nil
 }
 
+// Sign signs a transaction with the private key.
 func (s *EnvSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
 	return types.SignTx(tx, types.LatestSignerForChainID(chainID), s.privateKey)
 }
 
+// Address returns the signer's Ethereum address.
 func (s *EnvSigner) Address() common.Address {
 	return s.address
 }
 
+// Close zeros out the private key.
 func (s *EnvSigner) Close() error {
 	if s.privateKey != nil && s.privateKey.D != nil {
 		s.privateKey.D.SetInt64(0)

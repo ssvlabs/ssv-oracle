@@ -33,6 +33,7 @@ type executor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+// ContractEvent represents a stored SSV contract event.
 type ContractEvent struct {
 	EventType        string
 	Slot             uint64
@@ -48,6 +49,7 @@ type ContractEvent struct {
 	Error            *string
 }
 
+// ClusterRow represents a cluster's current state in the database.
 type ClusterRow struct {
 	ClusterID       []byte
 	OwnerAddress    []byte
@@ -60,16 +62,19 @@ type ClusterRow struct {
 	LastUpdatedSlot uint64
 }
 
+// ActiveValidator represents an active validator with its cluster.
 type ActiveValidator struct {
 	ClusterID       []byte
 	ValidatorPubkey []byte
 }
 
+// ClusterBalance represents a cluster's aggregated effective balance.
 type ClusterBalance struct {
 	ClusterID        []byte
 	EffectiveBalance uint64
 }
 
+// CommitStatus represents the status of an oracle commit.
 type CommitStatus string
 
 const (
@@ -78,6 +83,7 @@ const (
 	CommitStatusFailed    CommitStatus = "failed"
 )
 
+// OracleCommit represents a stored oracle merkle root commit.
 type OracleCommit struct {
 	RoundID         uint64
 	TargetEpoch     uint64
@@ -88,6 +94,7 @@ type OracleCommit struct {
 	TxHash          []byte
 }
 
+// PostgresStorage implements persistent storage using PostgreSQL.
 type PostgresStorage struct {
 	db *sql.DB
 }

@@ -79,7 +79,6 @@ type Config struct {
 }
 
 func runOracle(_ *cobra.Command, _ []string) error {
-	// Load configuration
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -89,14 +88,12 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid commit phases: %w", err)
 	}
 
-	// Create wallet signer
 	signer, err := wallet.NewSigner(&cfg.Wallet)
 	if err != nil {
 		return fmt.Errorf("failed to create wallet signer: %w", err)
 	}
 	defer signer.Close()
 
-	// Get database password from environment
 	dbPassword := os.Getenv(cfg.DBPasswordEnv)
 	if dbPassword == "" {
 		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
@@ -108,7 +105,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"signerAddress", signer.Address().Hex(),
 		"updater", withUpdater)
 
-	// 1. Create PostgreSQL storage
 	connString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, dbPassword, cfg.DBName)
 
@@ -122,7 +118,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		}
 	}()
 
-	// Handle fresh start flag
 	if freshStart {
 		logger.Info("Fresh start: clearing database")
 		ctx := context.Background()
@@ -131,7 +126,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Create execution client
 	execClient, err := ethsync.NewExecutionClient(ethsync.ExecutionClientConfig{
 		URL:        cfg.EthRPC,
 		BatchSize:  cfg.SyncBatchSize,
@@ -143,14 +137,13 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	}
 	defer execClient.Close()
 
-	// Get and log chain ID
 	chainID, err := execClient.GetChainID(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to get chain ID: %w", err)
 	}
 	logger.Infow("Connected to chain", "chainID", chainID)
 
-	// Validate chain ID matches database (prevents accidental network changes)
+	// Validate chain ID matches database to prevent accidental network changes
 	ctx := context.Background()
 	dbChainID, err := storage.GetChainID(ctx)
 	if err != nil {
@@ -158,7 +151,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	}
 
 	if dbChainID == nil {
-		// First run: store chain ID
 		if err := storage.SetChainID(ctx, chainID.Uint64()); err != nil {
 			return fmt.Errorf("failed to store chain ID: %w", err)
 		}
@@ -174,7 +166,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to create beacon client: %w", err)
 	}
 
-	// Fetch genesis time to create beacon spec for slot/epoch calculations
 	spec, err := beaconClient.GetSpec(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to get beacon spec: %w", err)
@@ -184,7 +175,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"slotsPerEpoch", spec.SlotsPerEpoch,
 		"slotDuration", spec.SlotDuration)
 
-	// Create event syncer
 	ssvContract := common.HexToAddress(cfg.SSVContract)
 	syncer, err := ethsync.NewEventSyncer(ethsync.EventSyncerConfig{
 		ExecutionClient: execClient,
@@ -202,8 +192,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"firstStartEpoch", currentPhase.StartEpoch,
 		"firstInterval", currentPhase.Interval)
 
-	// Create Ethereum client for oracle commits (uses SSV Network contract)
-	// Pass WebSocket URL for event subscriptions (required if running with --updater)
+	// WebSocket URL is required for event subscriptions when running with --updater
 	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer, &cfg.TxPolicy)
 	if err != nil {
 		return fmt.Errorf("failed to create Ethereum client: %w", err)
@@ -218,7 +207,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	oracleInstance := oracle.New(oracleCfg)
 
-	// Setup signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -231,21 +219,17 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
-	// Perform initial sync (blocking, sequential)
 	logger.Info("Syncing SSV contract events")
 	if err := syncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
 		return fmt.Errorf("initial sync failed: %w", err)
 	}
 
-	// Create errgroup for running oracle and optionally updater
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Run oracle
 	g.Go(func() error {
 		return oracleInstance.Run(gCtx, syncer, beaconClient)
 	})
 
-	// Optionally run updater
 	if withUpdater {
 		updaterInstance := updater.New(&updater.Config{
 			Storage:        storage,
@@ -256,7 +240,6 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		})
 	}
 
-	// Wait for completion - first error cancels all
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("error: %w", err)
 	}

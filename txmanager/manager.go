@@ -105,7 +105,6 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.Receipt, error) {
 	from := m.signer.Address()
 
-	// Estimate gas with buffer
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {
 		callMsg := ethereum.CallMsg{
@@ -123,13 +122,11 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		logger.Debugw("Gas estimated", "estimated", estimated, "withBuffer", gasLimit)
 	}
 
-	// Get initial gas price
 	gasTipCap, gasFeeCap, err := m.getGasPrice(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gas price: %w", err)
 	}
 
-	// Get nonce
 	nonce, err := m.client.PendingNonceAt(ctx, from)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get nonce: %w", err)
@@ -145,7 +142,6 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	var lastGasTipCap *big.Int = gasTipCap
 
 	for attempt := 1; attempt <= m.policy.MaxRetries; attempt++ {
-		// Build transaction
 		tx := types.NewTx(&types.DynamicFeeTx{
 			ChainID:   m.chainID,
 			Nonce:     nonce,
@@ -157,13 +153,11 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			Data:      opts.Data,
 		})
 
-		// Sign
 		signedTx, err := m.signer.Sign(tx, m.chainID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign tx: %w", err)
 		}
 
-		// Submit
 		if err := m.client.SendTransaction(ctx, signedTx); err != nil {
 			// If replacement underpriced, bump and retry
 			if attempt < m.policy.MaxRetries {
@@ -182,7 +176,6 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			"gasFeeCap", lastGasFeeCap,
 			"attempt", attempt)
 
-		// Wait for receipt with timeout
 		receipt, err := m.waitForReceipt(ctx, signedTx)
 		if err == nil {
 			if receipt.Status == 1 {
@@ -201,7 +194,6 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			return receipt, &RevertError{Reason: reason, TxHash: signedTx.Hash().Hex()}
 		}
 
-		// Timeout - try to bump gas
 		if attempt >= m.policy.MaxRetries {
 			break
 		}
@@ -211,14 +203,12 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			"attempt", attempt,
 			"timeoutBlocks", m.policy.PendingTimeoutBlocks)
 
-		// Calculate bumped gas prices
 		bumpFactor := int64(100 + m.policy.GasBumpPercent)
 		newTip := new(big.Int).Mul(lastGasTipCap, big.NewInt(bumpFactor))
 		newTip.Div(newTip, big.NewInt(100))
 		newFeeCap := new(big.Int).Mul(lastGasFeeCap, big.NewInt(bumpFactor))
 		newFeeCap.Div(newFeeCap, big.NewInt(100))
 
-		// Check if we've hit max
 		if m.maxFeePerGas != nil && newFeeCap.Cmp(m.maxFeePerGas) > 0 {
 			logger.Warnw("Max gas price reached, cancelling tx",
 				"currentFeeCap", lastGasFeeCap,
@@ -240,7 +230,6 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		lastGasFeeCap = newFeeCap
 	}
 
-	// Max retries exhausted
 	if lastTx != nil {
 		logger.Warnw("Max retries exhausted, cancelling tx",
 			"hash", lastTx.Hash().Hex(),
@@ -265,13 +254,12 @@ func (m *TxManager) getGasPrice(ctx context.Context) (*big.Int, *big.Int, error)
 		return nil, nil, fmt.Errorf("failed to get latest header: %w", err)
 	}
 
-	// Standard formula: gasFeeCap = 2*baseFee + gasTipCap
+	// gasFeeCap = 2*baseFee + gasTipCap (EIP-1559 standard formula)
 	gasFeeCap := new(big.Int).Add(
 		new(big.Int).Mul(header.BaseFee, big.NewInt(2)),
 		gasTipCap,
 	)
 
-	// Respect max cap
 	if m.maxFeePerGas != nil && gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
 		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
 		// Adjust tip if needed
@@ -302,7 +290,6 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 				return receipt, nil
 			}
 
-			// Check timeout
 			currentBlock, err := m.client.BlockNumber(ctx)
 			if err != nil {
 				logger.Warnw("Failed to get block number", "error", err)
@@ -353,7 +340,6 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 		"nonce", nonce,
 		"gasFeeCap", gasFeeCap)
 
-	// Wait for cancel tx to be mined
 	receipt, err := m.waitForReceipt(ctx, signedTx)
 	if err != nil {
 		return fmt.Errorf("cancel tx not confirmed: %w", err)

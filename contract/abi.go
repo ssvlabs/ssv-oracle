@@ -26,7 +26,6 @@ func init() {
 		panic("failed to parse SSVNetwork ABI: " + err.Error())
 	}
 
-	// Build error selectors from ABI
 	ErrorSelectors = make(map[string]string)
 	for name, abiError := range SSVNetworkABI.Errors {
 		selector := hex.EncodeToString(abiError.ID[:4])

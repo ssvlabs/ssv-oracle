@@ -23,7 +23,6 @@ func NewEventParser() (*EventParser, error) {
 }
 
 // ParseLog parses an Ethereum log into a structured event.
-// Returns the event type name and parsed data as interface{}.
 func (p *EventParser) ParseLog(log *types.Log) (string, interface{}, error) {
 	if len(log.Topics) == 0 {
 		return "", nil, fmt.Errorf("log has no topics")
@@ -214,9 +213,7 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 	return event, nil
 }
 
-// parseClusterBalanceUpdated parses the ClusterBalanceUpdated event.
-// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
-// Once updated, update this parser to match the new event format.
+// TODO: Update parser when contract includes cluster struct in ClusterBalanceUpdated event.
 func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanceUpdatedEvent, error) {
 	event := &ClusterBalanceUpdatedEvent{}
 

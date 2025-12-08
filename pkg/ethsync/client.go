@@ -112,9 +112,7 @@ type BlockLogs struct {
 // FetchLogsCallback is called for each batch of logs.
 type FetchLogsCallback func(batchEnd uint64, logs []BlockLogs) error
 
-// FetchLogs fetches logs for the given address and block range.
-// Calls the callback for each batch with the batch end block and logs found.
-// Only returns BlockLogs for blocks that have events (skips empty blocks).
+// FetchLogs fetches logs in batches, calling the callback after each batch.
 func (c *ExecutionClient) FetchLogs(
 	ctx context.Context,
 	address common.Address,
@@ -159,8 +157,7 @@ func (c *ExecutionClient) FetchLogs(
 	return nil
 }
 
-// packLogs groups logs by block number, sorted by block and tx index.
-// Also fetches block timestamps for each unique block using batch RPC.
+// packLogs groups logs by block number and fetches timestamps via batch RPC.
 func (c *ExecutionClient) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, error) {
 	if len(logs) == 0 {
 		return nil, nil

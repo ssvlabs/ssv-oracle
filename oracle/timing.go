@@ -5,15 +5,18 @@ import (
 	"fmt"
 )
 
+// CommitPhase defines a commit schedule phase with start epoch and interval.
 type CommitPhase struct {
 	StartEpoch uint64 `yaml:"start_epoch"`
 	Interval   uint64 `yaml:"interval"`
 }
 
+// TargetEpoch returns the target epoch for a given round in this phase.
 func (p CommitPhase) TargetEpoch(round uint64) uint64 {
 	return p.StartEpoch + (round * p.Interval)
 }
 
+// ValidatePhases validates commit phase configuration.
 func ValidatePhases(phases []CommitPhase) error {
 	if len(phases) == 0 {
 		return errors.New("commit_phases: at least one phase required")
@@ -31,6 +34,7 @@ func ValidatePhases(phases []CommitPhase) error {
 	return nil
 }
 
+// GetPhaseForEpoch returns the active phase for a given epoch.
 func GetPhaseForEpoch(phases []CommitPhase, epoch uint64) CommitPhase {
 	for i := len(phases) - 1; i >= 0; i-- {
 		if epoch >= phases[i].StartEpoch {
@@ -40,6 +44,7 @@ func GetPhaseForEpoch(phases []CommitPhase, epoch uint64) CommitPhase {
 	return phases[0]
 }
 
+// NextTargetEpoch calculates the next target epoch based on finalized epoch and phases.
 func NextTargetEpoch(phases []CommitPhase, finalizedEpoch uint64) uint64 {
 	phase := GetPhaseForEpoch(phases, finalizedEpoch)
 
@@ -66,6 +71,7 @@ func NextTargetEpoch(phases []CommitPhase, finalizedEpoch uint64) uint64 {
 	return nextTarget
 }
 
+// RoundInPhase returns the round number within a phase for a target epoch.
 func RoundInPhase(phase CommitPhase, targetEpoch uint64) uint64 {
 	if targetEpoch < phase.StartEpoch {
 		return 0
