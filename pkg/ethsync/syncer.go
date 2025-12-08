@@ -326,116 +326,72 @@ func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx Tx, event *
 }
 
 func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx Tx, event *ClusterLiquidatedEvent, slot uint64) error {
-	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
-
-	cluster := &ClusterRow{
-		ClusterID:       clusterID[:],
-		OwnerAddress:    event.Owner.Bytes(),
-		OperatorIDs:     event.OperatorIDs,
-		ValidatorCount:  event.Cluster.ValidatorCount,
-		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
-		Index:           event.Cluster.Index,
-		IsActive:        event.Cluster.Active,
-		Balance:         event.Cluster.Balance,
-		LastUpdatedSlot: slot,
-	}
-	return tx.UpsertCluster(ctx, cluster)
+	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, &event.Cluster, slot)
 }
 
 func (s *EventSyncer) handleClusterReactivated(ctx context.Context, tx Tx, event *ClusterReactivatedEvent, slot uint64) error {
-	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
-
-	cluster := &ClusterRow{
-		ClusterID:       clusterID[:],
-		OwnerAddress:    event.Owner.Bytes(),
-		OperatorIDs:     event.OperatorIDs,
-		ValidatorCount:  event.Cluster.ValidatorCount,
-		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
-		Index:           event.Cluster.Index,
-		IsActive:        event.Cluster.Active,
-		Balance:         event.Cluster.Balance,
-		LastUpdatedSlot: slot,
-	}
-	return tx.UpsertCluster(ctx, cluster)
+	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, &event.Cluster, slot)
 }
 
 func (s *EventSyncer) handleClusterWithdrawn(ctx context.Context, tx Tx, event *ClusterWithdrawnEvent, slot uint64) error {
-	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
-
-	cluster := &ClusterRow{
-		ClusterID:       clusterID[:],
-		OwnerAddress:    event.Owner.Bytes(),
-		OperatorIDs:     event.OperatorIDs,
-		ValidatorCount:  event.Cluster.ValidatorCount,
-		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
-		Index:           event.Cluster.Index,
-		IsActive:        event.Cluster.Active,
-		Balance:         event.Cluster.Balance,
-		LastUpdatedSlot: slot,
-	}
-	return tx.UpsertCluster(ctx, cluster)
+	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, &event.Cluster, slot)
 }
 
 func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *ClusterDepositedEvent, slot uint64) error {
-	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
-
-	cluster := &ClusterRow{
-		ClusterID:       clusterID[:],
-		OwnerAddress:    event.Owner.Bytes(),
-		OperatorIDs:     event.OperatorIDs,
-		ValidatorCount:  event.Cluster.ValidatorCount,
-		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
-		Index:           event.Cluster.Index,
-		IsActive:        event.Cluster.Active,
-		Balance:         event.Cluster.Balance,
-		LastUpdatedSlot: slot,
-	}
-	return tx.UpsertCluster(ctx, cluster)
+	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, &event.Cluster, slot)
 }
 
-// TODO: Update when contract includes cluster struct in ClusterBalanceUpdated event.
 func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, event *ClusterBalanceUpdatedEvent, slot uint64) error {
-	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
+	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, &event.Cluster, slot)
+}
 
-	cluster := &ClusterRow{
+func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx Tx, owner common.Address, operatorIDs []uint64, cluster *Cluster, slot uint64) error {
+	clusterID := ComputeClusterID(owner, operatorIDs)
+	row := &ClusterRow{
 		ClusterID:       clusterID[:],
-		OwnerAddress:    event.Owner.Bytes(),
-		OperatorIDs:     event.OperatorIDs,
-		ValidatorCount:  event.Cluster.ValidatorCount,
-		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
-		Index:           event.Cluster.Index,
-		IsActive:        event.Cluster.Active,
-		Balance:         event.Cluster.Balance,
+		OwnerAddress:    owner.Bytes(),
+		OperatorIDs:     operatorIDs,
+		ValidatorCount:  cluster.ValidatorCount,
+		NetworkFeeIndex: cluster.NetworkFeeIndex,
+		Index:           cluster.Index,
+		IsActive:        cluster.Active,
+		Balance:         cluster.Balance,
 		LastUpdatedSlot: slot,
 	}
-	return tx.UpsertCluster(ctx, cluster)
+	return tx.UpsertCluster(ctx, row)
+}
+
+// clusterEvent is implemented by all events that have Owner and OperatorIDs.
+type clusterEvent interface {
+	clusterKey() (common.Address, []uint64)
+}
+
+func (e *ValidatorAddedEvent) clusterKey() (common.Address, []uint64) { return e.Owner, e.OperatorIDs }
+func (e *ValidatorRemovedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterLiquidatedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterReactivatedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterDepositedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterBalanceUpdatedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
 }
 
 // computeClusterIDFromEvent extracts cluster ID from event data, or nil if unknown type.
 func computeClusterIDFromEvent(eventData interface{}) []byte {
-	switch e := eventData.(type) {
-	case *ValidatorAddedEvent:
-		id := ComputeClusterID(e.Owner, e.OperatorIDs)
+	if e, ok := eventData.(clusterEvent); ok {
+		owner, operatorIDs := e.clusterKey()
+		id := ComputeClusterID(owner, operatorIDs)
 		return id[:]
-	case *ValidatorRemovedEvent:
-		id := ComputeClusterID(e.Owner, e.OperatorIDs)
-		return id[:]
-	case *ClusterLiquidatedEvent:
-		id := ComputeClusterID(e.Owner, e.OperatorIDs)
-		return id[:]
-	case *ClusterReactivatedEvent:
-		id := ComputeClusterID(e.Owner, e.OperatorIDs)
-		return id[:]
-	case *ClusterWithdrawnEvent:
-		id := ComputeClusterID(e.Owner, e.OperatorIDs)
-		return id[:]
-	case *ClusterDepositedEvent:
-		id := ComputeClusterID(e.Owner, e.OperatorIDs)
-		return id[:]
-	case *ClusterBalanceUpdatedEvent:
-		id := ComputeClusterID(e.Owner, e.OperatorIDs)
-		return id[:]
-	default:
-		return nil
 	}
+	return nil
 }
