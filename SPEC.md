@@ -1,28 +1,4 @@
-# SSV Staking
-
-We introduce SSV staking V1, a brand-new feature that will allow SSV stakers to perform useful work for the SSV network in exchange for rewards.
-Stakers will run oracle services that report the correct effective balance (EB) of each SSV cluster to the SSV Network contract.
-This ensures that all fees are calculated proportionally to the expected rewards of the cluster.
-
-Since updating all clusters is a costly operation, we divide the work between two actors:
-1. *SSV Oracles* – which can only participate on behalf of stakers. They post a single small commitment of the effective balances of **all** clusters in each phase.
-2. *Cluster Updaters* – permissionless parties that post the actual verifiable EBs. Any data that cannot be verified against the commitment will be rejected.
-
-Cluster updaters will only be able to vote on commits that have reached a predefined voting threshold.
-The parties will be incentivized to act in an honest manner. The incentives will come from network fees collected from cluster owners and pooled in the SSV Network contract.
-Each staker will be able to withdraw its proportional share according to the weight of its correct votes.
-
-## V1
-
-In the first release phase, we focus on simplicity:
-  - There will be four permissioned SSV oracles.
-  - One of the oracles will volunteer to be a Cluster Updater.
-  - It is possible to stake, but all oracles will have the same weight.
-  - A threshold of 75% of the weight will allow the commitment to be accepted.
-  - Stakers will be able to withdraw an amount proportional to their stake.
- 
-
-### SSV Oracle
+### SSV Oracle Spec
 
 This section specifies the **offchain oracle client** that periodically publishes a Merkle root of **effective balances of all SSV clusters** to an onchain oracle contract.
 
@@ -355,13 +331,3 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
   - Keys should be stored and used via secure mechanisms (HSM, KMS, or encrypted keystores).
 - **Liveness**
   - Retry + gas bump policy should be tuned so at least one TX from each oracle is likely to make it onchain per round.
-
-### SSV Contract Changes
-
-TBD
-
-#### Add Staking module
-
-#### Define Unstaking Window
-
-#### Enable Reward Withdrawals
