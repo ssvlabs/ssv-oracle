@@ -6,7 +6,7 @@ This document specifies the **offchain oracle client** that periodically publish
 
 The client will:
 
-- Read **timing configuration** (`startEpoch`, `epochInterval`) from a shared oracle timing configuration source.
+- Read **commit phase configuration** (`startEpoch`, `epochInterval`) from a shared oracle commit phase configuration source.
 - Determine the **current target epoch** and corresponding **round**.
 - Ensure the **target epoch is finalized**.
 - Fetch effective balances for all clusters at the **target epoch**.
@@ -16,14 +16,14 @@ The client will:
 
 ---
 
-## 2. Timing & Rounds
+## 2. Commit Phase & Rounds
 
-### 2.1 Timing Configuration
+### 2.1 Commit Phase Configuration
 
-Timing Configuration:
+Commit Phase Configuration:
 
 ```
-Procedure getOracleTimingConfig(referenceEpoch) returns (startEpoch, epochInterval);
+Procedure getOracleCommitPhaseConfig(referenceEpoch) returns (startEpoch, epochInterval);
 ```
 
 - `startEpoch` – first epoch at which oracle commitments are defined.
@@ -34,7 +34,7 @@ The client obtains these values (for example, from an onchain contract or shared
 For example, given a configuration with algebraic value placeholders:
 ```yml
 # Do not edit default values
-- timing-config:
+- commit-phase-config:
 	- firstStartEpoch: x
 	- firstInterval: a
 	- secondStartEpoch: y
@@ -196,10 +196,10 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
    - Triggers the main loop at a fixed wall-clock interval.
    - Ensures no overlapping runs.
 
-2. **Config & Timing Manager**
-   - Reads `startEpoch` and `epochInterval` from the configuration source.
+2. **Config & Commit Phase Manager**
+   - Reads `startEpoch` and `epochInterval` from the commit phase configuration source.
    - Caches the values and refreshes them periodically or upon error.
-   - Computes `(round, targetEpoch)` according to the configured timing rules.
+   - Computes `(round, targetEpoch)` according to the configured commit phase rules.
 
 3. **Finalization & Epoch Manager**
    - Queries beacon/consensus RPC to get `finalizedEpoch`.
@@ -218,7 +218,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 6. **Onchain Client**
    - Ethereum RPC/websocket client.
    - ABI bindings for:
-     - `getOracleTimingConfig`
+     - `getOracleCommitPhaseConfig`
      - `commitRoot`
    - Manages nonces, gas price (EIP-1559), chain ID, etc.
    - Tracks TX lifecycle and implements retry logic.
@@ -255,8 +255,8 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 
 ## 8. Protocol Flow (Per Loop)
 
-1. **Fetch timing config**
-   - Call `getOracleTimingConfig(lastTargetEpoch)` → `(startEpoch, epochInterval)`.
+1. **Fetch commit phase config**
+   - Call `getOracleCommitPhaseConfig(lastTargetEpoch)` → `(startEpoch, epochInterval)`.
    - If `epochInterval == 0`, log an error and abort (misconfiguration).
 
 2. **Calculate current round**
