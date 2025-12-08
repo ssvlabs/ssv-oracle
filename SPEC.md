@@ -14,18 +14,20 @@ Each staker will be able to withdraw its relative part according to the weight o
 
 ## V1
 
-In the first release we focus on simplicity:
-  - There will only be 4 SSV oracles. 
+In the first release phase we focus on simplicity:
+  - There will be 4 permissioned SSV oracles. 
   - One of the oracles will volunteer to be a Cluster Updater.
-  - Stakers will delegate stake to all of them at once. Meaning all oracles will have the same weight.
+  - It is possible to stake, but all oracles will have the same weight.
   - A threshold of 75% of the weight will allow the commitment to be accepted.
   - Stakers will be able to withdraw amount proportional to their stake.
  
 
+###  SSV Oracle
 
-## 1. Summary
+This section specifies the **offchain oracle client** that periodically publishes a Merkle root of **effective balances of all SSV clusters** to an onchain oracle contract.
 
-This document specifies the **offchain oracle client** that periodically publishes a Merkle root of **effective balances of all SSV clusters** to an onchain oracle contract.
+#### 1. Summary
+
 
 The client will:
 
@@ -39,9 +41,9 @@ The client will:
 
 ---
 
-## 2. Commit Phase & Rounds
+#### 2. Commit Phase & Rounds
 
-### 2.1 Commit Phase Configuration
+##### 2.1 Commit Phase Configuration
 
 Commit Phase Configuration:
 
@@ -74,7 +76,7 @@ else:
 
 
 
-### 2.2 Round & Target Epoch
+##### 2.2 Round & Target Epoch
 
 The client maintains a `round` variable. To compute the target epoch for this round, use:
 
@@ -94,16 +96,16 @@ After each successful commit for a given `round`, the client increments `round` 
 
 ---
 
-## 3. Finalization & Data Source
+#### 3. Finalization & Data Source
 
-### 3.1 Finalization Requirement
+##### 3.1 Finalization Requirement
 
 Every time data is polled for an `epoch` it MUST be finalized. Finality can be checked via the beacon API: `/eth/v1/beacon/states/head/finality_checkpoints`.
 
 If `epoch <= finalizedEpoch` then it is eligible for data polling.
 Only epochs calculated as targets will be polled.
 
-### 3.2 Data Sources
+##### 3.2 Data Sources
 
 The client obtains `(clusterId, effectiveBalance)` for `epoch` from an Ethereum node:
    - Syncs SSV network events to build the mapping from validators to clusters.
@@ -111,9 +113,9 @@ The client obtains `(clusterId, effectiveBalance)` for `epoch` from an Ethereum 
 
 ---
 
-## 4. Data Model
+#### 4. Data Model
 
-### 4.1 Cluster Effective Balance
+##### 4.1 Cluster Effective Balance
 
 For each cluster `c`:
 
@@ -122,11 +124,11 @@ For each cluster `c`:
 
 ---
 
-## 5. Merkle Tree Construction
+#### 5. Merkle Tree Construction
 
 A Merkle tree must be constructed so it is compatible with the logic used by [OpenZeppelin Merkle Tree](https://docs.openzeppelin.com/contracts-cairo/alpha/api/merkle-tree).
 
-### 5.1 Leaf Encoding
+##### 5.1 Leaf Encoding
 
 For each cluster:
 
@@ -137,7 +139,7 @@ For each cluster:
 
 The exact encoding (types & order) is **part of the protocol** and MUST be identical across implementations and the onchain contract.
 
-### 5.2 Ordering
+##### 5.2 Ordering
 
 - Collect all leaves.
 - Sort by `clusterId` ascending (as `bytes32`).
@@ -145,7 +147,7 @@ The exact encoding (types & order) is **part of the protocol** and MUST be ident
 
 This ordering guarantees a deterministic Merkle tree.
 
-### 5.3 Empty Tree
+##### 5.3 Empty Tree
 If there are zero clusters, the Merkle root is defined as:
 `merkleRoot = keccak256([]byte{})`
 (i.e., keccak256 of zero bytes, resulting in `0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470`).
@@ -153,9 +155,9 @@ If there are zero clusters, the Merkle root is defined as:
 
 ---
 
-## 6. Contract Interface
+#### 6. Contract Interface
 
-### 6.1 Commit Root
+##### 6.1 Commit Root
 
 The oracle client calls the oracle contract:
 
@@ -165,7 +167,7 @@ function commitRoot(
     uint64  blockNum
 ) external;
 ```
-It fires upon success:
+When a committed root is accepted with a threshold of weight:
 ```solidity
 event RootCommitted(bytes32 merkleRoot, uint64 blockNum);
 ```
@@ -180,7 +182,7 @@ Contract responsibilities:
 - Handle storage and further use of that root.
 
 
-### 6.2 UpdateClusterBalance
+##### 6.2 UpdateClusterBalance
 
 The contract supports per-cluster updates:
 
@@ -211,9 +213,9 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 
 ---
 
-## 7. Client Architecture
+#### 7. Client Architecture
 
-### 7.1 Components
+##### 7.1 Components
 
 1. **Scheduler**
    - Triggers the main loop at a fixed wall-clock interval.
@@ -257,7 +259,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
    - Logging + metrics:
      - Commit attempts, successes, failures, RPC errors, data mismatches.
 
-### 7.2 Example Configuration
+##### 7.2 Example Configuration
 
 - Network:
   - `eth_rpc_url`
@@ -275,7 +277,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 
 ---
 
-## 8. Protocol Flow (Per Loop)
+#### 8. Protocol Flow (Per Loop)
 
 1. **Fetch commit phase config**
    - Call `getOracleCommitPhaseConfig(lastTargetEpoch)` → `(startEpoch, epochInterval)`.
@@ -342,7 +344,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 
 ---
 
-## 9. Security & Correctness Notes
+#### 9. Security & Correctness Notes
 
 - **Determinism**
   - `startEpoch`, `epochInterval` are read from the same source for all oracles.
@@ -355,3 +357,5 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
   - Keys should be stored and used via secure mechanisms (HSM, KMS, or encrypted keystores).
 - **Liveness**
   - Retry + gas bump policy should be tuned so at least one TX from each oracle is likely to make it onchain per round.
+
+###  SSV Contract Changes
