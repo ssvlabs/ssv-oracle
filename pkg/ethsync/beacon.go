@@ -14,19 +14,37 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	defaultBeaconTimeout = 30 * time.Second
+	validatorBatchSize   = 1000 // Max validators per beacon API request
+	maxParallelRequests  = 5
+)
+
+// BeaconAPI defines the beacon node capabilities required by the oracle.
+type BeaconAPI interface {
+	eth2client.GenesisProvider
+	eth2client.SpecProvider
+	eth2client.FinalityProvider
+	eth2client.SignedBeaconBlockProvider
+	eth2client.ValidatorsProvider
+}
+
+// BeaconClient wraps a beacon node client for fetching chain data.
 type BeaconClient struct {
-	client eth2client.Service
+	client BeaconAPI
 	spec   *Spec
 }
 
+// BeaconClientConfig holds configuration for the beacon client.
 type BeaconClientConfig struct {
 	URL     string
 	Timeout time.Duration
 }
 
+// NewBeaconClient creates a new beacon client.
 func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient, error) {
 	if cfg.Timeout == 0 {
-		cfg.Timeout = 30 * time.Second
+		cfg.Timeout = defaultBeaconTimeout
 	}
 
 	client, err := http.New(ctx,
@@ -38,29 +56,23 @@ func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient
 		return nil, fmt.Errorf("failed to create beacon client: %w", err)
 	}
 
-	return &BeaconClient{client: client}, nil
+	return &BeaconClient{
+		client: client.(BeaconAPI),
+	}, nil
 }
 
-// GetSpec returns beacon chain spec (cached after first call).
+// GetSpec returns the beacon chain spec (cached).
 func (c *BeaconClient) GetSpec(ctx context.Context) (*Spec, error) {
 	if c.spec != nil {
 		return c.spec, nil
 	}
 
-	genesisProvider, ok := c.client.(eth2client.GenesisProvider)
-	if !ok {
-		return nil, fmt.Errorf("client does not support GenesisProvider")
-	}
-	genesisResp, err := genesisProvider.Genesis(ctx, &api.GenesisOpts{})
+	genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get genesis: %w", err)
 	}
 
-	specProvider, ok := c.client.(eth2client.SpecProvider)
-	if !ok {
-		return nil, fmt.Errorf("client does not support SpecProvider")
-	}
-	specResp, err := specProvider.Spec(ctx, &api.SpecOpts{})
+	specResp, err := c.client.Spec(ctx, &api.SpecOpts{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get spec: %w", err)
 	}
@@ -84,18 +96,15 @@ func (c *BeaconClient) GetSpec(ctx context.Context) (*Spec, error) {
 	return c.spec, nil
 }
 
+// FinalizedCheckpoint contains the finalized epoch and corresponding execution block.
 type FinalizedCheckpoint struct {
 	Epoch    uint64
-	BlockNum uint64 // Execution layer block number
+	BlockNum uint64 // execution layer
 }
 
+// GetFinalizedCheckpoint returns the latest finalized checkpoint.
 func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoint, error) {
-	finalityProvider, ok := c.client.(eth2client.FinalityProvider)
-	if !ok {
-		return nil, fmt.Errorf("client does not support FinalityProvider")
-	}
-
-	finalityResp, err := finalityProvider.Finality(ctx, &api.FinalityOpts{
+	finalityResp, err := c.client.Finality(ctx, &api.FinalityOpts{
 		State: "head",
 	})
 	if err != nil {
@@ -105,12 +114,7 @@ func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCh
 	epoch := uint64(finalityResp.Data.Finalized.Epoch)
 	root := finalityResp.Data.Finalized.Root
 
-	blockProvider, ok := c.client.(eth2client.SignedBeaconBlockProvider)
-	if !ok {
-		return nil, fmt.Errorf("client does not support SignedBeaconBlockProvider")
-	}
-
-	blockResp, err := blockProvider.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
+	blockResp, err := c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
 		Block: root.String(),
 	})
 	if err != nil {
@@ -128,21 +132,10 @@ func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCh
 	}, nil
 }
 
-const (
-	validatorBatchSize  = 1000 // Max validators per beacon API request
-	maxParallelRequests = 5
-)
-
-// GetFinalizedValidatorBalances returns effective balances (in Gwei) for validators.
-// Returns map of BLS pubkey -> effective balance.
+// GetFinalizedValidatorBalances returns effective balances in Gwei for the given validators.
 func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
 		return make(map[phase0.BLSPubKey]uint64), nil
-	}
-
-	validatorsProvider, ok := c.client.(eth2client.ValidatorsProvider)
-	if !ok {
-		return nil, fmt.Errorf("client does not support ValidatorsProvider")
 	}
 
 	blsPubkeys := make([]phase0.BLSPubKey, len(pubkeys))
@@ -167,7 +160,7 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 
 	for _, batch := range batches {
 		g.Go(func() error {
-			resp, err := validatorsProvider.Validators(ctx, &api.ValidatorsOpts{
+			resp, err := c.client.Validators(ctx, &api.ValidatorsOpts{
 				State:   "finalized",
 				PubKeys: batch,
 			})

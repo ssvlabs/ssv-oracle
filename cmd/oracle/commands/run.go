@@ -167,10 +167,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("chain ID mismatch: database has %d, RPC has %d. Use --fresh to start with new chain", *dbChainID, chainID)
 	}
 
-	// Create beacon client
 	beaconClient, err := ethsync.NewBeaconClient(ctx, ethsync.BeaconClientConfig{
-		URL:     cfg.BeaconRPC,
-		Timeout: 30 * time.Second,
+		URL: cfg.BeaconRPC,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create beacon client: %w", err)
