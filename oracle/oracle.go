@@ -16,7 +16,8 @@ import (
 // storage defines the interface the oracle needs for persistence.
 type storage interface {
 	GetActiveValidators(ctx context.Context) ([]ethsync.ActiveValidator, error)
-	InsertOracleCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, txHash []byte, clusterBalances []ethsync.ClusterBalance) error
+	InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ethsync.ClusterBalance) error
+	UpdateCommitStatus(ctx context.Context, roundID uint64, status ethsync.CommitStatus, txHash []byte) error
 }
 
 type Oracle struct {
@@ -133,22 +134,30 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		"root", fmt.Sprintf("0x%x", merkleRoot[:8]),
 		"clusters", len(clusterBalances))
 
+	// Store commit as pending before sending tx (allows updater to find it when event arrives)
+	if err := o.storage.InsertPendingCommit(ctx, round, targetEpoch, merkleRoot[:], checkpoint.BlockNum, clusterBalances); err != nil {
+		return 0, fmt.Errorf("failed to store pending commit: %w", err)
+	}
+
 	tx, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum, round, targetEpoch)
 	if err != nil {
+		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, nil)
 		return 0, fmt.Errorf("failed to commit: %w", err)
 	}
 
 	receipt, err := o.contractClient.WaitForReceipt(ctx, tx)
 	if err != nil {
+		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, tx.Hash().Bytes())
 		return 0, fmt.Errorf("failed waiting for receipt: %w", err)
 	}
 
 	if receipt.Status != 1 {
+		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, tx.Hash().Bytes())
 		return 0, fmt.Errorf("transaction reverted")
 	}
 
-	if err := o.storage.InsertOracleCommit(ctx, round, targetEpoch, merkleRoot[:], checkpoint.BlockNum, tx.Hash().Bytes(), clusterBalances); err != nil {
-		log.Warnw("Failed to store commit", "error", err)
+	if err := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusConfirmed, tx.Hash().Bytes()); err != nil {
+		log.Warnw("Failed to update commit status", "error", err)
 	}
 
 	log.Infow("Committed", "txHash", tx.Hash().Hex())

@@ -63,11 +63,11 @@ Edit `config.yaml`:
 
 ```yaml
 # Network
-eth_rpc: "http://localhost:8545"       # HTTP RPC for transactions
-eth_ws_rpc: "ws://localhost:8546"      # WebSocket for subscriptions (required for --updater)
+eth_rpc: "http://localhost:8545"
+eth_ws_rpc: "ws://localhost:8546"  # Required for --updater
 beacon_rpc: "http://localhost:5052"
 
-# Contract (SSV Network with integrated oracle functionality)
+# Contract
 ssv_contract: "0x..."
 
 # Syncing
@@ -82,8 +82,28 @@ db_name: "ssv_oracle"
 db_user: "oracle"
 db_password_env: "DB_PASSWORD"
 
-# Oracle
-private_key_env: "PRIVATE_KEY"
+# Wallet
+wallet:
+  type: "env"  # env | keystore
+  private_key_env: "PRIVATE_KEY"
+```
+
+### Wallet Configuration
+
+The oracle supports multiple signing backends:
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `env` | Private key from environment variable | Development |
+| `keystore` | Encrypted keystore file | Production |
+
+**Keystore example:**
+```yaml
+wallet:
+  type: "keystore"
+  keystore_path: "/path/to/UTC--...--keystore.json"
+  password_env: "KEYSTORE_PASSWORD"   # or
+  password_file: "/path/to/password.txt"
 ```
 
 ## Oracle Cycle
@@ -149,6 +169,7 @@ ssv-oracle/
 ├── merkle/             Merkle tree construction & encoding
 ├── oracle/             Oracle cycle logic
 ├── updater/            Cluster balance updater
+├── wallet/             Transaction signing (env, keystore)
 └── pkg/ethsync/        Event syncing, beacon client, storage
 ```
 

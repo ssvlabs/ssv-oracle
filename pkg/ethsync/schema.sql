@@ -56,15 +56,18 @@ CREATE TABLE IF NOT EXISTS validators (
 CREATE INDEX IF NOT EXISTS idx_validators_cluster ON validators(cluster_id);
 
 -- Oracle commit history with cluster balances for merkle tree reconstruction
+-- Status: pending (tx sent), confirmed (receipt success), failed (tx reverted)
 CREATE TABLE IF NOT EXISTS oracle_commits (
     round_id BIGINT PRIMARY KEY,
     target_epoch BIGINT NOT NULL,
     merkle_root BYTEA NOT NULL,
     reference_block BIGINT NOT NULL,
     cluster_balances JSONB,
-    tx_hash BYTEA NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    tx_hash BYTEA,
     committed_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_oracle_commits_epoch ON oracle_commits(target_epoch);
 CREATE INDEX IF NOT EXISTS idx_oracle_commits_ref_block ON oracle_commits(reference_block);
+CREATE INDEX IF NOT EXISTS idx_oracle_commits_status ON oracle_commits(status);

@@ -27,6 +27,7 @@ ssv-oracle/
 ├── merkle/             # Merkle tree (Bitcoin/OpenZeppelin standard)
 ├── oracle/             # Main oracle loop
 ├── updater/            # Cluster balance updater
+├── wallet/             # Transaction signing (env, keystore)
 └── pkg/ethsync/        # Event syncing & storage (PostgreSQL)
 ```
 
@@ -89,3 +90,22 @@ ssv_contract: "0x..."                 # SSV Network contract (includes oracle fu
 
 - Chain ID is auto-detected from RPC
 - `eth_ws_rpc` is required when running with `--updater` (event subscriptions need WebSocket)
+
+### Wallet Configuration
+
+The oracle supports multiple signing backends via the `wallet` config section:
+
+```yaml
+wallet:
+  type: "env"                        # "env" or "keystore"
+  private_key_env: "PRIVATE_KEY"     # For type: env
+
+  # For type: keystore
+  # keystore_path: "/path/to/keystore.json"
+  # password_env: "KEYSTORE_PASSWORD"  # Password from env var
+  # password_file: "/path/to/password.txt"  # Or password from file
+```
+
+**Signer Types:**
+- `env`: Read private key from environment variable (simple, for development)
+- `keystore`: Use encrypted keystore file with password (recommended for production)

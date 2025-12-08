@@ -82,7 +82,7 @@ func (u *Updater) Run(ctx context.Context) error {
 					continue
 				}
 				if commit == nil {
-					log.Error("Commit not found - event from unknown source?")
+					log.Warn("Commit not found - event from unknown source?")
 					continue
 				}
 

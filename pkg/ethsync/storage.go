@@ -70,12 +70,22 @@ type ClusterBalance struct {
 	EffectiveBalance uint64
 }
 
+type CommitStatus string
+
+const (
+	CommitStatusPending   CommitStatus = "pending"
+	CommitStatusConfirmed CommitStatus = "confirmed"
+	CommitStatusFailed    CommitStatus = "failed"
+)
+
 type OracleCommit struct {
 	RoundID         uint64
 	TargetEpoch     uint64
 	MerkleRoot      []byte
 	ReferenceBlock  uint64
 	ClusterBalances []ClusterBalance
+	Status          CommitStatus
+	TxHash          []byte
 }
 
 type PostgresStorage struct {
@@ -176,7 +186,9 @@ func (s *PostgresStorage) GetCluster(ctx context.Context, clusterID []byte) (*Cl
 		cluster.OperatorIDs[i] = uint64(id)
 	}
 	cluster.Balance = new(big.Int)
-	cluster.Balance.SetString(balanceStr, 10)
+	if _, ok := cluster.Balance.SetString(balanceStr, 10); !ok {
+		return nil, fmt.Errorf("invalid balance value: %s", balanceStr)
+	}
 
 	return &cluster, nil
 }
@@ -214,37 +226,48 @@ func (s *PostgresStorage) GetActiveValidators(ctx context.Context) ([]ActiveVali
 	return validators, rows.Err()
 }
 
-func (s *PostgresStorage) InsertOracleCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, txHash []byte, clusterBalances []ClusterBalance) error {
+func (s *PostgresStorage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ClusterBalance) error {
 	balancesJSON, err := json.Marshal(clusterBalances)
 	if err != nil {
 		return fmt.Errorf("failed to marshal cluster balances: %w", err)
 	}
 
 	query := `
-		INSERT INTO oracle_commits (round_id, target_epoch, merkle_root, reference_block, cluster_balances, tx_hash)
+		INSERT INTO oracle_commits (round_id, target_epoch, merkle_root, reference_block, cluster_balances, status)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`
-	_, err = s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, txHash)
+	_, err = s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
 	if err != nil {
 		return fmt.Errorf("failed to insert oracle commit: %w", err)
 	}
 	return nil
 }
 
+func (s *PostgresStorage) UpdateCommitStatus(ctx context.Context, roundID uint64, status CommitStatus, txHash []byte) error {
+	query := `UPDATE oracle_commits SET status = $1, tx_hash = $2 WHERE round_id = $3`
+	_, err := s.db.ExecContext(ctx, query, status, txHash, roundID)
+	if err != nil {
+		return fmt.Errorf("failed to update commit status: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
 	query := `
-		SELECT round_id, target_epoch, merkle_root, reference_block, cluster_balances
+		SELECT round_id, target_epoch, merkle_root, reference_block, cluster_balances, status, tx_hash
 		FROM oracle_commits WHERE reference_block = $1
 	`
 	var c OracleCommit
 	var balancesJSON []byte
-	err := s.db.QueryRowContext(ctx, query, blockNum).Scan(&c.RoundID, &c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON)
+	var status string
+	err := s.db.QueryRowContext(ctx, query, blockNum).Scan(&c.RoundID, &c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON, &status, &c.TxHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get commit: %w", err)
 	}
+	c.Status = CommitStatus(status)
 	if balancesJSON != nil {
 		if err := json.Unmarshal(balancesJSON, &c.ClusterBalances); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal cluster balances: %w", err)

@@ -19,6 +19,7 @@ import (
 	"ssv-oracle/pkg/ethsync"
 	"ssv-oracle/pkg/logger"
 	"ssv-oracle/updater"
+	"ssv-oracle/wallet"
 )
 
 var (
@@ -66,8 +67,8 @@ type Config struct {
 	DBUser        string `yaml:"db_user"`
 	DBPasswordEnv string `yaml:"db_password_env"`
 
-	// Oracle
-	PrivateKeyEnv string `yaml:"private_key_env"`
+	// Wallet / Key Management
+	Wallet wallet.Config `yaml:"wallet"`
 
 	// Commit Phases
 	CommitPhases []oracle.CommitPhase `yaml:"commit_phases"`
@@ -84,11 +85,12 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid commit phases: %w", err)
 	}
 
-	// Get private key from environment
-	privateKey := os.Getenv(cfg.PrivateKeyEnv)
-	if privateKey == "" {
-		return fmt.Errorf("private key not found in environment variable %s", cfg.PrivateKeyEnv)
+	// Create wallet signer
+	signer, err := wallet.NewSigner(&cfg.Wallet)
+	if err != nil {
+		return fmt.Errorf("failed to create wallet signer: %w", err)
 	}
+	defer signer.Close()
 
 	// Get database password from environment
 	dbPassword := os.Getenv(cfg.DBPasswordEnv)
@@ -99,6 +101,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	logger.Infow("SSV Oracle starting",
 		"version", Version,
 		"contract", cfg.SSVContract,
+		"signerAddress", signer.Address().Hex(),
 		"updater", withUpdater)
 
 	// 1. Create PostgreSQL storage
@@ -199,7 +202,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	// Create Ethereum client for oracle commits (uses SSV Network contract)
 	// Pass WebSocket URL for event subscriptions (required if running with --updater)
-	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, privateKey)
+	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer)
 	if err != nil {
 		return fmt.Errorf("failed to create Ethereum client: %w", err)
 	}
