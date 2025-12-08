@@ -359,3 +359,11 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
   - Retry + gas bump policy should be tuned so at least one TX from each oracle is likely to make it onchain per round.
 
 ###  SSV Contract Changes
+
+TBD
+
+#### Add Staking module
+
+#### Define Unstaking Window
+
+#### Enable Reward Withdrawals
