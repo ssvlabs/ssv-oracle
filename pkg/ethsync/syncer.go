@@ -295,6 +295,8 @@ func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, 
 		return s.handleClusterWithdrawn(ctx, tx, eventData.(*ClusterWithdrawnEvent), slot)
 	case EventClusterDeposited:
 		return s.handleClusterDeposited(ctx, tx, eventData.(*ClusterDepositedEvent), slot)
+	case EventClusterBalanceUpdated:
+		return s.handleClusterBalanceUpdated(ctx, tx, eventData.(*ClusterBalanceUpdatedEvent), slot)
 	default:
 		return fmt.Errorf("unknown event type: %s", eventType)
 	}
@@ -416,6 +418,26 @@ func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *
 	return tx.UpsertCluster(ctx, cluster)
 }
 
+// handleClusterBalanceUpdated updates the cluster state after an updateClusterBalance call.
+// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
+// Once updated, this handler will properly update cluster state after effective balance updates.
+func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, event *ClusterBalanceUpdatedEvent, slot uint64) error {
+	clusterID := ComputeClusterID(event.Owner, event.OperatorIDs)
+
+	cluster := &ClusterRow{
+		ClusterID:       clusterID[:],
+		OwnerAddress:    event.Owner.Bytes(),
+		OperatorIDs:     event.OperatorIDs,
+		ValidatorCount:  event.Cluster.ValidatorCount,
+		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
+		Index:           event.Cluster.Index,
+		IsActive:        event.Cluster.Active,
+		Balance:         event.Cluster.Balance,
+		LastUpdatedSlot: slot,
+	}
+	return tx.UpsertCluster(ctx, cluster)
+}
+
 // computeClusterIDFromEvent extracts owner and operatorIDs from event data and computes cluster ID.
 // Returns nil for unknown event types.
 func computeClusterIDFromEvent(eventData interface{}) []byte {
@@ -436,6 +458,9 @@ func computeClusterIDFromEvent(eventData interface{}) []byte {
 		id := ComputeClusterID(e.Owner, e.OperatorIDs)
 		return id[:]
 	case *ClusterDepositedEvent:
+		id := ComputeClusterID(e.Owner, e.OperatorIDs)
+		return id[:]
+	case *ClusterBalanceUpdatedEvent:
 		id := ComputeClusterID(e.Owner, e.OperatorIDs)
 		return id[:]
 	default:

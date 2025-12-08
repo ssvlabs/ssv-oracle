@@ -14,12 +14,13 @@ import (
 // Based on ssvlabs/ssv-network ISSVClusters interface
 
 const (
-	EventValidatorAdded     = "ValidatorAdded"
-	EventValidatorRemoved   = "ValidatorRemoved"
-	EventClusterLiquidated  = "ClusterLiquidated"
-	EventClusterReactivated = "ClusterReactivated"
-	EventClusterWithdrawn   = "ClusterWithdrawn"
-	EventClusterDeposited   = "ClusterDeposited"
+	EventValidatorAdded        = "ValidatorAdded"
+	EventValidatorRemoved      = "ValidatorRemoved"
+	EventClusterLiquidated     = "ClusterLiquidated"
+	EventClusterReactivated    = "ClusterReactivated"
+	EventClusterWithdrawn      = "ClusterWithdrawn"
+	EventClusterDeposited      = "ClusterDeposited"
+	EventClusterBalanceUpdated = "ClusterBalanceUpdated"
 )
 
 // Event signatures (keccak256 of event signature)
@@ -31,6 +32,12 @@ var (
 	EventSigClusterReactivated = crypto.Keccak256Hash([]byte("ClusterReactivated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterWithdrawn   = crypto.Keccak256Hash([]byte("ClusterWithdrawn(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterDeposited   = crypto.Keccak256Hash([]byte("ClusterDeposited(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
+
+	// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
+	// Current signature: ClusterBalanceUpdated(bytes32,uint64,uint256,uint64)
+	// Future signature:  ClusterBalanceUpdated(address,uint64[],uint256,uint64,(uint32,uint64,uint64,bool,uint256))
+	// Update this signature once contract is deployed with the new event format.
+	EventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(address,uint64[],uint256,uint64,(uint32,uint64,uint64,bool,uint256))"))
 )
 
 // Cluster represents an SSV cluster state.
@@ -91,6 +98,17 @@ type ClusterDepositedEvent struct {
 	OperatorIDs []uint64
 	Value       *big.Int
 	Cluster     Cluster
+}
+
+// ClusterBalanceUpdatedEvent represents the ClusterBalanceUpdated event.
+// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
+// Once updated, this event will be used to update cluster state after updateClusterBalance calls.
+type ClusterBalanceUpdatedEvent struct {
+	Owner            common.Address
+	OperatorIDs      []uint64
+	EffectiveBalance *big.Int
+	VUnits           uint64
+	Cluster          Cluster
 }
 
 // ComputeClusterID computes the cluster ID from owner address and operator IDs.

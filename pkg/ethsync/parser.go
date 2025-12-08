@@ -50,6 +50,9 @@ func (p *EventParser) ParseLog(log *types.Log) (string, interface{}, error) {
 	case EventSigClusterDeposited:
 		event, err := p.parseClusterDeposited(log)
 		return EventClusterDeposited, event, err
+	case EventSigClusterBalanceUpdated:
+		event, err := p.parseClusterBalanceUpdated(log)
+		return EventClusterBalanceUpdated, event, err
 	default:
 		return "", nil, fmt.Errorf("unknown event signature: %s", eventSig.Hex())
 	}
@@ -69,13 +72,7 @@ func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent,
 		OperatorIds []uint64
 		PublicKey   []byte
 		Shares      []byte
-		Cluster     struct {
-			ValidatorCount  uint32
-			NetworkFeeIndex uint64
-			Index           uint64
-			Active          bool
-			Balance         *big.Int
-		}
+		Cluster     Cluster
 	}
 
 	err := p.abi.UnpackIntoInterface(&result, "ValidatorAdded", log.Data)
@@ -86,13 +83,7 @@ func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent,
 	event.OperatorIDs = result.OperatorIds
 	event.PublicKey = result.PublicKey
 	event.Shares = result.Shares
-	event.Cluster = Cluster{
-		ValidatorCount:  result.Cluster.ValidatorCount,
-		NetworkFeeIndex: result.Cluster.NetworkFeeIndex,
-		Index:           result.Cluster.Index,
-		Active:          result.Cluster.Active,
-		Balance:         result.Cluster.Balance,
-	}
+	event.Cluster = result.Cluster
 
 	return event, nil
 }
@@ -108,13 +99,7 @@ func (p *EventParser) parseValidatorRemoved(log *types.Log) (*ValidatorRemovedEv
 	var result struct {
 		OperatorIds []uint64
 		PublicKey   []byte
-		Cluster     struct {
-			ValidatorCount  uint32
-			NetworkFeeIndex uint64
-			Index           uint64
-			Active          bool
-			Balance         *big.Int
-		}
+		Cluster     Cluster
 	}
 
 	err := p.abi.UnpackIntoInterface(&result, "ValidatorRemoved", log.Data)
@@ -124,13 +109,7 @@ func (p *EventParser) parseValidatorRemoved(log *types.Log) (*ValidatorRemovedEv
 
 	event.OperatorIDs = result.OperatorIds
 	event.PublicKey = result.PublicKey
-	event.Cluster = Cluster{
-		ValidatorCount:  result.Cluster.ValidatorCount,
-		NetworkFeeIndex: result.Cluster.NetworkFeeIndex,
-		Index:           result.Cluster.Index,
-		Active:          result.Cluster.Active,
-		Balance:         result.Cluster.Balance,
-	}
+	event.Cluster = result.Cluster
 
 	return event, nil
 }
@@ -145,13 +124,7 @@ func (p *EventParser) parseClusterLiquidated(log *types.Log) (*ClusterLiquidated
 
 	var result struct {
 		OperatorIds []uint64
-		Cluster     struct {
-			ValidatorCount  uint32
-			NetworkFeeIndex uint64
-			Index           uint64
-			Active          bool
-			Balance         *big.Int
-		}
+		Cluster     Cluster
 	}
 
 	err := p.abi.UnpackIntoInterface(&result, "ClusterLiquidated", log.Data)
@@ -160,13 +133,7 @@ func (p *EventParser) parseClusterLiquidated(log *types.Log) (*ClusterLiquidated
 	}
 
 	event.OperatorIDs = result.OperatorIds
-	event.Cluster = Cluster{
-		ValidatorCount:  result.Cluster.ValidatorCount,
-		NetworkFeeIndex: result.Cluster.NetworkFeeIndex,
-		Index:           result.Cluster.Index,
-		Active:          result.Cluster.Active,
-		Balance:         result.Cluster.Balance,
-	}
+	event.Cluster = result.Cluster
 
 	return event, nil
 }
@@ -181,13 +148,7 @@ func (p *EventParser) parseClusterReactivated(log *types.Log) (*ClusterReactivat
 
 	var result struct {
 		OperatorIds []uint64
-		Cluster     struct {
-			ValidatorCount  uint32
-			NetworkFeeIndex uint64
-			Index           uint64
-			Active          bool
-			Balance         *big.Int
-		}
+		Cluster     Cluster
 	}
 
 	err := p.abi.UnpackIntoInterface(&result, "ClusterReactivated", log.Data)
@@ -196,13 +157,7 @@ func (p *EventParser) parseClusterReactivated(log *types.Log) (*ClusterReactivat
 	}
 
 	event.OperatorIDs = result.OperatorIds
-	event.Cluster = Cluster{
-		ValidatorCount:  result.Cluster.ValidatorCount,
-		NetworkFeeIndex: result.Cluster.NetworkFeeIndex,
-		Index:           result.Cluster.Index,
-		Active:          result.Cluster.Active,
-		Balance:         result.Cluster.Balance,
-	}
+	event.Cluster = result.Cluster
 
 	return event, nil
 }
@@ -218,13 +173,7 @@ func (p *EventParser) parseClusterWithdrawn(log *types.Log) (*ClusterWithdrawnEv
 	var result struct {
 		OperatorIds []uint64
 		Value       *big.Int
-		Cluster     struct {
-			ValidatorCount  uint32
-			NetworkFeeIndex uint64
-			Index           uint64
-			Active          bool
-			Balance         *big.Int
-		}
+		Cluster     Cluster
 	}
 
 	err := p.abi.UnpackIntoInterface(&result, "ClusterWithdrawn", log.Data)
@@ -234,13 +183,7 @@ func (p *EventParser) parseClusterWithdrawn(log *types.Log) (*ClusterWithdrawnEv
 
 	event.OperatorIDs = result.OperatorIds
 	event.Value = result.Value
-	event.Cluster = Cluster{
-		ValidatorCount:  result.Cluster.ValidatorCount,
-		NetworkFeeIndex: result.Cluster.NetworkFeeIndex,
-		Index:           result.Cluster.Index,
-		Active:          result.Cluster.Active,
-		Balance:         result.Cluster.Balance,
-	}
+	event.Cluster = result.Cluster
 
 	return event, nil
 }
@@ -256,13 +199,7 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 	var result struct {
 		OperatorIds []uint64
 		Value       *big.Int
-		Cluster     struct {
-			ValidatorCount  uint32
-			NetworkFeeIndex uint64
-			Index           uint64
-			Active          bool
-			Balance         *big.Int
-		}
+		Cluster     Cluster
 	}
 
 	err := p.abi.UnpackIntoInterface(&result, "ClusterDeposited", log.Data)
@@ -272,13 +209,38 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 
 	event.OperatorIDs = result.OperatorIds
 	event.Value = result.Value
-	event.Cluster = Cluster{
-		ValidatorCount:  result.Cluster.ValidatorCount,
-		NetworkFeeIndex: result.Cluster.NetworkFeeIndex,
-		Index:           result.Cluster.Index,
-		Active:          result.Cluster.Active,
-		Balance:         result.Cluster.Balance,
+	event.Cluster = result.Cluster
+
+	return event, nil
+}
+
+// parseClusterBalanceUpdated parses the ClusterBalanceUpdated event.
+// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
+// Once updated, update this parser to match the new event format.
+func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanceUpdatedEvent, error) {
+	event := &ClusterBalanceUpdatedEvent{}
+
+	if len(log.Topics) < 2 {
+		return nil, fmt.Errorf("missing owner topic")
 	}
+	event.Owner = common.BytesToAddress(log.Topics[1].Bytes())
+
+	var result struct {
+		OperatorIds      []uint64
+		EffectiveBalance *big.Int
+		VUnits           uint64
+		Cluster          Cluster
+	}
+
+	err := p.abi.UnpackIntoInterface(&result, "ClusterBalanceUpdated", log.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unpack ClusterBalanceUpdated: %w", err)
+	}
+
+	event.OperatorIDs = result.OperatorIds
+	event.EffectiveBalance = result.EffectiveBalance
+	event.VUnits = result.VUnits
+	event.Cluster = result.Cluster
 
 	return event, nil
 }
