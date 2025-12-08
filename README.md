@@ -14,7 +14,7 @@ Off-chain oracle client that publishes Merkle roots of SSV cluster effective bal
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker (for PostgreSQL)
 - Ethereum execution client (RPC endpoint)
 - Beacon node (REST API endpoint)
@@ -48,6 +48,8 @@ make fresh        # Fresh start (reset DB)
 make fresh-all    # Fresh start with updater
 make test         # Run tests
 make lint         # Run linters
+make docker       # Build Docker image
+make clean        # Remove build artifacts
 ```
 
 **CLI flags:**

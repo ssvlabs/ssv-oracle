@@ -8,6 +8,7 @@ ssv-oracle
 # Test files
 *_test.go
 testdata/
+coverage.*
 
 # Documentation
 *.md
@@ -31,5 +32,14 @@ Dockerfile
 .dockerignore
 docker-compose*.yaml
 
+# Config (may contain secrets)
+.env*
+config.yaml
+
+# AI assistant
+.claude/
+CLAUDE.md
+
 # Misc
 .DS_Store
+*.log

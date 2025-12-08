@@ -1,4 +1,4 @@
-.PHONY: help build test lint run run-all fresh fresh-all db-up db-wait
+.PHONY: help build test lint run run-all fresh fresh-all db-up db-wait docker clean
 .DEFAULT_GOAL := help
 
 # Load .env file if it exists
@@ -7,7 +7,9 @@ export
 
 # Build info
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -ldflags="-X main.Version=$(VERSION) -s -w"
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+LDFLAGS := -ldflags="-X main.Version=$(VERSION) -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME) -s -w"
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -50,3 +52,15 @@ db-wait:
 	@echo "Waiting for PostgreSQL..."
 	@until docker-compose exec -T postgres pg_isready -U oracle > /dev/null 2>&1; do sleep 0.5; done
 	@echo "✓ PostgreSQL ready"
+
+docker: ## Build Docker image
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		-t ssv-oracle:$(VERSION) \
+		-t ssv-oracle:latest \
+		.
+
+clean: ## Remove build artifacts
+	rm -f ssv-oracle
