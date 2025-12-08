@@ -1,34 +1,32 @@
 # SSV Staking
 
-We introduce SSV staking V1, a brand new feature that will allow SSV stakers to perform useful work for the SSV network in exchange for rewards.
-Stakers will run oracle services that will report the correct effective balance (EB) of each SSV cluster to the SSV Network contract.
-This will ensure that all fees are calculated proportionally to the expected rewards of the cluster.
+We introduce SSV staking V1, a brand-new feature that will allow SSV stakers to perform useful work for the SSV network in exchange for rewards.
+Stakers will run oracle services that report the correct effective balance (EB) of each SSV cluster to the SSV Network contract.
+This ensures that all fees are calculated proportionally to the expected rewards of the cluster.
 
-Since updating all clusters is a costly operation, we divide the work between 2 actors:
-1. *SSV Oracles* - that can only participate in behalf of stakers. They post a single small commitment of the effective balances of **all** clusters in each phase.
-2. *Cluster Updaters* - Permissionless parties that post the actual verifiable EBs. Any data that won't be verified against the commitment will be rejected.
+Since updating all clusters is a costly operation, we divide the work between two actors:
+1. *SSV Oracles* – which can only participate on behalf of stakers. They post a single small commitment of the effective balances of **all** clusters in each phase.
+2. *Cluster Updaters* – permissionless parties that post the actual verifiable EBs. Any data that cannot be verified against the commitment will be rejected.
 
-Cluster updaters will only be able to vote on commits that gained some threshold of votes.
-The parties will be incentivized to act in a honest manner. The incentives will come from network fees collected from cluster owners and pooled in the SSV Network contract.
-Each staker will be able to withdraw its relative part according to the weight of its correct votes.
+Cluster updaters will only be able to vote on commits that have reached a predefined voting threshold.
+The parties will be incentivized to act in an honest manner. The incentives will come from network fees collected from cluster owners and pooled in the SSV Network contract.
+Each staker will be able to withdraw its proportional share according to the weight of its correct votes.
 
 ## V1
 
-In the first release phase we focus on simplicity:
-  - There will be 4 permissioned SSV oracles. 
+In the first release phase, we focus on simplicity:
+  - There will be four permissioned SSV oracles.
   - One of the oracles will volunteer to be a Cluster Updater.
   - It is possible to stake, but all oracles will have the same weight.
   - A threshold of 75% of the weight will allow the commitment to be accepted.
-  - Stakers will be able to withdraw amount proportional to their stake.
+  - Stakers will be able to withdraw an amount proportional to their stake.
  
 
-###  SSV Oracle
+### SSV Oracle
 
 This section specifies the **offchain oracle client** that periodically publishes a Merkle root of **effective balances of all SSV clusters** to an onchain oracle contract.
 
 #### 1. Summary
-
-
 The client will:
 
 - Read **commit phase configuration** (`startEpoch`, `epochInterval`) from a shared oracle commit phase configuration source.
@@ -45,7 +43,7 @@ The client will:
 
 ##### 2.1 Commit Phase Configuration
 
-Commit Phase Configuration:
+Commit phase configuration:
 
 ```
 Procedure getOracleCommitPhaseConfig(referenceEpoch) returns (startEpoch, epochInterval);
@@ -56,7 +54,7 @@ Procedure getOracleCommitPhaseConfig(referenceEpoch) returns (startEpoch, epochI
 
 The client obtains these values (for example, from an onchain contract or shared configuration) and MUST support dynamic configuration transitions.
 
-For example, given a configuration with algebraic value placeholders:
+For example, given a configuration with algebraic placeholders:
 ```yml
 # Do not edit default values
 - commit-phase-config:
@@ -66,7 +64,7 @@ For example, given a configuration with algebraic value placeholders:
 	- secondInterval: b
 ```
 
-the configuration function behaves as:
+the configuration function behaves as follows:
 ```python
 if referenceEpoch >= y:
 	return (y,b)
@@ -102,7 +100,7 @@ After each successful commit for a given `round`, the client increments `round` 
 
 Every time data is polled for an `epoch` it MUST be finalized. Finality can be checked via the beacon API: `/eth/v1/beacon/states/head/finality_checkpoints`.
 
-If `epoch <= finalizedEpoch` then it is eligible for data polling.
+If `epoch <= finalizedEpoch`, then it is eligible for data polling.
 Only epochs calculated as targets will be polled.
 
 ##### 3.2 Data Sources
@@ -167,13 +165,13 @@ function commitRoot(
     uint64  blockNum
 ) external;
 ```
-When a committed root is accepted with a threshold of weight:
+When a committed root is accepted with a sufficient threshold of weight:
 ```solidity
 event RootCommitted(bytes32 merkleRoot, uint64 blockNum);
 ```
 
 - `merkleRoot` – Merkle root of all cluster effective balances for `targetEpoch`.
-- `blockNum` – The blockNumber that maps to the checkpoint of the `targetEpoch`.
+- `blockNum` – The block number that maps to the checkpoint of the `targetEpoch`.
 
 
 Contract responsibilities:
@@ -284,9 +282,9 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
    - If `epochInterval == 0`, log an error and abort (misconfiguration).
 
 2. **Calculate current round**
-   - If can not be fetched from memory:
-    - Obtain `latestFinalizedEpoch` from the beacon node.
-    - Compute `round = ceil((latestFinalizedEpoch - startEpoch) / epochInterval)`.
+   - If it cannot be fetched from memory:
+     - Obtain `latestFinalizedEpoch` from the beacon node.
+     - Compute `round = ceil((latestFinalizedEpoch - startEpoch) / epochInterval)`.
 
 3. **Compute targetEpoch & roundId**
    - Compute:
@@ -296,7 +294,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
    - Check if `targetEpoch` is finalized via consensus node before proceeding.
 
 4. **Idempotency check (already committed?)**
-   - If epoch finalized, find the checkpoint's `BlockNum`
+   - If the epoch is finalized, find the checkpoint's `BlockNum`.
    - From local DB and/or onchain state, check:
      - If this oracle address already has a successful commit for a block number greater than or equal to `blockNum`.
    - If yes, abort this cycle (nothing to do).
@@ -312,7 +310,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
    
 
 6. **Build Merkle root**
-   - Encode and sort as in section 5
+   - Encode and sort as in section 5.
 
 7. **Construct and sign TX**
    - Call `commitRoot`.
@@ -335,7 +333,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
          - Bump gas (e.g. multiply `maxFee` and/or `maxPriorityFee` by `gas_bump_factor`).
          - Resubmit a new TX and update `retryCount`.
       3. If still not committed after max retries:
-         - Log permanent failure for this round. Wait for manual intervention. 
+         - Log permanent failure for this round and wait for manual intervention.
 
 10. **Optional: update cluster balance**
     - Listen to the `RootCommitted(merkleRoot, blockNum, block.timestamp)` event and validate the correct `merkleRoot` is constructed for `blockNum`.
@@ -358,7 +356,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 - **Liveness**
   - Retry + gas bump policy should be tuned so at least one TX from each oracle is likely to make it onchain per round.
 
-###  SSV Contract Changes
+### SSV Contract Changes
 
 TBD
 
