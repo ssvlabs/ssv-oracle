@@ -189,8 +189,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	currentPhase := oracle.GetPhaseForEpoch(cfg.CommitPhases, 0)
 	logger.Infow("Commit phases configured",
 		"phases", len(cfg.CommitPhases),
-		"firstStartEpoch", currentPhase.StartEpoch,
-		"firstInterval", currentPhase.Interval)
+		"startEpoch", currentPhase.StartEpoch,
+		"interval", currentPhase.Interval)
 
 	// WebSocket URL is required for event subscriptions when running with --updater
 	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer, &cfg.TxPolicy)

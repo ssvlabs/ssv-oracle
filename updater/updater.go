@@ -15,6 +15,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+const (
+	subscribeRetryDelay = 10 * time.Second
+	reconnectDelay      = 5 * time.Second
+)
+
 // storage defines the interface the updater needs for persistence.
 type storage interface {
 	GetCluster(ctx context.Context, clusterID []byte) (*ethsync.ClusterRow, error)
@@ -43,14 +48,12 @@ func New(cfg *Config) *Updater {
 
 // Run starts the updater main loop, listening for RootCommitted events.
 func (u *Updater) Run(ctx context.Context) error {
-	logger.Info("Updater started")
-
 	for {
 		events, errChan, err := u.contractClient.SubscribeRootCommitted(ctx, nil)
 		if err != nil {
-			logger.Errorw("Failed to subscribe, retrying in 10s", "error", err)
+			logger.Errorw("Failed to subscribe, retrying", "error", err)
 			select {
-			case <-time.After(10 * time.Second):
+			case <-time.After(subscribeRetryDelay):
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -78,7 +81,7 @@ func (u *Updater) Run(ctx context.Context) error {
 
 				log := logger.With("blockNum", event.BlockNum)
 				log.Infow("Received RootCommitted",
-					"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot[:8]))
+					"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
 
 				commit, err := u.storage.GetCommitByBlock(ctx, event.BlockNum)
 				if err != nil {
@@ -100,9 +103,9 @@ func (u *Updater) Run(ctx context.Context) error {
 			}
 		}
 
-		logger.Info("Pausing 5s before reconnecting")
+		logger.Info("Reconnecting")
 		select {
-		case <-time.After(5 * time.Second):
+		case <-time.After(reconnectDelay):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -113,7 +116,7 @@ func (u *Updater) Run(ctx context.Context) error {
 func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommit) error {
 	log := logger.With("blockNum", commit.ReferenceBlock, "targetEpoch", commit.TargetEpoch)
 	log.Infow("Processing root",
-		"committedRoot", fmt.Sprintf("0x%x", commit.MerkleRoot[:8]))
+		"committedRoot", fmt.Sprintf("0x%x", commit.MerkleRoot))
 
 	if len(commit.ClusterBalances) == 0 {
 		log.Info("No clusters to update")
@@ -127,18 +130,15 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 		var clusterID [32]byte
 		copy(clusterID[:], bal.ClusterID)
 		clusterMap[clusterID] = bal.EffectiveBalance
-		logger.Debugw("Cluster balance",
-			"clusterID", fmt.Sprintf("%x", bal.ClusterID[:8]),
-			"balance", bal.EffectiveBalance)
 	}
 
 	tree := merkle.BuildMerkleTreeWithProofs(clusterMap)
 	log.Infow("Merkle tree built",
-		"root", fmt.Sprintf("0x%x", tree.Root[:8]))
+		"root", fmt.Sprintf("0x%x", tree.Root))
 
 	if !bytes.Equal(tree.Root[:], commit.MerkleRoot) {
 		return fmt.Errorf("root mismatch: computed=0x%x, committed=0x%x",
-			tree.Root[:8], commit.MerkleRoot[:8])
+			tree.Root, commit.MerkleRoot)
 	}
 
 	log.Infow("Root validated, processing clusters", "count", len(commit.ClusterBalances))
@@ -149,7 +149,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 	for _, leaf := range tree.Leaves {
 		if err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree); err != nil {
 			logger.Warnw("Failed to process cluster",
-				"clusterID", fmt.Sprintf("%x", leaf.ClusterID[:8]),
+				"clusterID", fmt.Sprintf("%x", leaf.ClusterID),
 				"error", err)
 			errors++
 			continue
@@ -165,7 +165,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 }
 
 func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) error {
-	clusterID := fmt.Sprintf("%x", leaf.ClusterID[:8])
+	clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
 	cluster, err := u.storage.GetCluster(ctx, leaf.ClusterID[:])
 	if err != nil {

@@ -24,6 +24,11 @@ var (
 	ErrMaxRetriesExhausted = errors.New("max retries exhausted")
 )
 
+const (
+	receiptPollInterval = 2 * time.Second
+	simpleTransferGas   = 21000
+)
+
 // errorSelectors maps custom error selectors to human-readable names.
 // Set via SetErrorSelectors, typically from contract.ErrorSelectors.
 var errorSelectors map[string]string
@@ -277,7 +282,7 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 		return nil, fmt.Errorf("failed to get block number: %w", err)
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(receiptPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -289,6 +294,7 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 			if err == nil {
 				return receipt, nil
 			}
+			logger.Debugw("Receipt not found", "hash", tx.Hash().Hex(), "error", err)
 
 			currentBlock, err := m.client.BlockNumber(ctx)
 			if err != nil {
@@ -321,7 +327,7 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 		Nonce:     nonce,
 		GasTipCap: gasFeeCap,
 		GasFeeCap: gasFeeCap,
-		Gas:       21000, // Simple transfer
+		Gas:       simpleTransferGas,
 		To:        &from,
 		Value:     big.NewInt(0),
 	})

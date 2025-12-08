@@ -1,57 +1,44 @@
-# SSV Oracle Configuration Example
-# Copy this file to config.yaml and update values for your environment.
+# SSV Oracle Configuration
+# Copy to config.yaml and update for your environment.
 
 # ============================================================================
 # Ethereum & Beacon Chain
 # ============================================================================
 
-# Ethereum Execution Layer RPC endpoint (HTTP - for transactions and queries)
-eth_rpc: "http://127.0.0.1:8545"
-
-# Ethereum Execution Layer WebSocket endpoint (for event subscriptions)
-# Required if running with --updater flag
-eth_ws_rpc: "ws://127.0.0.1:8546"
-
-# Beacon Chain (Consensus Layer) API endpoint (for effective balances and finalization)
-beacon_rpc: "http://127.0.0.1:5052"
+eth_rpc: "http://127.0.0.1:8545"       # Execution layer (HTTP)
+eth_ws_rpc: "ws://127.0.0.1:8546"      # Execution layer (WebSocket, required for --updater)
+beacon_rpc: "http://127.0.0.1:5052"    # Consensus layer
 
 # ============================================================================
 # Contract
 # ============================================================================
 
-# SSV Network contract address (includes oracle functionality)
 ssv_contract: "0x..."
 
 # ============================================================================
-# Event Syncing Configuration
+# Database
 # ============================================================================
 
-# Block number when SSV contract was deployed (start syncing from here)
-sync_from_block: 0
-
-# Blocks to process per batch (smaller = faster progress updates)
-sync_batch_size: 1000
-
-# Max retry attempts for RPC failures
-sync_max_retries: 3
-
-# ============================================================================
-# Database Configuration
-# ============================================================================
-
-# PostgreSQL connection
 db_host: "localhost"
 db_port: 5432
 db_name: "ssv_oracle"
 db_user: "oracle"
-db_password_env: "DB_PASSWORD"  # Read password from this environment variable
+db_password_env: "DB_PASSWORD"         # Read password from this env var
 
 # ============================================================================
-# Wallet Configuration
+# Event Syncing
+# ============================================================================
+
+sync_from_block: 0                     # Block when SSV contract was deployed
+sync_batch_size: 1000                  # Blocks per batch
+sync_max_retries: 3                    # Max RPC retry attempts
+
+# ============================================================================
+# Wallet
 # ============================================================================
 
 wallet:
-  type: "env"  # env | keystore
+  type: "env"                          # env | keystore
   private_key_env: "PRIVATE_KEY"
   # keystore_path: "/path/to/keystore.json"
   # password_env: "KEYSTORE_PASSWORD"
@@ -61,21 +48,19 @@ wallet:
 # Transaction Policy
 # ============================================================================
 
-# Controls gas estimation, retries, bumping, and cancellation
 tx_policy:
-  gas_buffer_percent: 20        # Add 20% to estimated gas to prevent out-of-gas
-  max_fee_per_gas: "100 gwei"   # Never exceed this gas price
-  pending_timeout_blocks: 10    # Blocks to wait before bumping gas
-  gas_bump_percent: 10          # Minimum 10% bump for replace-by-fee
-  max_retries: 3                # Retry attempts before cancellation
-  retry_delay: 5s               # Delay between retries
+  gas_buffer_percent: 20               # Added to gas estimates
+  max_fee_per_gas: "100 gwei"          # Hard cap on gas price
+  pending_timeout_blocks: 10           # Blocks before bumping
+  gas_bump_percent: 10                 # Min bump for replace-by-fee
+  max_retries: 3                       # Attempts before cancellation
+  retry_delay: 5s
 
 # ============================================================================
 # Commit Phases
 # ============================================================================
 
-# Phases define when oracle commits happen. Each has start_epoch and interval.
-# Multiple phases allow changing interval over time (must be sorted by start_epoch).
+# Phases define commit schedule. Multiple phases allow changing interval over time.
 commit_phases:
-  - start_epoch: 0  # First epoch where oracle should commit
-    interval: 225   # Commit every 225 epochs
+  - start_epoch: 0                     # First epoch to commit
+    interval: 225                      # Commit every N epochs

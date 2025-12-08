@@ -111,11 +111,11 @@ func ComputeClusterID(owner common.Address, operatorIDs []uint64) [32]byte {
 		return sortedIDs[i] < sortedIDs[j]
 	})
 
-	data := make([]byte, 0, 20+(32*len(sortedIDs)))
+	data := make([]byte, 0, common.AddressLength+(common.HashLength*len(sortedIDs)))
 	data = append(data, owner.Bytes()...)
 
 	for _, id := range sortedIDs {
-		idBytes := make([]byte, 32)
+		idBytes := make([]byte, common.HashLength)
 		big.NewInt(int64(id)).FillBytes(idBytes)
 		data = append(data, idBytes...)
 	}

@@ -13,6 +13,8 @@ import (
 	"ssv-oracle/pkg/logger"
 )
 
+const errorRetryDelay = 10 * time.Second
+
 // storage defines the interface the oracle needs for persistence.
 type storage interface {
 	GetActiveValidators(ctx context.Context) ([]ethsync.ActiveValidator, error)
@@ -45,22 +47,10 @@ func New(cfg *Config) *Oracle {
 
 // Run starts the oracle main loop, committing roots at each target epoch.
 func (o *Oracle) Run(ctx context.Context, syncer *ethsync.EventSyncer, beaconClient *ethsync.BeaconClient) error {
-	logger.Info("Oracle started")
-
 	spec, err := beaconClient.GetSpec(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get beacon spec: %w", err)
 	}
-	logger.Infow("Beacon spec loaded",
-		"genesis", spec.GenesisTime.Format(time.RFC3339),
-		"slotsPerEpoch", spec.SlotsPerEpoch,
-		"slotDuration", spec.SlotDuration)
-
-	firstPhase := o.phases[0]
-	logger.Infow("Commit phases configured",
-		"phases", len(o.phases),
-		"firstStartEpoch", firstPhase.StartEpoch,
-		"firstInterval", firstPhase.Interval)
 
 	var lastTargetEpoch uint64
 	for {
@@ -71,7 +61,7 @@ func (o *Oracle) Run(ctx context.Context, syncer *ethsync.EventSyncer, beaconCli
 				return ctx.Err()
 			}
 			logger.Errorw("Commit failed", "error", err)
-			time.Sleep(10 * time.Second)
+			time.Sleep(errorRetryDelay)
 			continue
 		}
 		lastTargetEpoch = targetEpoch
@@ -135,7 +125,7 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 
 	merkleRoot := merkle.BuildMerkleTree(clusterMap)
 	log.Infow("Merkle tree built",
-		"root", fmt.Sprintf("0x%x", merkleRoot[:8]),
+		"root", fmt.Sprintf("0x%x", merkleRoot),
 		"clusters", len(clusterBalances))
 
 	// Store commit as pending before sending tx (allows updater to find it when event arrives)

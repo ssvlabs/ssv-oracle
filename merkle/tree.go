@@ -123,7 +123,7 @@ func (t *MerkleTree) GetProof(clusterID [32]byte) ([][32]byte, error) {
 		}
 	}
 	if leafIndex == -1 {
-		return nil, fmt.Errorf("cluster %x not found in tree", clusterID[:8])
+		return nil, fmt.Errorf("cluster %x not found in tree", clusterID)
 	}
 
 	var proof [][32]byte

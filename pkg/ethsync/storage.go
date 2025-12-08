@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/lib/pq"
 
 	"ssv-oracle/pkg/logger"
@@ -414,8 +415,8 @@ func deleteCluster(ctx context.Context, e executor, clusterID []byte) error {
 }
 
 func insertValidator(ctx context.Context, e executor, clusterID, pubkey []byte) error {
-	if len(pubkey) != 48 {
-		return fmt.Errorf("invalid validator pubkey length: got %d, expected 48", len(pubkey))
+	if len(pubkey) != phase0.PublicKeyLength {
+		return fmt.Errorf("invalid validator pubkey length: got %d, expected %d", len(pubkey), phase0.PublicKeyLength)
 	}
 	_, err := e.ExecContext(ctx,
 		`INSERT INTO validators (cluster_id, validator_pubkey) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
