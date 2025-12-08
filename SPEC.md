@@ -224,7 +224,6 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
    - Tracks TX lifecycle and implements retry logic.
 
 7. **Wallet / Key Management**
-   - Local keystore / HSM / KMS / remote signer.
    - Signs EIP-1559 transactions.
    - Ensures the private key is never exposed in raw form in logs or configuration.
 
