@@ -28,6 +28,7 @@ ssv-oracle/
 ├── oracle/             # Main oracle loop
 ├── updater/            # Cluster balance updater
 ├── wallet/             # Transaction signing (env, keystore)
+├── txmanager/          # Transaction lifecycle (gas, retries, cancellation)
 └── pkg/ethsync/        # Event syncing & storage (PostgreSQL)
 ```
 
@@ -109,3 +110,19 @@ wallet:
 **Signer Types:**
 - `env`: Read private key from environment variable (simple, for development)
 - `keystore`: Use encrypted keystore file with password (recommended for production)
+
+### Transaction Policy (txmanager/)
+
+Automatic transaction management with gas bumping, retries, and cancellation:
+
+```yaml
+tx_policy:
+  gas_buffer_percent: 20        # Add 20% to gas estimates
+  max_fee_per_gas: "100 gwei"   # Hard cap on gas price
+  pending_timeout_blocks: 10    # Blocks before bumping
+  gas_bump_percent: 10          # Minimum bump for RBF (EIP-1559 requires ≥10%)
+  max_retries: 3                # Attempts before cancellation
+  retry_delay: 5s               # Delay between retries
+```
+
+**Lifecycle:** estimate gas → submit tx → monitor blocks → bump if stuck → cancel if max reached

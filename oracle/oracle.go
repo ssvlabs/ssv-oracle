@@ -139,28 +139,22 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		return 0, fmt.Errorf("failed to store pending commit: %w", err)
 	}
 
-	tx, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum, round, targetEpoch)
+	// TxManager handles gas estimation, bumping, retries, and cancellation
+	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum, round, targetEpoch)
 	if err != nil {
-		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, nil)
+		var txHash []byte
+		if receipt != nil {
+			txHash = receipt.TxHash.Bytes()
+		}
+		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, txHash)
 		return 0, fmt.Errorf("failed to commit: %w", err)
 	}
 
-	receipt, err := o.contractClient.WaitForReceipt(ctx, tx)
-	if err != nil {
-		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, tx.Hash().Bytes())
-		return 0, fmt.Errorf("failed waiting for receipt: %w", err)
-	}
-
-	if receipt.Status != 1 {
-		_ = o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, tx.Hash().Bytes())
-		return 0, fmt.Errorf("transaction reverted")
-	}
-
-	if err := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusConfirmed, tx.Hash().Bytes()); err != nil {
+	if err := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusConfirmed, receipt.TxHash.Bytes()); err != nil {
 		log.Warnw("Failed to update commit status", "error", err)
 	}
 
-	log.Infow("Committed", "txHash", tx.Hash().Hex())
+	log.Infow("Committed", "txHash", receipt.TxHash.Hex())
 	return targetEpoch, nil
 }
 

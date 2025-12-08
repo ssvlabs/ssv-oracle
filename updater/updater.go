@@ -202,7 +202,8 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 
 	effectiveBalanceBig := new(big.Int).SetUint64(leaf.EffectiveBalance)
 
-	tx, err := u.contractClient.UpdateClusterBalance(
+	// TxManager handles gas estimation, bumping, retries, and cancellation
+	receipt, err := u.contractClient.UpdateClusterBalance(
 		ctx,
 		blockNum,
 		owner,
@@ -212,24 +213,13 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		proof,
 	)
 	if err != nil {
-		return fmt.Errorf("contract call failed: %w", err)
+		return fmt.Errorf("UpdateClusterBalance: %w", err)
 	}
 
-	logger.Infow("Submitted tx",
-		"clusterID", clusterID,
-		"txHash", tx.Hash().Hex(),
-		"effectiveBalance", leaf.EffectiveBalance)
-
-	receipt, err := u.contractClient.WaitForReceipt(ctx, tx)
-	if err != nil {
-		return fmt.Errorf("tx failed to mine: %w", err)
-	}
-	if receipt.Status != 1 {
-		return fmt.Errorf("tx reverted")
-	}
 	logger.Infow("Tx confirmed",
 		"clusterID", clusterID,
-		"txHash", tx.Hash().Hex(),
+		"txHash", receipt.TxHash.Hex(),
+		"effectiveBalance", leaf.EffectiveBalance,
 		"block", receipt.BlockNumber.Uint64())
 
 	return nil

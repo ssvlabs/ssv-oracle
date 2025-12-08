@@ -47,11 +47,28 @@ db_user: "oracle"
 db_password_env: "DB_PASSWORD"  # Read password from this environment variable
 
 # ============================================================================
-# Oracle Credentials
+# Wallet Configuration
 # ============================================================================
 
-# Private key for signing transactions (read from environment variable)
-private_key_env: "PRIVATE_KEY"
+wallet:
+  type: "env"  # env | keystore
+  private_key_env: "PRIVATE_KEY"
+  # keystore_path: "/path/to/keystore.json"
+  # password_env: "KEYSTORE_PASSWORD"
+  # password_file: "/path/to/password.txt"
+
+# ============================================================================
+# Transaction Policy
+# ============================================================================
+
+# Controls gas estimation, retries, bumping, and cancellation
+tx_policy:
+  gas_buffer_percent: 20        # Add 20% to estimated gas to prevent out-of-gas
+  max_fee_per_gas: "100 gwei"   # Never exceed this gas price
+  pending_timeout_blocks: 10    # Blocks to wait before bumping gas
+  gas_bump_percent: 10          # Minimum 10% bump for replace-by-fee
+  max_retries: 3                # Retry attempts before cancellation
+  retry_delay: 5s               # Delay between retries
 
 # ============================================================================
 # Commit Phases

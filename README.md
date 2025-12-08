@@ -106,6 +106,31 @@ wallet:
   password_file: "/path/to/password.txt"
 ```
 
+### Transaction Policy
+
+The oracle includes automatic transaction management with gas optimization, retries, and cancellation:
+
+```yaml
+tx_policy:
+  gas_buffer_percent: 20        # Add 20% to estimated gas
+  max_fee_per_gas: "100 gwei"   # Never exceed this gas price
+  pending_timeout_blocks: 10    # Blocks before bumping gas
+  gas_bump_percent: 10          # Minimum 10% for replace-by-fee
+  max_retries: 3                # Attempts before cancellation
+  retry_delay: 5s               # Delay between retries
+```
+
+| Setting | Description |
+|---------|-------------|
+| `gas_buffer_percent` | Extra gas added to estimates to prevent out-of-gas errors |
+| `max_fee_per_gas` | Hard cap on gas price (supports "gwei", "wei" suffixes) |
+| `pending_timeout_blocks` | Blocks to wait before bumping a stuck transaction |
+| `gas_bump_percent` | Percentage increase when bumping (EIP-1559 requires ≥10%) |
+| `max_retries` | Maximum retry attempts before cancelling and giving up |
+| `retry_delay` | Wait time between retry attempts |
+
+**Automatic cancellation:** When max retries are exhausted or max gas price is reached, the oracle sends a 0-value self-transfer to free the nonce and prevent stuck transactions.
+
 ## Oracle Cycle
 
 The oracle executes the following steps each round:

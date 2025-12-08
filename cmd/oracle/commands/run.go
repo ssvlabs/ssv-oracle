@@ -18,6 +18,7 @@ import (
 	"ssv-oracle/oracle"
 	"ssv-oracle/pkg/ethsync"
 	"ssv-oracle/pkg/logger"
+	"ssv-oracle/txmanager"
 	"ssv-oracle/updater"
 	"ssv-oracle/wallet"
 )
@@ -69,6 +70,9 @@ type Config struct {
 
 	// Wallet / Key Management
 	Wallet wallet.Config `yaml:"wallet"`
+
+	// Transaction Policy
+	TxPolicy txmanager.TxPolicy `yaml:"tx_policy"`
 
 	// Commit Phases
 	CommitPhases []oracle.CommitPhase `yaml:"commit_phases"`
@@ -202,7 +206,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	// Create Ethereum client for oracle commits (uses SSV Network contract)
 	// Pass WebSocket URL for event subscriptions (required if running with --updater)
-	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer)
+	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer, &cfg.TxPolicy)
 	if err != nil {
 		return fmt.Errorf("failed to create Ethereum client: %w", err)
 	}
