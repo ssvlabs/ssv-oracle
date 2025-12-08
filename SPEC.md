@@ -1,4 +1,27 @@
-# SSV Cluster Effective Balance Oracle – Offchain Client Spec
+# SSV Staking
+
+We introduce SSV staking V1, a brand new feature that will allow SSV stakers to perform useful work for the SSV network in exchange for rewards.
+Stakers will run oracle services that will report the correct effective balance (EB) of each SSV cluster to the SSV Network contract.
+This will ensure that all fees are calculated proportionally to the expected rewards of the cluster.
+
+Since updating all clusters is a costly operation, we divide the work between 2 actors:
+1. *SSV Oracles* - that can only participate in behalf of stakers. They post a single small commitment of the effective balances of **all** clusters in each phase.
+2. *Cluster Updaters* - Permissionless parties that post the actual verifiable EBs. Any data that won't be verified against the commitment will be rejected.
+
+Cluster updaters will only be able to vote on commits that gained some threshold of votes.
+The parties will be incentivized to act in a honest manner. The incentives will come from network fees collected from cluster owners and pooled in the SSV Network contract.
+Each staker will be able to withdraw its relative part according to the weight of its correct votes.
+
+## V1
+
+In the first release we focus on simplicity:
+  - There will only be 4 SSV oracles. 
+  - One of the oracles will volunteer to be a Cluster Updater.
+  - Stakers will delegate stake to all of them at once. Meaning all oracles will have the same weight.
+  - A threshold of 75% of the weight will allow the commitment to be accepted.
+  - Stakers will be able to withdraw amount proportional to their stake.
+ 
+
 
 ## 1. Summary
 
