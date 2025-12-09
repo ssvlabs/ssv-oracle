@@ -96,6 +96,10 @@ For each cluster `c`:
 - `clusterId` – `bytes32` (canonical cluster identifier).
 - `effectiveBalance` – integer `uint64` representing units in gwei.
 
+The `effectiveBalance` of the cluster is the sum of all its SSV validators.
+If the `effectiveBalance` of a validator is below the (EJECTION_BALANCE)(https://eth2book.info/capella/annotated-spec/#validator-cycle) of 16 ETH,
+then round it up to 32 ETH for cluster sum calculations.
+
 ---
 
 #### 5. Merkle Tree Construction
@@ -207,11 +211,11 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 
 4. **Data Fetcher**
    - Syncs SSV contract events in order to reconstruct cluster data.
-   - Calls the beacon node API to calculate `(clusterId, effectiveBalance)` for `targetEpoch`.
+   - Calls the beacon node API to get effective balances of SSV validators for `targetEpoch`.
 
 5. **Merkle Builder**
    - Sorts and encodes cluster data.
-   - Applies empty-leaf rule.
+   - Computes for each cluster the total effective balance as defined in section 4.1.
    - Produces `merkleRoot`, and optionally a structure for proof generation.
 
 6. **Onchain Client**
