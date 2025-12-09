@@ -61,7 +61,12 @@ func (o *Oracle) Run(ctx context.Context, syncer *ethsync.EventSyncer, beaconCli
 				return ctx.Err()
 			}
 			logger.Errorw("Commit failed", "error", err)
-			time.Sleep(errorRetryDelay)
+			select {
+			case <-ctx.Done():
+				logger.Info("Oracle stopping")
+				return ctx.Err()
+			case <-time.After(errorRetryDelay):
+			}
 			continue
 		}
 		lastTargetEpoch = targetEpoch
@@ -76,14 +81,12 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 
 	targetEpoch := NextTargetEpoch(o.phases, checkpoint.Epoch)
 
+	// Already committed for this target epoch. Wait for at least one more epoch
+	// to finalize before recalculating the next target.
 	if targetEpoch <= lastTargetEpoch && lastTargetEpoch > 0 {
-		_, err := o.waitForFinalization(ctx, beaconClient, spec, lastTargetEpoch+1)
+		checkpoint, err = o.waitForFinalization(ctx, beaconClient, spec, lastTargetEpoch+1)
 		if err != nil {
 			return 0, err
-		}
-		checkpoint, err = beaconClient.GetFinalizedCheckpoint(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("failed to get checkpoint: %w", err)
 		}
 		targetEpoch = NextTargetEpoch(o.phases, checkpoint.Epoch)
 	}
@@ -99,7 +102,11 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		return 0, err
 	}
 
-	currentSlot := uint64(time.Since(spec.GenesisTime) / spec.SlotDuration)
+	elapsed := time.Since(spec.GenesisTime)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	currentSlot := uint64(elapsed / spec.SlotDuration)
 	currentEpoch := currentSlot / spec.SlotsPerEpoch
 
 	log.Infow("Epoch finalized",
@@ -154,90 +161,101 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 	return targetEpoch, nil
 }
 
+// waitForFinalization blocks until targetEpoch is finalized on the beacon chain.
+//
+// Finalization semantics: A finalized checkpoint at epoch N contains state at the
+// START of epoch N, which reflects the END of epoch N-1. Therefore, to confirm
+// that epoch N is fully finalized, we need checkpoint.Epoch > N (i.e., checkpoint
+// at epoch N+1 or later).
+//
+// Returns the checkpoint when checkpoint.Epoch > targetEpoch.
 func (o *Oracle) waitForFinalization(ctx context.Context, beaconClient *ethsync.BeaconClient, spec *ethsync.Spec, targetEpoch uint64) (*ethsync.FinalizedCheckpoint, error) {
+	const maxRetries = 10
+
 	var lastLoggedCheckpoint uint64
-	var lastLoggedSlot uint64
-	var checkpointRetries int
+	var retries int
 
 	for {
-		now := time.Now()
-		currentSlot := uint64(now.Sub(spec.GenesisTime) / spec.SlotDuration)
+		// Guard against clock before genesis (would overflow uint64)
+		elapsed := time.Since(spec.GenesisTime)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		currentSlot := uint64(elapsed / spec.SlotDuration)
 		currentEpoch := currentSlot / spec.SlotsPerEpoch
-		slotInEpoch := (currentSlot % spec.SlotsPerEpoch) + 1
 
 		checkpoint, err := beaconClient.GetFinalizedCheckpoint(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			checkpointRetries++
-			logger.Warnw("Failed to get checkpoint, retrying",
-				"attempt", checkpointRetries,
+			retries++
+			if retries > maxRetries {
+				return nil, fmt.Errorf("checkpoint fetch failed after %d attempts: %w", retries, err)
+			}
+			// Exponential backoff: slotDuration * 2^retries, capped at 16x
+			backoff := spec.SlotDuration * time.Duration(1<<min(retries, 4))
+			logger.Warnw("Checkpoint fetch failed",
+				"attempt", retries,
+				"backoff", backoff.Round(time.Second),
 				"error", err)
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(spec.SlotDuration):
+			case <-time.After(backoff):
 			}
 			continue
 		}
-		checkpointRetries = 0
+		retries = 0
 
+		// Target epoch is finalized when checkpoint > targetEpoch
+		// (checkpoint at N+1 means epoch N is complete)
 		if targetEpoch < checkpoint.Epoch {
-			logger.Infow("Finalization detected",
-				"slot", currentSlot,
-				"epoch", currentEpoch,
-				"slotInEpoch", fmt.Sprintf("%d/%d", slotInEpoch, spec.SlotsPerEpoch))
+			logger.Infow("Epoch finalized",
+				"targetEpoch", targetEpoch,
+				"checkpoint", checkpoint.Epoch)
 			return checkpoint, nil
 		}
 
-		epochsAhead := int64(targetEpoch) - int64(checkpoint.Epoch)
-		if epochsAhead > 1 {
-			if checkpoint.Epoch != lastLoggedCheckpoint {
-				logger.Infow("Waiting for finalization",
-					"slot", currentSlot,
-					"epoch", currentEpoch,
-					"slotInEpoch", fmt.Sprintf("%d/%d", slotInEpoch, spec.SlotsPerEpoch),
-					"targetEpoch", targetEpoch,
-					"checkpoint", checkpoint.Epoch)
-				lastLoggedCheckpoint = checkpoint.Epoch
-				lastLoggedSlot = currentSlot
-			}
-			waitEpochs := epochsAhead - 1
-			waitTime := time.Duration(uint64(waitEpochs)*spec.SlotsPerEpoch) * spec.SlotDuration
-			logger.Infow("Target ahead, sleeping",
-				"epochsAhead", epochsAhead,
-				"waitTime", waitTime.Round(time.Second))
+		// Log progress once per checkpoint change
+		if checkpoint.Epoch != lastLoggedCheckpoint {
+			// We need checkpoint > targetEpoch, i.e., checkpoint >= targetEpoch + 1
+			needCheckpoint := targetEpoch + 1
+			logger.Infow("Waiting for finalization",
+				"targetEpoch", targetEpoch,
+				"needCheckpoint", needCheckpoint,
+				"currentCheckpoint", checkpoint.Epoch,
+				"currentEpoch", currentEpoch)
+			lastLoggedCheckpoint = checkpoint.Epoch
+		}
 
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(waitTime):
-			}
+		// Calculate wait time
+		// We need checkpoint >= targetEpoch + 1, currently at checkpoint.Epoch
+		epochsUntilFinalization := (targetEpoch + 1) - checkpoint.Epoch
+		var waitTime time.Duration
+
+		if epochsUntilFinalization > 1 {
+			// Sleep until 1 epoch before expected finalization
+			epochsToSleep := epochsUntilFinalization - 1
+			waitTime = time.Duration(epochsToSleep) * time.Duration(spec.SlotsPerEpoch) * spec.SlotDuration
+			logger.Debugw("Target epoch far ahead, sleeping",
+				"epochsToSleep", epochsToSleep,
+				"sleepDuration", waitTime.Round(time.Second))
 		} else {
-			if checkpoint.Epoch != lastLoggedCheckpoint {
-				logger.Infow("Waiting for finalization",
-					"slot", currentSlot,
-					"epoch", currentEpoch,
-					"slotInEpoch", fmt.Sprintf("%d/%d", slotInEpoch, spec.SlotsPerEpoch),
-					"targetEpoch", targetEpoch,
-					"checkpoint", checkpoint.Epoch)
-				lastLoggedCheckpoint = checkpoint.Epoch
-				lastLoggedSlot = currentSlot
-			} else if currentSlot != lastLoggedSlot {
-				logger.Debugw("Slot tick",
-					"slot", currentSlot,
-					"epoch", currentEpoch,
-					"slotInEpoch", fmt.Sprintf("%d/%d", slotInEpoch, spec.SlotsPerEpoch))
-				lastLoggedSlot = currentSlot
-			}
-
+			// Close to finalization, poll each slot
 			nextSlotTime := spec.GenesisTime.Add(time.Duration(currentSlot+1) * spec.SlotDuration)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Until(nextSlotTime)):
-			}
+			waitTime = time.Until(nextSlotTime)
+		}
+
+		// Guard against negative wait time
+		if waitTime < 0 {
+			waitTime = spec.SlotDuration
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(waitTime):
 		}
 	}
 }
@@ -274,18 +292,19 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, beaconClient *ethsync
 
 	// Aggregate by cluster ID
 	clusterTotals := make(map[[32]byte]uint64)
+	var notOnBeacon int
 	for _, v := range validators {
 		var pk phase0.BLSPubKey
 		copy(pk[:], v.ValidatorPubkey)
 		balance, onBeacon := balanceMap[pk]
 		if !onBeacon {
+			notOnBeacon++
 			continue
 		}
 		var clusterID [32]byte
 		copy(clusterID[:], v.ClusterID)
 		clusterTotals[clusterID] += balance
 	}
-
 	var result []ethsync.ClusterBalance
 	for clusterID, total := range clusterTotals {
 		result = append(result, ethsync.ClusterBalance{
@@ -297,6 +316,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, beaconClient *ethsync
 	logger.Infow("Balances fetched",
 		"validators", len(validators),
 		"fromBeacon", len(balanceMap),
+		"notOnBeacon", notOnBeacon,
 		"clusters", len(result),
 		"took", beaconDuration.Round(time.Millisecond))
 
