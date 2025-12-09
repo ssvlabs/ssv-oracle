@@ -11,6 +11,7 @@ import (
 	"ssv-oracle/merkle"
 	"ssv-oracle/pkg/ethsync"
 	"ssv-oracle/pkg/logger"
+	"ssv-oracle/txmanager"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -144,55 +145,75 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 	log.Infow("Root validated, processing clusters", "count", len(commit.ClusterBalances))
 
 	updated := 0
-	errors := 0
+	skipped := 0
+	failures := make(map[txmanager.FailureReason]int)
 
 	for _, leaf := range tree.Leaves {
-		if err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree); err != nil {
-			logger.Warnw("Failed to process cluster",
+		ok, err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree)
+		if err != nil {
+			reason, retryable := txmanager.ClassifyError(err)
+			failures[reason]++
+
+			logFunc := logger.Warnw
+			if !retryable {
+				logFunc = logger.Errorw
+			}
+			logFunc("Failed to process cluster",
 				"clusterID", fmt.Sprintf("%x", leaf.ClusterID),
+				"reason", reason,
+				"retryable", retryable,
 				"error", err)
-			errors++
 			continue
 		}
-		updated++
+		if ok {
+			updated++
+		} else {
+			skipped++
+		}
 	}
 
-	log.Infow("Commit complete",
+	logFields := []interface{}{
 		"updated", updated,
-		"errors", errors)
+		"skipped", skipped,
+	}
+	for reason, count := range failures {
+		logFields = append(logFields, string(reason), count)
+	}
+	log.Infow("Commit complete", logFields...)
 
 	return nil
 }
 
-func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) error {
+// processCluster updates a single cluster's effective balance on-chain.
+// Returns (true, nil) if update was submitted successfully.
+// Returns (false, nil) if update was skipped (balance unchanged or cluster not found).
+// Returns (false, err) if update failed.
+func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) (bool, error) {
 	clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
 	cluster, err := u.storage.GetCluster(ctx, leaf.ClusterID[:])
 	if err != nil {
-		return fmt.Errorf("failed to get cluster: %w", err)
+		return false, fmt.Errorf("failed to get cluster: %w", err)
 	}
 	if cluster == nil {
-		logger.Warnw("Cluster not found", "clusterID", clusterID)
-		return nil
+		logger.Debugw("Cluster not found, skipping", "clusterID", clusterID)
+		return false, nil
 	}
 
 	proof, err := tree.GetProof(leaf.ClusterID)
 	if err != nil {
-		return fmt.Errorf("failed to get proof: %w", err)
+		return false, fmt.Errorf("failed to get proof: %w", err)
 	}
 
 	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, leaf.ClusterID)
 	if err != nil {
-		logger.Warnw("Failed to check current balance, skipping",
-			"clusterID", clusterID,
-			"error", err)
-		return nil
+		return false, fmt.Errorf("failed to check current balance: %w", err)
 	}
 	if currentBalance == leaf.EffectiveBalance {
 		logger.Debugw("Balance unchanged, skipping",
 			"clusterID", clusterID,
 			"balance", currentBalance)
-		return nil
+		return false, nil
 	}
 
 	owner := common.BytesToAddress(cluster.OwnerAddress)
@@ -217,7 +238,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		proof,
 	)
 	if err != nil {
-		return fmt.Errorf("UpdateClusterBalance: %w", err)
+		return false, err
 	}
 
 	logger.Infow("Tx confirmed",
@@ -226,5 +247,5 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		"effectiveBalance", leaf.EffectiveBalance,
 		"block", receipt.BlockNumber.Uint64())
 
-	return nil
+	return true, nil
 }

@@ -11,6 +11,7 @@ import (
 	"ssv-oracle/merkle"
 	"ssv-oracle/pkg/ethsync"
 	"ssv-oracle/pkg/logger"
+	"ssv-oracle/txmanager"
 )
 
 const errorRetryDelay = 10 * time.Second
@@ -150,6 +151,18 @@ func (o *Oracle) processNextCommit(ctx context.Context, syncer *ethsync.EventSyn
 		if statusErr := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, txHash); statusErr != nil {
 			log.Warnw("Failed to update commit status", "error", statusErr)
 		}
+
+		// Classify error to determine if we should retry or skip to next epoch
+		if revertErr, ok := txmanager.IsRevertError(err); ok {
+			// Contract rejected the commit (e.g., stale block, already committed).
+			// Don't retry - move to next target epoch.
+			log.Errorw("Commit reverted, skipping to next epoch",
+				"reason", revertErr.Reason,
+				"simulated", revertErr.Simulated)
+			return targetEpoch, nil
+		}
+
+		// Transient error - will be retried by main loop
 		return 0, fmt.Errorf("failed to commit: %w", err)
 	}
 

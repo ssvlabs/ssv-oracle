@@ -65,6 +65,43 @@ func IsRevertError(err error) (*RevertError, bool) {
 	return nil, false
 }
 
+// FailureReason classifies why a transaction failed.
+type FailureReason string
+
+const (
+	FailureRevert    FailureReason = "revert"    // Contract rejected (permanent)
+	FailureGas       FailureReason = "gas"       // Max gas reached (transient)
+	FailureTimeout   FailureReason = "timeout"   // Max retries exhausted (transient)
+	FailureTransient FailureReason = "transient" // Other transient errors
+)
+
+// ClassifyError determines if an error is permanent or transient.
+// Returns (reason, retryable) where retryable indicates if the operation
+// may succeed on retry. Permanent errors (reverts) won't succeed on retry.
+func ClassifyError(err error) (FailureReason, bool) {
+	if err == nil {
+		return "", false
+	}
+
+	// Contract reverts are permanent - retrying won't help
+	if _, ok := IsRevertError(err); ok {
+		return FailureRevert, false
+	}
+
+	// Gas limit reached - may recover when gas prices drop
+	if errors.Is(err, ErrMaxGasReached) {
+		return FailureGas, true
+	}
+
+	// Max retries exhausted - network congestion, may recover
+	if errors.Is(err, ErrMaxRetriesExhausted) {
+		return FailureTimeout, true
+	}
+
+	// Default: treat as transient (RPC issues, etc.)
+	return FailureTransient, true
+}
+
 // TxOpts specifies parameters for a transaction.
 type TxOpts struct {
 	To       common.Address
