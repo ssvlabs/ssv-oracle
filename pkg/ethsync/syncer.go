@@ -110,13 +110,14 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 		}),
 	)
 
-	totalEvents := 0
+	knownEvents := 0
 	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, targetBlock, func(batchEnd uint64, logs []BlockLogs) error {
 		for _, blockLogs := range logs {
-			if err := s.processBlockLogs(ctx, blockLogs); err != nil {
+			count, err := s.processBlockLogs(ctx, blockLogs)
+			if err != nil {
 				return fmt.Errorf("failed to process block %d: %w", blockLogs.BlockNumber, err)
 			}
-			totalEvents += len(blockLogs.Logs)
+			knownEvents += count
 		}
 
 		_ = bar.Set(int(batchEnd - fromBlock))
@@ -138,7 +139,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	_ = bar.Finish()
 	fmt.Println() // New line after progress bar
-	logger.Infow("Events synced", "block", targetBlock, "newEvents", totalEvents)
+	logger.Infow("Events synced", "block", targetBlock, "newEvents", knownEvents)
 	return nil
 }
 
@@ -152,10 +153,11 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 }
 
 // processBlockLogs processes all logs from a block in a single transaction.
-func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs) error {
+// Returns the count of known (successfully parsed) events.
+func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs) (int, error) {
 	tx, err := s.storage.BeginTx(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to begin tx: %w", err)
+		return 0, fmt.Errorf("failed to begin tx: %w", err)
 	}
 
 	committed := false
@@ -165,40 +167,46 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs)
 		}
 	}()
 
+	knownEvents := 0
 	for _, log := range blockLogs.Logs {
-		if err := s.processLog(ctx, tx, &log, blockLogs); err != nil {
-			return fmt.Errorf("failed to process log at index %d: %w", log.Index, err)
+		known, err := s.processLog(ctx, tx, &log, blockLogs)
+		if err != nil {
+			return 0, fmt.Errorf("failed to process log at index %d: %w", log.Index, err)
+		}
+		if known {
+			knownEvents++
 		}
 	}
 
 	// Update sync progress atomically with events
 	if err := tx.UpdateLastSyncedBlock(ctx, blockLogs.BlockNumber); err != nil {
-		return fmt.Errorf("failed to update sync progress: %w", err)
+		return 0, fmt.Errorf("failed to update sync progress: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit tx: %w", err)
+		return 0, fmt.Errorf("failed to commit tx: %w", err)
 	}
 	committed = true
 
-	return nil
+	return knownEvents, nil
 }
 
 // processLog processes a single log entry.
-func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blockLogs BlockLogs) error {
+// Returns (known, error) where known indicates if the event was a recognized type.
+func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blockLogs BlockLogs) (bool, error) {
 	eventType, eventData, err := s.parser.ParseLog(log)
 	if err != nil {
-		return s.storeRawEvent(ctx, tx, log, blockLogs, err)
+		return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
 	}
 
 	rawLog, err := EncodeLogToJSON(log)
 	if err != nil {
-		return fmt.Errorf("failed to encode raw log: %w", err)
+		return false, fmt.Errorf("failed to encode raw log: %w", err)
 	}
 
 	rawEvent, err := EncodeEventToJSON(eventData)
 	if err != nil {
-		return fmt.Errorf("failed to encode event: %w", err)
+		return false, fmt.Errorf("failed to encode event: %w", err)
 	}
 
 	slot := s.spec.SlotAt(blockLogs.BlockTime)
@@ -219,14 +227,14 @@ func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blo
 	}
 
 	if err := tx.InsertEvent(ctx, contractEvent); err != nil {
-		return fmt.Errorf("failed to insert event: %w", err)
+		return false, fmt.Errorf("failed to insert event: %w", err)
 	}
 
 	if err := s.updateState(ctx, tx, eventType, eventData, slot, uint32(log.Index)); err != nil {
-		return fmt.Errorf("failed to update state: %w", err)
+		return false, fmt.Errorf("failed to update state: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // storeRawEvent stores a raw event when parsing fails.
