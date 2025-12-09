@@ -1,91 +1,12 @@
 package ethsync
 
 import (
-	"context"
 	"math/big"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
-
-// mockSyncerStorage implements the storage interface for syncer testing.
-type mockSyncerStorage struct {
-	lastSyncedBlock uint64
-	updateErr       error
-	beginTxErr      error
-}
-
-func (m *mockSyncerStorage) GetLastSyncedBlock(ctx context.Context) (uint64, error) {
-	return m.lastSyncedBlock, nil
-}
-
-func (m *mockSyncerStorage) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
-	if m.updateErr != nil {
-		return m.updateErr
-	}
-	m.lastSyncedBlock = blockNum
-	return nil
-}
-
-func (m *mockSyncerStorage) BeginTx(ctx context.Context) (Tx, error) {
-	if m.beginTxErr != nil {
-		return nil, m.beginTxErr
-	}
-	return &mockTx{}, nil
-}
-
-// mockTx implements the Tx interface for testing.
-type mockTx struct {
-	committed          bool
-	rolledBack         bool
-	insertedEvents     []*ContractEvent
-	upsertedClusters   []*ClusterRow
-	deletedClusters    [][]byte
-	insertedValidators [][]byte
-	deletedValidators  [][]byte
-	syncedBlocks       []uint64
-}
-
-func (m *mockTx) Commit() error {
-	m.committed = true
-	return nil
-}
-
-func (m *mockTx) Rollback() error {
-	m.rolledBack = true
-	return nil
-}
-
-func (m *mockTx) InsertEvent(ctx context.Context, event *ContractEvent) error {
-	m.insertedEvents = append(m.insertedEvents, event)
-	return nil
-}
-
-func (m *mockTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
-	m.upsertedClusters = append(m.upsertedClusters, cluster)
-	return nil
-}
-
-func (m *mockTx) DeleteCluster(ctx context.Context, clusterID []byte) error {
-	m.deletedClusters = append(m.deletedClusters, clusterID)
-	return nil
-}
-
-func (m *mockTx) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
-	m.insertedValidators = append(m.insertedValidators, pubkey)
-	return nil
-}
-
-func (m *mockTx) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
-	m.deletedValidators = append(m.deletedValidators, pubkey)
-	return nil
-}
-
-func (m *mockTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
-	m.syncedBlocks = append(m.syncedBlocks, blockNum)
-	return nil
-}
 
 func TestNewEventSyncer(t *testing.T) {
 	spec := &Spec{
