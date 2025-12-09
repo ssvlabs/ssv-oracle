@@ -44,7 +44,11 @@ jobs:
           fetch-depth: 0  # Full history for git describe
 
       - name: Build Docker image
-        run: docker build -t ssv-oracle:test .
+        run: |
+          docker build \
+            --build-arg VERSION=$(git describe --tags --always --dirty) \
+            --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
+            -t ssv-oracle:test .
 
   security:
     runs-on: ubuntu-latest

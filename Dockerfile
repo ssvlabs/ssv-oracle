@@ -3,7 +3,8 @@
 # Build stage
 FROM golang:1.25.5-alpine AS builder
 
-RUN apk add --no-cache git
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
 
 WORKDIR /build
 
@@ -12,10 +13,7 @@ RUN go mod download && go mod verify
 
 COPY . .
 
-# Extract version info from git (works automatically, no build args needed)
-RUN VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev") && \
-    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown") && \
-    BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ') && \
+RUN BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ') && \
     CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME} -s -w" \
     -o ssv-oracle \
