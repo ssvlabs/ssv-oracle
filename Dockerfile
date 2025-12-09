@@ -52,3 +52,4 @@ WORKDIR /home/oracle
 
 ENTRYPOINT ["ssv-oracle"]
 CMD ["run", "--config", "/config/config.yaml"]
+
