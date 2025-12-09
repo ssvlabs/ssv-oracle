@@ -138,23 +138,30 @@ func TestComputeClusterIDFromEvent_ClusterDeposited(t *testing.T) {
 	}
 }
 
-func TestComputeClusterIDFromEvent_ClusterBalanceUpdated(t *testing.T) {
+func TestClusterBalanceUpdatedEvent_HasClusterIDDirectly(t *testing.T) {
+	var clusterID [32]byte
+	copy(clusterID[:], []byte("test-cluster-id-12345678901234"))
+
 	event := &ClusterBalanceUpdatedEvent{
-		Owner:            common.HexToAddress("0xabc123"),
-		OperatorIDs:      []uint64{1, 2, 3, 4},
+		ClusterID:        clusterID,
+		BlockNum:         12345,
 		EffectiveBalance: big.NewInt(32000000000),
 		VUnits:           1,
 		Cluster:          Cluster{},
 	}
 
-	clusterID := computeClusterIDFromEvent(event)
-	if clusterID == nil {
-		t.Fatal("computeClusterIDFromEvent returned nil for ClusterBalanceUpdatedEvent")
+	// ClusterBalanceUpdatedEvent doesn't implement clusterEvent
+	gotClusterID := computeClusterIDFromEvent(event)
+	if gotClusterID != nil {
+		t.Error("Expected nil from computeClusterIDFromEvent for ClusterBalanceUpdatedEvent")
+	}
+
+	if event.ClusterID != clusterID {
+		t.Errorf("ClusterID = %x, want %x", event.ClusterID, clusterID)
 	}
 }
 
 func TestComputeClusterIDFromEvent_UnknownType(t *testing.T) {
-	// A type that doesn't implement clusterEvent
 	unknownEvent := struct{ foo string }{foo: "bar"}
 
 	clusterID := computeClusterIDFromEvent(unknownEvent)
@@ -177,7 +184,6 @@ func TestClusterKey_AllEventTypes(t *testing.T) {
 		{"ClusterReactivated", &ClusterReactivatedEvent{Owner: owner, OperatorIDs: operatorIDs}},
 		{"ClusterWithdrawn", &ClusterWithdrawnEvent{Owner: owner, OperatorIDs: operatorIDs}},
 		{"ClusterDeposited", &ClusterDepositedEvent{Owner: owner, OperatorIDs: operatorIDs}},
-		{"ClusterBalanceUpdated", &ClusterBalanceUpdatedEvent{Owner: owner, OperatorIDs: operatorIDs}},
 	}
 
 	for _, tt := range tests {

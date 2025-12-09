@@ -274,7 +274,7 @@ func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, 
 	case EventClusterDeposited:
 		return s.handleClusterDeposited(ctx, tx, eventData.(*ClusterDepositedEvent), clusterID, slot)
 	case EventClusterBalanceUpdated:
-		return s.handleClusterBalanceUpdated(ctx, tx, eventData.(*ClusterBalanceUpdatedEvent), clusterID, slot)
+		return s.handleClusterBalanceUpdated(ctx, tx, eventData.(*ClusterBalanceUpdatedEvent), slot)
 	default:
 		return fmt.Errorf("unhandled event type: %s", eventType)
 	}
@@ -340,8 +340,17 @@ func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster, slot)
 }
 
-func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, event *ClusterBalanceUpdatedEvent, clusterID []byte, slot uint64) error {
-	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster, slot)
+func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, event *ClusterBalanceUpdatedEvent, slot uint64) error {
+	row := &ClusterRow{
+		ClusterID:       event.ClusterID[:],
+		ValidatorCount:  event.Cluster.ValidatorCount,
+		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
+		Index:           event.Cluster.Index,
+		IsActive:        event.Cluster.Active,
+		Balance:         event.Cluster.Balance,
+		LastUpdatedSlot: slot,
+	}
+	return tx.UpsertCluster(ctx, row)
 }
 
 func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx Tx, owner common.Address, operatorIDs []uint64, clusterID []byte, cluster *Cluster, slot uint64) error {
@@ -378,9 +387,6 @@ func (e *ClusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
 func (e *ClusterDepositedEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ClusterBalanceUpdatedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
 

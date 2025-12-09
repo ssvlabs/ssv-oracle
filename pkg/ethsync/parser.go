@@ -214,13 +214,13 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanceUpdatedEvent, error) {
 	event := &ClusterBalanceUpdatedEvent{}
 
-	if len(log.Topics) < 2 {
-		return nil, fmt.Errorf("missing owner topic")
+	if len(log.Topics) < 3 {
+		return nil, fmt.Errorf("missing indexed topics (clusterId, blockNum)")
 	}
-	event.Owner = common.BytesToAddress(log.Topics[1].Bytes())
+	copy(event.ClusterID[:], log.Topics[1].Bytes())
+	event.BlockNum = log.Topics[2].Big().Uint64()
 
 	var result struct {
-		OperatorIds      []uint64
 		EffectiveBalance *big.Int
 		VUnits           uint64
 		Cluster          Cluster
@@ -231,7 +231,6 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 		return nil, fmt.Errorf("failed to unpack ClusterBalanceUpdated: %w", err)
 	}
 
-	event.OperatorIDs = result.OperatorIds
 	event.EffectiveBalance = result.EffectiveBalance
 	event.VUnits = result.VUnits
 	event.Cluster = result.Cluster
