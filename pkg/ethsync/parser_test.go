@@ -9,17 +9,14 @@ import (
 )
 
 func TestNewEventParser(t *testing.T) {
-	parser, err := NewEventParser()
-	if err != nil {
-		t.Fatalf("NewEventParser() error = %v", err)
-	}
+	parser := NewEventParser()
 	if parser == nil {
 		t.Fatal("NewEventParser() returned nil")
 	}
 }
 
-func TestEventParser_ParseLog_EmptyTopics(t *testing.T) {
-	parser, _ := NewEventParser()
+func TestParseLog_EmptyTopics(t *testing.T) {
+	parser := NewEventParser()
 
 	log := &types.Log{
 		Topics: []common.Hash{},
@@ -31,8 +28,8 @@ func TestEventParser_ParseLog_EmptyTopics(t *testing.T) {
 	}
 }
 
-func TestEventParser_ParseLog_UnknownSignature(t *testing.T) {
-	parser, _ := NewEventParser()
+func TestParseLog_UnknownSignature(t *testing.T) {
+	parser := NewEventParser()
 
 	log := &types.Log{
 		Topics: []common.Hash{
@@ -46,8 +43,8 @@ func TestEventParser_ParseLog_UnknownSignature(t *testing.T) {
 	}
 }
 
-func TestEventParser_ParseLog_MissingOwnerTopic(t *testing.T) {
-	parser, _ := NewEventParser()
+func TestParseLog_MissingOwnerTopic(t *testing.T) {
+	parser := NewEventParser()
 
 	// ValidatorAdded signature but no owner topic
 	log := &types.Log{

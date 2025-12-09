@@ -112,7 +112,7 @@ func (c *ExecutionClient) GetBlockByNumber(ctx context.Context, number uint64) (
 	var result *types.Header
 	err := c.withRetry(ctx, func() error {
 		var err error
-		result, err = c.client.HeaderByNumber(ctx, big.NewInt(int64(number)))
+		result, err = c.client.HeaderByNumber(ctx, new(big.Int).SetUint64(number))
 		return err
 	})
 	if err != nil {
@@ -277,8 +277,8 @@ func (c *ExecutionClient) fetchLogsBatch(
 	fromBlock, toBlock uint64,
 ) ([]types.Log, error) {
 	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(int64(fromBlock)),
-		ToBlock:   big.NewInt(int64(toBlock)),
+		FromBlock: new(big.Int).SetUint64(fromBlock),
+		ToBlock:   new(big.Int).SetUint64(toBlock),
 		Addresses: []common.Address{address},
 	}
 

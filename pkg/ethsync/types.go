@@ -22,17 +22,12 @@ const (
 
 // Event signatures use Solidity tuple format: (type1,type2,...) NOT tuple(type1,type2,...)
 var (
-	EventSigValidatorAdded     = crypto.Keccak256Hash([]byte("ValidatorAdded(address,uint64[],bytes,bytes,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigValidatorRemoved   = crypto.Keccak256Hash([]byte("ValidatorRemoved(address,uint64[],bytes,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterLiquidated  = crypto.Keccak256Hash([]byte("ClusterLiquidated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterReactivated = crypto.Keccak256Hash([]byte("ClusterReactivated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterWithdrawn   = crypto.Keccak256Hash([]byte("ClusterWithdrawn(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterDeposited   = crypto.Keccak256Hash([]byte("ClusterDeposited(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
-
-	// TODO: Contract team will update this event to include cluster struct and owner/operatorIds.
-	// Current signature: ClusterBalanceUpdated(bytes32,uint64,uint256,uint64)
-	// Future signature:  ClusterBalanceUpdated(address,uint64[],uint256,uint64,(uint32,uint64,uint64,bool,uint256))
-	// Update this signature once contract is deployed with the new event format.
+	EventSigValidatorAdded        = crypto.Keccak256Hash([]byte("ValidatorAdded(address,uint64[],bytes,bytes,(uint32,uint64,uint64,bool,uint256))"))
+	EventSigValidatorRemoved      = crypto.Keccak256Hash([]byte("ValidatorRemoved(address,uint64[],bytes,(uint32,uint64,uint64,bool,uint256))"))
+	EventSigClusterLiquidated     = crypto.Keccak256Hash([]byte("ClusterLiquidated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
+	EventSigClusterReactivated    = crypto.Keccak256Hash([]byte("ClusterReactivated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
+	EventSigClusterWithdrawn      = crypto.Keccak256Hash([]byte("ClusterWithdrawn(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
+	EventSigClusterDeposited      = crypto.Keccak256Hash([]byte("ClusterDeposited(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(address,uint64[],uint256,uint64,(uint32,uint64,uint64,bool,uint256))"))
 )
 
@@ -93,7 +88,6 @@ type ClusterDepositedEvent struct {
 }
 
 // ClusterBalanceUpdatedEvent is emitted when a cluster's effective balance is updated.
-// TODO: Contract will be updated to include cluster struct in this event.
 type ClusterBalanceUpdatedEvent struct {
 	Owner            common.Address
 	OperatorIDs      []uint64

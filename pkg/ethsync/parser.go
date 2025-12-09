@@ -17,9 +17,9 @@ type EventParser struct {
 	abi abi.ABI
 }
 
-// NewEventParser creates a new event parser using the shared SSVNetwork ABI.
-func NewEventParser() (*EventParser, error) {
-	return &EventParser{abi: contract.SSVNetworkABI}, nil
+// NewEventParser creates a new event parser.
+func NewEventParser() *EventParser {
+	return &EventParser{abi: contract.SSVNetworkABI}
 }
 
 // ParseLog parses an Ethereum log into a structured event.
@@ -60,13 +60,11 @@ func (p *EventParser) ParseLog(log *types.Log) (string, interface{}, error) {
 func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent, error) {
 	event := &ValidatorAddedEvent{}
 
-	// Owner is indexed (topic[1])
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
 	}
 	event.Owner = common.BytesToAddress(log.Topics[1].Bytes())
 
-	// Unpack non-indexed fields (operatorIds, publicKey, shares, cluster)
 	var result struct {
 		OperatorIds []uint64
 		PublicKey   []byte
@@ -213,7 +211,6 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 	return event, nil
 }
 
-// TODO: Update parser when contract includes cluster struct in ClusterBalanceUpdated event.
 func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanceUpdatedEvent, error) {
 	event := &ClusterBalanceUpdatedEvent{}
 
@@ -253,7 +250,6 @@ func EncodeEventToJSON(event interface{}) (json.RawMessage, error) {
 
 // EncodeLogToJSON encodes an Ethereum log to JSON for storage.
 func EncodeLogToJSON(log *types.Log) (json.RawMessage, error) {
-	// Convert to simpler structure for JSON storage
 	logData := map[string]interface{}{
 		"address": log.Address.Hex(),
 		"topics":  make([]string, len(log.Topics)),
