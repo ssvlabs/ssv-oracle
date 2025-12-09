@@ -25,7 +25,7 @@ var (
 )
 
 const (
-	receiptPollInterval = 2 * time.Second
+	receiptPollInterval = 4 * time.Second
 	simpleTransferGas   = 21000
 )
 
