@@ -32,13 +32,3 @@ func TestCluster(t *testing.T) {
 
 	t.Logf("Cluster: validatorCount=%d, active=%v", cluster.ValidatorCount, cluster.Active)
 }
-
-// Note: Full integration tests will be added when contract is deployed to testnet
-func TestClient_PlaceholderForFutureTests(t *testing.T) {
-	t.Skip("Skipping until contract is deployed to testnet")
-
-	// Future tests:
-	// - TestClient_CommitRoot
-	// - TestClient_UpdateClusterBalance
-	// - TestClient_WaitForReceipt
-}

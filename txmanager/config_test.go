@@ -1,0 +1,167 @@
+package txmanager
+
+import (
+	"testing"
+	"time"
+)
+
+func TestTxPolicy_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  *TxPolicy
+		wantErr bool
+	}{
+		{
+			name: "valid policy",
+			policy: &TxPolicy{
+				GasBufferPercent:     20,
+				MaxFeePerGas:         "100 gwei",
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       10,
+				MaxRetries:           3,
+				RetryDelay:           5 * time.Second,
+			},
+			wantErr: false,
+		},
+		{
+			name: "gas bump too low",
+			policy: &TxPolicy{
+				GasBufferPercent:     20,
+				MaxFeePerGas:         "100 gwei",
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       5, // Must be >= 10 for EIP-1559
+				MaxRetries:           3,
+				RetryDelay:           5 * time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero retries",
+			policy: &TxPolicy{
+				GasBufferPercent:     20,
+				MaxFeePerGas:         "100 gwei",
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       10,
+				MaxRetries:           0,
+				RetryDelay:           5 * time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing max fee",
+			policy: &TxPolicy{
+				GasBufferPercent:     20,
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       10,
+				MaxRetries:           3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "gas buffer too high",
+			policy: &TxPolicy{
+				GasBufferPercent:     150, // Max is 100
+				MaxFeePerGas:         "100 gwei",
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       10,
+				MaxRetries:           3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative gas buffer",
+			policy: &TxPolicy{
+				GasBufferPercent:     -10,
+				MaxFeePerGas:         "100 gwei",
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       10,
+				MaxRetries:           3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero pending timeout",
+			policy: &TxPolicy{
+				GasBufferPercent:     20,
+				MaxFeePerGas:         "100 gwei",
+				PendingTimeoutBlocks: 0,
+				GasBumpPercent:       10,
+				MaxRetries:           3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative retry delay",
+			policy: &TxPolicy{
+				GasBufferPercent:     20,
+				MaxFeePerGas:         "100 gwei",
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       10,
+				MaxRetries:           3,
+				RetryDelay:           -1 * time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid max fee format",
+			policy: &TxPolicy{
+				GasBufferPercent:     20,
+				MaxFeePerGas:         "invalid",
+				PendingTimeoutBlocks: 10,
+				GasBumpPercent:       10,
+				MaxRetries:           3,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.policy.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestTxPolicy_ParseMaxFeePerGas(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int64 // in wei
+		wantErr  bool
+		wantNil  bool
+	}{
+		{"100 gwei", "100 gwei", 100_000_000_000, false, false},
+		{"1 gwei", "1 gwei", 1_000_000_000, false, false},
+		{"0.5 gwei", "0.5 gwei", 500_000_000, false, false},
+		{"1 wei", "1 wei", 1, false, false},
+		{"plain number as wei", "1000000000", 1_000_000_000, false, false},
+		{"empty string returns nil", "", 0, false, true},
+		{"invalid format", "invalid", 0, true, false},
+		{"unknown unit", "100 foo", 0, true, false},
+		{"1 ether", "1 ether", 1_000_000_000_000_000_000, false, false},
+		{"1 eth", "1 eth", 1_000_000_000_000_000_000, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := &TxPolicy{MaxFeePerGas: tt.input}
+			got, err := policy.ParseMaxFeePerGas()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseMaxFeePerGas() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("ParseMaxFeePerGas() = %v, want nil", got)
+				}
+				return
+			}
+			if !tt.wantErr && got != nil && got.Int64() != tt.expected {
+				t.Errorf("ParseMaxFeePerGas() = %d, want %d", got.Int64(), tt.expected)
+			}
+		})
+	}
+}

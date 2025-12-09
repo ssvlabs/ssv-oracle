@@ -248,7 +248,7 @@ func EncodeEventToJSON(event interface{}) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal event: %w", err)
 	}
-	return json.RawMessage(data), nil
+	return data, nil
 }
 
 // EncodeLogToJSON encodes an Ethereum log to JSON for storage.
@@ -269,5 +269,5 @@ func EncodeLogToJSON(log *types.Log) (json.RawMessage, error) {
 		return nil, fmt.Errorf("failed to marshal log: %w", err)
 	}
 
-	return json.RawMessage(data), nil
+	return data, nil
 }

@@ -332,30 +332,36 @@ func TestPostgresStorage_OracleCommit(t *testing.T) {
 
 	ctx := context.Background()
 
-	roundID := uint64(999)
+	// Use unique values to avoid conflicts with other test runs
+	roundID := uint64(time.Now().UnixNano() % 1000000)
 	targetEpoch := uint64(100)
 	merkleRoot := make([]byte, 32)
 	merkleRoot[0] = 0xff
-	referenceBlock := uint64(1000000)
-	txHash := make([]byte, 32)
-	txHash[0] = 0xee
+	referenceBlock := uint64(time.Now().UnixNano() % 1000000)
 
 	clusterBalances := []ClusterBalance{
-		{ClusterID: []byte{0x01, 0x02}, EffectiveBalance: 32000000000},
-		{ClusterID: []byte{0x03, 0x04}, EffectiveBalance: 64000000000},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32000000000},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64000000000},
+	}
+	clusterBalances[0].ClusterID[0] = 0x01
+	clusterBalances[1].ClusterID[0] = 0x02
+
+	// Insert pending commit (no tx hash yet)
+	err = storage.InsertPendingCommit(ctx, roundID, targetEpoch, merkleRoot, referenceBlock, clusterBalances)
+	if err != nil {
+		t.Fatalf("Failed to insert pending commit: %v", err)
 	}
 
-	err = storage.InsertOracleCommit(ctx, roundID, targetEpoch, merkleRoot, referenceBlock, txHash, clusterBalances)
+	// Get commit by reference block
+	commit, err := storage.GetCommitByBlock(ctx, referenceBlock)
 	if err != nil {
-		t.Fatalf("Failed to insert oracle commit: %v", err)
-	}
-
-	commit, err := storage.GetCommitByRound(ctx, roundID)
-	if err != nil {
-		t.Fatalf("Failed to get commit by round: %v", err)
+		t.Fatalf("Failed to get commit by block: %v", err)
 	}
 	if commit == nil {
 		t.Fatal("Expected commit, got nil")
+	}
+	if commit.RoundID != roundID {
+		t.Errorf("Expected round ID %d, got %d", roundID, commit.RoundID)
 	}
 	if commit.TargetEpoch != targetEpoch {
 		t.Errorf("Expected target epoch %d, got %d", targetEpoch, commit.TargetEpoch)
@@ -363,15 +369,33 @@ func TestPostgresStorage_OracleCommit(t *testing.T) {
 	if len(commit.ClusterBalances) != 2 {
 		t.Errorf("Expected 2 cluster balances, got %d", len(commit.ClusterBalances))
 	}
+	if commit.Status != CommitStatusPending {
+		t.Errorf("Expected status %s, got %s", CommitStatusPending, commit.Status)
+	}
 
-	commit2, err := storage.GetCommitByReferenceBlock(ctx, referenceBlock)
+	// Update commit status to confirmed
+	txHash := make([]byte, 32)
+	txHash[0] = 0xee
+	err = storage.UpdateCommitStatus(ctx, roundID, CommitStatusConfirmed, txHash)
 	if err != nil {
-		t.Fatalf("Failed to get commit by reference block: %v", err)
+		t.Fatalf("Failed to update commit status: %v", err)
 	}
-	if commit2 == nil {
-		t.Fatal("Expected commit, got nil")
+
+	// Verify status was updated
+	commit, err = storage.GetCommitByBlock(ctx, referenceBlock)
+	if err != nil {
+		t.Fatalf("Failed to get commit after status update: %v", err)
 	}
-	if commit2.RoundID != roundID {
-		t.Errorf("Expected round ID %d, got %d", roundID, commit2.RoundID)
+	if commit.Status != CommitStatusConfirmed {
+		t.Errorf("Expected status %s, got %s", CommitStatusConfirmed, commit.Status)
+	}
+	if commit.TxHash[0] != 0xee {
+		t.Errorf("Expected tx hash to be set")
+	}
+
+	// Test idempotency - inserting same roundID again should not error
+	err = storage.InsertPendingCommit(ctx, roundID, targetEpoch, merkleRoot, referenceBlock, clusterBalances)
+	if err != nil {
+		t.Fatalf("InsertPendingCommit should be idempotent, got error: %v", err)
 	}
 }

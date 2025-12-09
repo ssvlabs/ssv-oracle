@@ -68,8 +68,6 @@ func TestBuildMerkleTree_TwoClusters(t *testing.T) {
 	if root != root2 {
 		t.Error("BuildMerkleTree is not deterministic")
 	}
-
-	// TODO: Verify against Solidity test
 }
 
 func TestBuildMerkleTree_ThreeClusters(t *testing.T) {
@@ -93,8 +91,6 @@ func TestBuildMerkleTree_ThreeClusters(t *testing.T) {
 	if root != root2 {
 		t.Error("BuildMerkleTree is not deterministic")
 	}
-
-	// TODO: Verify against Solidity test
 }
 
 func TestBuildMerkleTree_Sorting(t *testing.T) {
@@ -118,38 +114,6 @@ func TestBuildMerkleTree_Sorting(t *testing.T) {
 	}
 
 	t.Logf("Root with sorting: 0x%x", root)
-}
-
-func TestBuildMerkleTree_TestDataFixtures(t *testing.T) {
-	// Use our test data cluster IDs (computed with keccak256)
-	cluster1Hex := "b183c42279b4dc3eb381352db3458ae66a3439765e4f880a027f62ac2c4edba9"
-	cluster2Hex := "44ab2ba437cef9cb17bb6bc6af7d87715b9a3e245fbb153e66b09bb79697d316"
-	cluster3Hex := "a1ea9fe3f3ba4ba4d19a681b639f7033740e55371ee0f00c2e32c15b4fe3c468"
-
-	cluster1Bytes, _ := hex.DecodeString(cluster1Hex)
-	cluster2Bytes, _ := hex.DecodeString(cluster2Hex)
-	cluster3Bytes, _ := hex.DecodeString(cluster3Hex)
-
-	var cluster1, cluster2, cluster3 [32]byte
-	copy(cluster1[:], cluster1Bytes)
-	copy(cluster2[:], cluster2Bytes)
-	copy(cluster3[:], cluster3Bytes)
-
-	clusters := map[[32]byte]uint64{
-		cluster1: 64000000000, // 64 ETH
-		cluster2: 31000000000, // 31 ETH
-		cluster3: 32000000000, // 32 ETH
-	}
-
-	root := BuildMerkleTree(clusters)
-
-	t.Log("Merkle tree from test data:")
-	t.Logf("  Cluster 1: 0x%s (64 ETH)", cluster1Hex)
-	t.Logf("  Cluster 2: 0x%s (31 ETH)", cluster2Hex)
-	t.Logf("  Cluster 3: 0x%s (32 ETH)", cluster3Hex)
-	t.Logf("  Merkle Root: 0x%x", root)
-
-	// TODO: Verify against Solidity test with same data
 }
 
 func TestBuildMerkleTree_DifferentOrderSameRoot(t *testing.T) {

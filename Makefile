@@ -1,4 +1,4 @@
-.PHONY: help build test lint run run-all fresh fresh-all db-up db-wait docker clean
+.PHONY: help build test test-integration lint run run-all fresh fresh-all db-up db-wait docker clean
 .DEFAULT_GOAL := help
 
 # Load .env file if it exists
@@ -17,8 +17,11 @@ help: ## Show available targets
 build: ## Build the oracle binary
 	go build $(LDFLAGS) -o ssv-oracle ./cmd/oracle
 
-test: ## Run tests
+test: ## Run unit tests
 	go test ./...
+
+test-integration: db-up db-wait ## Run integration tests (requires DB)
+	go test ./... -tags=integration
 
 lint: ## Run linters
 	@echo "Running linters..."
