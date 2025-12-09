@@ -180,8 +180,8 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	}
 
 	var lastTx *types.Transaction
-	var lastGasFeeCap *big.Int = gasFeeCap
-	var lastGasTipCap *big.Int = gasTipCap
+	lastGasFeeCap := gasFeeCap
+	lastGasTipCap := gasTipCap
 
 	for attempt := 1; attempt <= m.policy.MaxRetries; attempt++ {
 		tx := types.NewTx(&types.DynamicFeeTx{

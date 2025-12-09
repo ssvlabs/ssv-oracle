@@ -17,15 +17,13 @@ const testPrivateKeyHex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784
 const testAddress = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 func TestEnvSigner(t *testing.T) {
-	// Set test private key in environment
-	os.Setenv("TEST_PRIVATE_KEY", testPrivateKeyHex)
-	defer os.Unsetenv("TEST_PRIVATE_KEY")
+	t.Setenv("TEST_PRIVATE_KEY", testPrivateKeyHex)
 
 	signer, err := NewEnvSigner("TEST_PRIVATE_KEY")
 	if err != nil {
 		t.Fatalf("NewEnvSigner failed: %v", err)
 	}
-	defer signer.Close()
+	defer func() { _ = signer.Close() }()
 
 	// Verify address
 	expectedAddr := common.HexToAddress(testAddress)
@@ -54,7 +52,7 @@ func TestEnvSigner(t *testing.T) {
 }
 
 func TestEnvSigner_MissingEnvVar(t *testing.T) {
-	os.Unsetenv("NONEXISTENT_KEY")
+	_ = os.Unsetenv("NONEXISTENT_KEY")
 
 	_, err := NewEnvSigner("NONEXISTENT_KEY")
 	if err == nil {
@@ -70,8 +68,7 @@ func TestEnvSigner_EmptyEnvVarName(t *testing.T) {
 }
 
 func TestEnvSigner_InvalidPrivateKey(t *testing.T) {
-	os.Setenv("TEST_INVALID_KEY", "not-a-valid-key")
-	defer os.Unsetenv("TEST_INVALID_KEY")
+	t.Setenv("TEST_INVALID_KEY", "not-a-valid-key")
 
 	_, err := NewEnvSigner("TEST_INVALID_KEY")
 	if err == nil {
@@ -105,15 +102,13 @@ func TestKeystoreSigner(t *testing.T) {
 	}
 	keystorePath := files[0]
 
-	// Test with password from env var
-	os.Setenv("TEST_KEYSTORE_PASSWORD", password)
-	defer os.Unsetenv("TEST_KEYSTORE_PASSWORD")
+	t.Setenv("TEST_KEYSTORE_PASSWORD", password)
 
 	signer, err := NewKeystoreSigner(keystorePath, "TEST_KEYSTORE_PASSWORD", "")
 	if err != nil {
 		t.Fatalf("NewKeystoreSigner failed: %v", err)
 	}
-	defer signer.Close()
+	defer func() { _ = signer.Close() }()
 
 	// Verify address matches
 	if signer.Address() != account.Address {
@@ -176,7 +171,7 @@ func TestKeystoreSigner_PasswordFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKeystoreSigner with password file failed: %v", err)
 	}
-	defer signer.Close()
+	defer func() { _ = signer.Close() }()
 
 	// Verify it works
 	tx := createTestTransaction()
@@ -206,8 +201,7 @@ func TestKeystoreSigner_WrongPassword(t *testing.T) {
 		t.Fatalf("Failed to find keystore file")
 	}
 
-	os.Setenv("TEST_WRONG_PASSWORD", "wrongpassword")
-	defer os.Unsetenv("TEST_WRONG_PASSWORD")
+	t.Setenv("TEST_WRONG_PASSWORD", "wrongpassword")
 
 	_, err = NewKeystoreSigner(files[0], "TEST_WRONG_PASSWORD", "")
 	if err == nil {
@@ -216,8 +210,7 @@ func TestKeystoreSigner_WrongPassword(t *testing.T) {
 }
 
 func TestFactory(t *testing.T) {
-	os.Setenv("TEST_FACTORY_KEY", testPrivateKeyHex)
-	defer os.Unsetenv("TEST_FACTORY_KEY")
+	t.Setenv("TEST_FACTORY_KEY", testPrivateKeyHex)
 
 	tests := []struct {
 		name    string
@@ -285,15 +278,14 @@ func TestFactory(t *testing.T) {
 				return
 			}
 			if signer != nil {
-				signer.Close()
+				_ = signer.Close()
 			}
 		})
 	}
 }
 
 func TestSignerClose(t *testing.T) {
-	os.Setenv("TEST_CLOSE_KEY", testPrivateKeyHex)
-	defer os.Unsetenv("TEST_CLOSE_KEY")
+	t.Setenv("TEST_CLOSE_KEY", testPrivateKeyHex)
 
 	signer, err := NewEnvSigner("TEST_CLOSE_KEY")
 	if err != nil {

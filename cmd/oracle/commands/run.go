@@ -93,7 +93,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create wallet signer: %w", err)
 	}
-	defer signer.Close()
+	defer func() { _ = signer.Close() }()
 
 	dbPassword := os.Getenv(cfg.DBPasswordEnv)
 	if dbPassword == "" {

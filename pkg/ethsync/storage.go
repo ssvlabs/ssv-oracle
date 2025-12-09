@@ -221,7 +221,7 @@ func (s *PostgresStorage) GetActiveValidators(ctx context.Context) ([]ActiveVali
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active validators: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var validators []ActiveValidator
 	for rows.Next() {
