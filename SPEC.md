@@ -242,7 +242,6 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 - Network:
   - `eth_rpc_url`
   - `beacon_rpc_url`
-  - `ssv_node_rpc_url`
   - `ssv_network_contract_address`
 - Wallet:
   - `keystore_path` or `private_key_env`
@@ -316,7 +315,7 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
          - Log permanent failure for this round and wait for manual intervention.
 
 10. **Optional: update cluster balance**
-    - Listen to the `RootCommitted(merkleRoot, blockNum, block.timestamp)` event and validate the correct `merkleRoot` is constructed for `blockNum`.
+    - Listen to the `RootCommitted(merkleRoot, blockNum)` event and validate the correct `merkleRoot` is constructed for `blockNum`.
     - Call `UpdateClusterBalance` per cluster in internal configuration.
     - Use the same practices as in steps 7–9 to ensure a successful transaction.
 
