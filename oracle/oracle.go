@@ -233,12 +233,12 @@ func (o *Oracle) waitForFinalization(ctx context.Context, beaconClient *ethsync.
 		// Log progress once per checkpoint change
 		if checkpoint.Epoch != lastLoggedCheckpoint {
 			// We need checkpoint > targetEpoch, i.e., checkpoint >= targetEpoch + 1
-			needCheckpoint := targetEpoch + 1
+			targetCheckpoint := targetEpoch + 1
 			logger.Infow("Waiting for finalization",
-				"targetEpoch", targetEpoch,
-				"needCheckpoint", needCheckpoint,
+				"currentEpoch", currentEpoch,
 				"currentCheckpoint", checkpoint.Epoch,
-				"currentEpoch", currentEpoch)
+				"targetEpoch", targetEpoch,
+				"targetCheckpoint", targetCheckpoint)
 			lastLoggedCheckpoint = checkpoint.Epoch
 		}
 
