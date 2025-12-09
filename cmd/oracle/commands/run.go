@@ -89,16 +89,17 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid commit phases: %w", err)
 	}
 
+	// Validate required environment variables before loading secrets
+	dbPassword := os.Getenv(cfg.DBPasswordEnv)
+	if dbPassword == "" {
+		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
+	}
+
 	signer, err := wallet.NewSigner(&cfg.Wallet)
 	if err != nil {
 		return fmt.Errorf("failed to create wallet signer: %w", err)
 	}
 	defer func() { _ = signer.Close() }()
-
-	dbPassword := os.Getenv(cfg.DBPasswordEnv)
-	if dbPassword == "" {
-		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
-	}
 
 	logger.Infow("SSV Oracle starting",
 		"version", Version,

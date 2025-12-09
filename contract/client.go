@@ -39,6 +39,10 @@ func NewClient(rpcURL string, wsRPCURL string, contractAddress string, signer wa
 		return nil, fmt.Errorf("signer cannot be nil")
 	}
 
+	if !common.IsHexAddress(contractAddress) {
+		return nil, fmt.Errorf("invalid contract address: %s", contractAddress)
+	}
+
 	txmanager.SetErrorSelectors(ErrorSelectors)
 
 	ethClient, err := ethclient.Dial(rpcURL)

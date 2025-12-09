@@ -13,6 +13,11 @@ import (
 )
 
 // EnvSigner signs transactions using a private key from an environment variable.
+//
+// WARNING: For development/testing only. Not recommended for production use.
+// Environment variables may be logged, visible in process listings, or persisted
+// in shell history. Private keys in memory are not securely erased by Go's GC.
+// For production, use KeystoreSigner with encrypted keystore files.
 type EnvSigner struct {
 	privateKey *ecdsa.PrivateKey
 	address    common.Address

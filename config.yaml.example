@@ -36,10 +36,17 @@ sync_max_retries: 3                    # Max RPC retry attempts
 # ============================================================================
 # Wallet
 # ============================================================================
+#
+# WARNING: "env" type is for development/testing only.
+# For production, use "keystore" with an encrypted keystore file.
 
 wallet:
-  type: "env"                          # env | keystore
+  # Development (NOT for production):
+  type: "env"
   private_key_env: "PRIVATE_KEY"
+
+  # Production (recommended):
+  # type: "keystore"
   # keystore_path: "/path/to/keystore.json"
   # password_env: "KEYSTORE_PASSWORD"
   # password_file: "/path/to/password.txt"
