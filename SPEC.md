@@ -298,7 +298,6 @@ The client shall have tooling to generate Merkle proofs. This feature will be us
 
 8. **Broadcast TX**
     - Send TX to Ethereum node.
-    - Persist `{round, targetEpoch, merkleRoot, referenceBlock, txHash, retryCount=0}` locally.
 
 9. **Track TX and ensure success**
     - Poll for receipt until:
