@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/params"
 
 	"ssv-oracle/pkg/logger"
 	"ssv-oracle/wallet"
@@ -26,7 +27,6 @@ var (
 
 const (
 	receiptPollInterval = 4 * time.Second
-	simpleTransferGas   = 21000
 )
 
 // errorSelectors maps custom error selectors to human-readable names.
@@ -366,7 +366,7 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 		Nonce:     nonce,
 		GasTipCap: gasFeeCap,
 		GasFeeCap: gasFeeCap,
-		Gas:       simpleTransferGas,
+		Gas:       params.TxGas,
 		To:        &from,
 		Value:     big.NewInt(0),
 	})

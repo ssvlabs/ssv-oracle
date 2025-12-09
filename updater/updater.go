@@ -90,7 +90,8 @@ func (u *Updater) Run(ctx context.Context) error {
 					continue
 				}
 				if commit == nil {
-					log.Warn("Commit not found - event from unknown source?")
+					log.Warnw("Skipping RootCommitted event - not from this oracle",
+						"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
 					continue
 				}
 
