@@ -1,6 +1,7 @@
 package ethsync
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 	"time"
@@ -153,26 +154,29 @@ func TestComputeClusterIDFromEvent_ClusterMigratedToETH(t *testing.T) {
 	}
 }
 
-func TestClusterBalanceUpdatedEvent_HasClusterIDDirectly(t *testing.T) {
-	var clusterID [32]byte
-	copy(clusterID[:], []byte("test-cluster-id-12345678901234"))
+func TestClusterBalanceUpdatedEvent_ImplementsClusterEvent(t *testing.T) {
+	owner := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	operatorIDs := []uint64{1, 2, 3, 4}
 
 	event := &ClusterBalanceUpdatedEvent{
-		ClusterID:        clusterID,
+		Owner:            owner,
+		OperatorIDs:      operatorIDs,
 		BlockNum:         12345,
 		EffectiveBalance: big.NewInt(32000000000),
 		VUnits:           1,
 		Cluster:          Cluster{},
 	}
 
-	// ClusterBalanceUpdatedEvent doesn't implement clusterEvent
-	gotClusterID := computeClusterIDFromEvent(event)
-	if gotClusterID != nil {
-		t.Error("Expected nil from computeClusterIDFromEvent for ClusterBalanceUpdatedEvent")
+	// ClusterBalanceUpdatedEvent now implements clusterEvent
+	clusterID := computeClusterIDFromEvent(event)
+	if clusterID == nil {
+		t.Fatal("computeClusterIDFromEvent returned nil for ClusterBalanceUpdatedEvent")
 	}
 
-	if event.ClusterID != clusterID {
-		t.Errorf("ClusterID = %x, want %x", event.ClusterID, clusterID)
+	// Verify computed cluster ID matches expected
+	expectedID := ComputeClusterID(owner, operatorIDs)
+	if !bytes.Equal(clusterID, expectedID[:]) {
+		t.Errorf("ClusterID = %x, want %x", clusterID, expectedID)
 	}
 }
 

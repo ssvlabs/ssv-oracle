@@ -32,7 +32,7 @@ var (
 	EventSigClusterWithdrawn      = crypto.Keccak256Hash([]byte("ClusterWithdrawn(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterDeposited      = crypto.Keccak256Hash([]byte("ClusterDeposited(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterMigratedToETH  = crypto.Keccak256Hash([]byte("ClusterMigratedToETH(address,uint64[],uint256,uint256,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(bytes32,uint64,uint256,uint64,(uint32,uint64,uint64,bool,uint256))"))
+	EventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(address,uint64[],uint64,uint256,uint64,(uint32,uint64,uint64,bool,uint256))"))
 )
 
 // Cluster represents an SSV cluster state (matches ISSVNetworkCore.sol).
@@ -102,8 +102,9 @@ type ClusterMigratedToETHEvent struct {
 
 // ClusterBalanceUpdatedEvent is emitted when a cluster's effective balance is updated.
 type ClusterBalanceUpdatedEvent struct {
-	ClusterID        [32]byte // indexed
-	BlockNum         uint64   // indexed
+	Owner            common.Address // indexed
+	OperatorIDs      []uint64
+	BlockNum         uint64 // indexed
 	EffectiveBalance *big.Int
 	VUnits           uint64
 	Cluster          Cluster

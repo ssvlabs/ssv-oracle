@@ -381,9 +381,15 @@
     "inputs": [
       {
         "indexed": true,
-        "internalType": "bytes32",
-        "name": "clusterId",
-        "type": "bytes32"
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64[]",
+        "name": "operatorIds",
+        "type": "uint64[]"
       },
       {
         "indexed": true,

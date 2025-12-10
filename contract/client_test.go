@@ -45,7 +45,7 @@ func TestSSVNetworkABI_Events(t *testing.T) {
 		{eventClusterWithdrawn, 1, 3},
 		{eventClusterDeposited, 1, 3},
 		{eventClusterMigratedToETH, 1, 4},
-		{eventClusterBalanceUpdated, 2, 3},
+		{eventClusterBalanceUpdated, 2, 4},
 	}
 
 	for _, tt := range tests {
