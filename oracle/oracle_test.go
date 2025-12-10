@@ -336,12 +336,8 @@ func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
 	}
 }
 
-func TestBalanceThresholdConstants(t *testing.T) {
-	// Verify constants are correct
-	if ejectionBalanceGwei != 16_000_000_000 {
-		t.Errorf("ejectionBalanceGwei should be 16 ETH in gwei, got %d", ejectionBalanceGwei)
-	}
-	if defaultBalanceGwei != 32_000_000_000 {
-		t.Errorf("defaultBalanceGwei should be 32 ETH in gwei, got %d", defaultBalanceGwei)
+func TestBalanceFloorConstant(t *testing.T) {
+	if balanceFloorGwei != 32_000_000_000 {
+		t.Errorf("balanceFloorGwei should be 32 ETH in gwei, got %d", balanceFloorGwei)
 	}
 }

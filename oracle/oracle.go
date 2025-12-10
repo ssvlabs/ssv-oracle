@@ -15,7 +15,10 @@ import (
 	"ssv-oracle/txmanager"
 )
 
-const errorRetryDelay = 10 * time.Second
+const (
+	errorRetryDelay  = 10 * time.Second
+	balanceFloorGwei = 32_000_000_000 // Floor for low/missing validator balances (32 ETH)
+)
 
 // Config holds Oracle configuration.
 type Config struct {
@@ -209,14 +212,6 @@ func (o *Oracle) deduplicatePubkeys(validators []ethsync.ActiveValidator) [][]by
 	return pubkeys
 }
 
-// Balance thresholds in Gwei.
-const (
-	// ejectionBalanceGwei is the threshold below which validators are considered near ejection (16 ETH).
-	ejectionBalanceGwei = 16_000_000_000
-	// defaultBalanceGwei is the default effective balance for new/exited/low-balance validators (32 ETH).
-	defaultBalanceGwei = 32_000_000_000
-)
-
 func (o *Oracle) aggregateByCluster(validators []ethsync.ActiveValidator, balanceMap map[phase0.BLSPubKey]uint64) ([]ethsync.ClusterBalance, int) {
 	clusterTotals := make(map[[32]byte]uint64)
 	var notOnBeacon int
@@ -228,9 +223,9 @@ func (o *Oracle) aggregateByCluster(validators []ethsync.ActiveValidator, balanc
 		balance, onBeacon := balanceMap[pk]
 		if !onBeacon {
 			notOnBeacon++
-			balance = defaultBalanceGwei
-		} else if balance <= ejectionBalanceGwei {
-			balance = defaultBalanceGwei
+		}
+		if balance < balanceFloorGwei {
+			balance = balanceFloorGwei
 		}
 
 		var clusterID [32]byte
