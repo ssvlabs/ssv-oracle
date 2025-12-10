@@ -334,4 +334,3 @@ func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
 			balanceFloorGwei, result[0].EffectiveBalance)
 	}
 }
-
