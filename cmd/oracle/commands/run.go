@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -58,11 +57,7 @@ type Config struct {
 	SyncBatchSize  uint64 `yaml:"sync_batch_size"`
 	SyncMaxRetries int    `yaml:"sync_max_retries"`
 
-	DBHost        string `yaml:"db_host"`
-	DBPort        int    `yaml:"db_port"`
-	DBName        string `yaml:"db_name"`
-	DBUser        string `yaml:"db_user"`
-	DBPasswordEnv string `yaml:"db_password_env"`
+	DBPath string `yaml:"db_path"`
 
 	Wallet       wallet.Config        `yaml:"wallet"`
 	TxPolicy     txmanager.TxPolicy   `yaml:"tx_policy"`
@@ -79,9 +74,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid commit phases: %w", err)
 	}
 
-	dbPassword := os.Getenv(cfg.DBPasswordEnv)
-	if dbPassword == "" {
-		return fmt.Errorf("database password not found in %s", cfg.DBPasswordEnv)
+	if cfg.DBPath == "" {
+		return fmt.Errorf("db_path is required")
 	}
 
 	signer, err := wallet.NewSigner(&cfg.Wallet)
@@ -96,7 +90,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"signerAddress", signer.Address().Hex(),
 		"updater", withUpdater)
 
-	storage, execClient, beaconClient, err := initClients(cfg, dbPassword)
+	storage, execClient, beaconClient, err := initClients(cfg)
 	if err != nil {
 		return err
 	}
@@ -148,11 +142,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	return runServices(cfg, storage, ethClient, syncer, beaconClient)
 }
 
-func initClients(cfg *Config, dbPassword string) (*ethsync.PostgresStorage, *ethsync.ExecutionClient, *ethsync.BeaconClient, error) {
-	connString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		cfg.DBHost, cfg.DBPort, cfg.DBUser, url.QueryEscape(dbPassword), cfg.DBName)
-
-	storage, err := ethsync.NewPostgresStorage(connString)
+func initClients(cfg *Config) (*ethsync.Storage, *ethsync.ExecutionClient, *ethsync.BeaconClient, error) {
+	storage, err := ethsync.NewStorage(cfg.DBPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -161,7 +152,6 @@ func initClients(cfg *Config, dbPassword string) (*ethsync.PostgresStorage, *eth
 		URL:        cfg.EthRPC,
 		BatchSize:  cfg.SyncBatchSize,
 		MaxRetries: cfg.SyncMaxRetries,
-		RetryDelay: 5 * time.Second,
 	})
 	if err != nil {
 		_ = storage.Close()
@@ -180,7 +170,7 @@ func initClients(cfg *Config, dbPassword string) (*ethsync.PostgresStorage, *eth
 	return storage, execClient, beaconClient, nil
 }
 
-func validateChainID(storage *ethsync.PostgresStorage, execClient *ethsync.ExecutionClient) error {
+func validateChainID(storage *ethsync.Storage, execClient *ethsync.ExecutionClient) error {
 	ctx := context.Background()
 
 	chainID, err := execClient.GetChainID(ctx)
@@ -211,7 +201,7 @@ func validateChainID(storage *ethsync.PostgresStorage, execClient *ethsync.Execu
 
 func runServices(
 	cfg *Config,
-	storage *ethsync.PostgresStorage,
+	storage *ethsync.Storage,
 	ethClient *contract.Client,
 	syncer *ethsync.EventSyncer,
 	beaconClient *ethsync.BeaconClient,

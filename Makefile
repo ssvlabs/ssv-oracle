@@ -1,4 +1,4 @@
-.PHONY: help build test test-integration lint run run-all fresh fresh-all db-up db-wait docker clean
+.PHONY: help build test lint run run-all fresh fresh-all docker clean
 .DEFAULT_GOAL := help
 
 # Load .env file if it exists
@@ -11,6 +11,9 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS := -ldflags="-X main.Version=$(VERSION) -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME) -s -w"
 
+# Default database path (must match config.yaml default)
+DB_PATH := ./data/oracle.db
+
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -19,9 +22,6 @@ build: ## Build the oracle binary
 
 test: ## Run unit tests
 	go test ./...
-
-test-integration: db-up db-wait ## Run integration tests (requires DB)
-	go test ./... -tags=integration
 
 lint: ## Run linters
 	@echo "Running linters..."
@@ -32,29 +32,21 @@ lint: ## Run linters
 	@golangci-lint run ./...
 	@echo "✓ golangci-lint passed"
 
-run: build db-up db-wait ## Run oracle
+run: build ## Run oracle
 	./ssv-oracle run --config config.yaml
 
-run-all: build db-up db-wait ## Run oracle with updater
+run-all: build ## Run oracle with updater
 	./ssv-oracle run --config config.yaml --updater
 
-fresh: build db-reset db-wait ## Fresh start (reset DB)
+fresh: build db-reset ## Fresh start (reset DB)
 	./ssv-oracle run --config config.yaml --fresh
 
-fresh-all: build db-reset db-wait ## Fresh start with updater
+fresh-all: build db-reset ## Fresh start with updater
 	./ssv-oracle run --config config.yaml --fresh --updater
 
-db-up: ## Start PostgreSQL
-	@docker-compose up -d postgres
-
-db-reset:
-	@docker-compose down -v postgres 2>/dev/null || true
-	@docker-compose up -d postgres
-
-db-wait:
-	@echo "Waiting for PostgreSQL..."
-	@until docker-compose exec -T postgres pg_isready -U oracle > /dev/null 2>&1; do sleep 0.5; done
-	@echo "✓ PostgreSQL ready"
+db-reset: ## Remove SQLite database files
+	@rm -f $(DB_PATH) $(DB_PATH)-wal $(DB_PATH)-shm
+	@echo "✓ Database reset"
 
 docker: ## Build Docker image
 	docker build \
@@ -65,5 +57,5 @@ docker: ## Build Docker image
 		-t ssv-oracle:latest \
 		.
 
-clean: ## Remove build artifacts
+clean: db-reset ## Remove build artifacts and database
 	rm -f ssv-oracle

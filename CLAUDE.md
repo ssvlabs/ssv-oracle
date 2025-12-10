@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-`ssv-oracle` is a Go 1.24 oracle client that publishes Merkle roots of SSV cluster effective balances to an onchain oracle contract.
+`ssv-oracle` is a Go 1.25 oracle client that publishes Merkle roots of SSV cluster effective balances to an onchain oracle contract.
 
 ## Development Commands
 
@@ -16,6 +16,8 @@ make run        # Run oracle
 make run-all    # Run oracle with updater
 make fresh      # Fresh start (reset DB)
 make fresh-all  # Fresh start with updater
+make db-reset   # Remove SQLite database files
+make clean      # Remove build artifacts and database
 ```
 
 ## Project Structure
@@ -29,15 +31,17 @@ ssv-oracle/
 ├── updater/            # Cluster balance updater
 ├── wallet/             # Transaction signing (env, keystore)
 ├── txmanager/          # Transaction lifecycle (gas, retries, cancellation)
-└── pkg/ethsync/        # Event syncing & storage (PostgreSQL)
+├── pkg/ethsync/        # Event syncing & storage (SQLite)
+└── data/               # SQLite database files (gitignored)
 ```
 
 ## Key Components
 
 ### Event Syncing (pkg/ethsync)
-- Syncs SSV contract events to PostgreSQL
+- Syncs SSV contract events to SQLite
 - Tracks validator and cluster state
 - Schema auto-applies on startup via `//go:embed schema.sql`
+- Uses WAL mode for better concurrency
 
 ### Oracle Loop (oracle/)
 1. Sync events incrementally
@@ -71,14 +75,30 @@ keccak256(abi.encodePacked(owner, uint256(op1), uint256(op2), ...))
 - Operator IDs sorted ascending
 - Each operator ID is 32-byte uint256
 
-## Database Schema
+## Database (SQLite)
 
-Key tables:
+Single-file database at `./data/oracle.db` with WAL mode enabled.
+
+### Key Tables
 - `sync_progress` - Chain ID and last synced block
 - `contract_events` - Raw SSV events (append-only)
 - `clusters` - Current cluster state (deleted when validator_count = 0)
 - `validators` - Validator membership (cascade delete with cluster)
 - `oracle_commits` - Commit history with cluster balances for merkle reconstruction
+
+### Database Files
+- `oracle.db` - Main database file
+- `oracle.db-wal` - Write-ahead log (WAL mode)
+- `oracle.db-shm` - Shared memory file (WAL mode)
+
+### Backup
+```bash
+# When DB is idle
+cp data/oracle.db data/oracle.db.backup
+
+# Online backup
+sqlite3 data/oracle.db ".backup data/oracle.db.backup"
+```
 
 ## Configuration
 
@@ -87,6 +107,7 @@ eth_rpc: "http://localhost:8545"      # Execution layer RPC (HTTP)
 eth_ws_rpc: "ws://localhost:8546"     # Execution layer WebSocket (for updater)
 beacon_rpc: "http://localhost:5052"   # Beacon node RPC
 ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
+db_path: "./data/oracle.db"           # SQLite database path
 ```
 
 - Chain ID is auto-detected from RPC

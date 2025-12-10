@@ -30,7 +30,7 @@ type EventSyncer struct {
 // EventSyncerConfig holds configuration for the event syncer.
 type EventSyncerConfig struct {
 	ExecutionClient *ExecutionClient
-	Storage         *PostgresStorage
+	Storage         *Storage
 	SSVContract     common.Address
 	Spec            *Spec // Beacon chain spec for slot/epoch calculations
 }

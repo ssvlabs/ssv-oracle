@@ -68,7 +68,7 @@ func TestNew(t *testing.T) {
 	phases := []CommitPhase{{StartEpoch: 0, Interval: 225}}
 
 	cfg := &Config{
-		Storage:        nil, // Would be *ethsync.PostgresStorage
+		Storage:        nil, // Would be *ethsync.Storage
 		ContractClient: nil, // Would be *contract.Client
 		Phases:         phases,
 	}

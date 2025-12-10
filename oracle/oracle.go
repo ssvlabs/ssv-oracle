@@ -19,7 +19,7 @@ const errorRetryDelay = 10 * time.Second
 
 // Config holds Oracle configuration.
 type Config struct {
-	Storage        *ethsync.PostgresStorage
+	Storage        *ethsync.Storage
 	ContractClient *contract.Client
 	Phases         []CommitPhase
 }

@@ -4,19 +4,19 @@ Off-chain oracle client that publishes Merkle roots of SSV cluster effective bal
 
 ## Features
 
-- **Event-sourced architecture** - Syncs SSV contract events to PostgreSQL for point-in-time queries
+- **Event-sourced architecture** - Syncs SSV contract events to SQLite for point-in-time queries
 - **Epoch-aligned timing** - Waits for epoch finalization before committing roots
 - **OpenZeppelin-compatible Merkle trees** - Deterministic root computation with standardized sibling ordering
 - **Beacon chain integration** - Fetches validator effective balances directly from consensus layer
 - **Unified contract** - Uses SSV Network contract with integrated oracle functionality
+- **Single binary deployment** - SQLite database requires no external services
 
 ## Quick Start
 
 ### Prerequisites
 
 - Go 1.25+
-- Docker (for PostgreSQL)
-- Ethereum execution client (RPC endpoint)
+- Ethereum execution client (HTTP RPC, WebSocket for `--updater`)
 - Beacon node (REST API endpoint)
 
 ### Installation
@@ -27,7 +27,8 @@ cp .env.example .env
 cp config.yaml.example config.yaml
 
 # Edit config.yaml with your endpoints
-# - eth_rpc: Execution layer RPC
+# - eth_rpc: Execution layer HTTP RPC
+# - eth_ws_rpc: Execution layer WebSocket (required for --updater)
 # - beacon_rpc: Beacon node API
 # - ssv_contract: SSV Network contract address (includes oracle functionality)
 
@@ -49,7 +50,8 @@ make fresh-all    # Fresh start with updater
 make test         # Run tests
 make lint         # Run linters
 make docker       # Build Docker image
-make clean        # Remove build artifacts
+make clean        # Remove build artifacts and database
+make db-reset     # Remove SQLite database files
 ```
 
 **CLI flags:**
@@ -77,12 +79,8 @@ sync_from_block: 17507487  # SSV contract deployment block (mainnet example)
 sync_batch_size: 200
 sync_max_retries: 3
 
-# Database
-db_host: "localhost"
-db_port: 5432
-db_name: "ssv_oracle"
-db_user: "oracle"
-db_password_env: "DB_PASSWORD"
+# Database (SQLite)
+db_path: "./data/oracle.db"
 
 # Wallet
 wallet:
@@ -178,14 +176,30 @@ clusterId = keccak256(abi.encodePacked(owner, uint256(op1), uint256(op2), ...))
 ```
 where operator IDs are sorted ascending.
 
-## Database Schema
+## Database
 
-PostgreSQL tables:
+SQLite database at `./data/oracle.db` with WAL mode for better concurrency.
+
+**Tables:**
 - `sync_progress` - Sync state and chain ID validation
 - `contract_events` - Raw SSV contract events (audit log)
 - `clusters` - Current cluster state
 - `validators` - Validator membership (cluster_id, pubkey)
 - `oracle_commits` - History of committed roots with cluster balances
+
+**Database files (WAL mode):**
+- `oracle.db` - Main database
+- `oracle.db-wal` - Write-ahead log
+- `oracle.db-shm` - Shared memory
+
+**Backup:**
+```bash
+# When DB is idle
+cp data/oracle.db data/oracle.db.backup
+
+# Online backup (safe)
+sqlite3 data/oracle.db ".backup data/oracle.db.backup"
+```
 
 ## Project Structure
 
@@ -197,7 +211,8 @@ ssv-oracle/
 ├── oracle/             Oracle cycle logic
 ├── updater/            Cluster balance updater
 ├── wallet/             Transaction signing (env, keystore)
-└── pkg/ethsync/        Event syncing, beacon client, storage
+├── pkg/ethsync/        Event syncing, beacon client, storage
+└── data/               SQLite database files (gitignored)
 ```
 
 ## Logging
@@ -234,10 +249,10 @@ go test -run TestMerkleTree ./merkle
 
 ## Troubleshooting
 
-**Database connection failed**
+**Database errors**
 ```bash
-docker ps  # Check if PostgreSQL is running
-make fresh  # Reset and restart
+make db-reset  # Remove SQLite files and start fresh
+make fresh     # Reset and restart
 ```
 
 **Execution client connection failed**

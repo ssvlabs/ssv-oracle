@@ -21,7 +21,7 @@ const retryDelay = 5 * time.Second
 
 // Config holds Updater configuration.
 type Config struct {
-	Storage        *ethsync.PostgresStorage
+	Storage        *ethsync.Storage
 	ContractClient *contract.Client
 }
 

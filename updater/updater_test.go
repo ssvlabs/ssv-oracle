@@ -33,7 +33,7 @@ func (m *mockStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*e
 
 func TestNew(t *testing.T) {
 	cfg := &Config{
-		Storage:        nil, // Would be *ethsync.PostgresStorage
+		Storage:        nil, // Would be *ethsync.Storage
 		ContractClient: nil, // Would be *contract.Client
 	}
 

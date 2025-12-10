@@ -3,15 +3,17 @@ package ethsync
 import (
 	"context"
 	"database/sql"
-	_ "embed"
+	_ "embed" // for schema.sql
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
-	"github.com/lib/pq"
+	_ "modernc.org/sqlite" // register sqlite driver
 
 	"ssv-oracle/pkg/logger"
 )
@@ -95,17 +97,30 @@ type OracleCommit struct {
 	TxHash          []byte
 }
 
-// PostgresStorage implements persistent storage using PostgreSQL.
-type PostgresStorage struct {
-	db *sql.DB
-}
+// SQLite configuration constants.
+const (
+	sqliteBusyTimeoutMs = 5000  // Wait up to 5s for locks
+	sqliteCacheSizeKB   = 64000 // 64MB page cache
+	maxIdleConns        = 2
+)
 
 //go:embed schema.sql
 var schemaSQL string
 
-// NewPostgresStorage creates a new PostgreSQL storage and applies the schema.
-func NewPostgresStorage(connString string) (*PostgresStorage, error) {
-	db, err := sql.Open("postgres", connString)
+// Storage implements persistent storage using SQLite.
+type Storage struct {
+	db *sql.DB
+}
+
+// NewStorage creates a new SQLite storage and applies the schema.
+func NewStorage(dbPath string) (*Storage, error) {
+	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("failed to create db directory: %w", err)
+		}
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -114,19 +129,38 @@ func NewPostgresStorage(connString string) (*PostgresStorage, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	// WAL mode for concurrent reads, NORMAL sync for durability without excessive fsync
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA foreign_keys=ON",
+		fmt.Sprintf("PRAGMA busy_timeout=%d", sqliteBusyTimeoutMs),
+		fmt.Sprintf("PRAGMA cache_size=-%d", sqliteCacheSizeKB),
+	}
+	for _, pragma := range pragmas {
+		if _, err := db.Exec(pragma); err != nil {
+			return nil, fmt.Errorf("failed to set %s: %w", pragma, err)
+		}
+	}
+
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(time.Hour)
+
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("failed to apply schema: %w", err)
 	}
 	logger.Info("Database schema applied")
 
-	return &PostgresStorage{db: db}, nil
+	return &Storage{db: db}, nil
 }
 
-func (s *PostgresStorage) Close() error {
+// Close closes the database connection.
+func (s *Storage) Close() error {
 	return s.db.Close()
 }
 
-func (s *PostgresStorage) GetChainID(ctx context.Context) (*uint64, error) {
+// GetChainID returns the stored chain ID, or nil if not set.
+func (s *Storage) GetChainID(ctx context.Context) (*uint64, error) {
 	var chainID *uint64
 	err := s.db.QueryRowContext(ctx, `SELECT chain_id FROM sync_progress WHERE id = 1`).Scan(&chainID)
 	if err != nil {
@@ -135,15 +169,17 @@ func (s *PostgresStorage) GetChainID(ctx context.Context) (*uint64, error) {
 	return chainID, nil
 }
 
-func (s *PostgresStorage) SetChainID(ctx context.Context, chainID uint64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sync_progress SET chain_id = $1, updated_at = NOW() WHERE id = 1`, chainID)
+// SetChainID stores the chain ID.
+func (s *Storage) SetChainID(ctx context.Context, chainID uint64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE sync_progress SET chain_id = ?, updated_at = datetime('now') WHERE id = 1`, chainID)
 	if err != nil {
 		return fmt.Errorf("failed to set chain ID: %w", err)
 	}
 	return nil
 }
 
-func (s *PostgresStorage) GetLastSyncedBlock(ctx context.Context) (uint64, error) {
+// GetLastSyncedBlock returns the last synced block number.
+func (s *Storage) GetLastSyncedBlock(ctx context.Context) (uint64, error) {
 	var blockNum uint64
 	err := s.db.QueryRowContext(ctx, `SELECT last_synced_block FROM sync_progress WHERE id = 1`).Scan(&blockNum)
 	if err != nil {
@@ -152,36 +188,42 @@ func (s *PostgresStorage) GetLastSyncedBlock(ctx context.Context) (uint64, error
 	return blockNum, nil
 }
 
-func (s *PostgresStorage) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
+// UpdateLastSyncedBlock updates the last synced block number.
+func (s *Storage) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
 	return updateLastSyncedBlock(ctx, s.db, blockNum)
 }
 
-func (s *PostgresStorage) InsertEvent(ctx context.Context, event *ContractEvent) error {
+// InsertEvent stores a contract event.
+func (s *Storage) InsertEvent(ctx context.Context, event *ContractEvent) error {
 	return insertEvent(ctx, s.db, event)
 }
 
-func (s *PostgresStorage) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
+// UpsertCluster creates or updates a cluster.
+func (s *Storage) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
 	return upsertCluster(ctx, s.db, cluster)
 }
 
-func (s *PostgresStorage) DeleteCluster(ctx context.Context, clusterID []byte) error {
+// DeleteCluster removes a cluster and its validators (cascade).
+func (s *Storage) DeleteCluster(ctx context.Context, clusterID []byte) error {
 	return deleteCluster(ctx, s.db, clusterID)
 }
 
-func (s *PostgresStorage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow, error) {
+// GetCluster retrieves a cluster by ID, or nil if not found.
+func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow, error) {
 	query := `
 		SELECT cluster_id, owner_address, operator_ids, validator_count,
-		       network_fee_index, index, is_active, balance, last_updated_slot
-		FROM clusters WHERE cluster_id = $1
+		       network_fee_index, idx, is_active, balance, last_updated_slot
+		FROM clusters WHERE cluster_id = ?
 	`
 	var cluster ClusterRow
-	var operatorIDs []int64
+	var operatorIDsJSON string
 	var balanceStr string
+	var isActiveInt int
 
 	err := s.db.QueryRowContext(ctx, query, clusterID).Scan(
-		&cluster.ClusterID, &cluster.OwnerAddress, pq.Array(&operatorIDs),
+		&cluster.ClusterID, &cluster.OwnerAddress, &operatorIDsJSON,
 		&cluster.ValidatorCount, &cluster.NetworkFeeIndex, &cluster.Index,
-		&cluster.IsActive, &balanceStr, &cluster.LastUpdatedSlot,
+		&isActiveInt, &balanceStr, &cluster.LastUpdatedSlot,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -190,10 +232,12 @@ func (s *PostgresStorage) GetCluster(ctx context.Context, clusterID []byte) (*Cl
 		return nil, fmt.Errorf("failed to get cluster: %w", err)
 	}
 
-	cluster.OperatorIDs = make([]uint64, len(operatorIDs))
-	for i, id := range operatorIDs {
-		cluster.OperatorIDs[i] = uint64(id)
+	operatorIDs, err := decodeOperatorIDs(operatorIDsJSON)
+	if err != nil {
+		return nil, err
 	}
+	cluster.OperatorIDs = operatorIDs
+	cluster.IsActive = intToBool(isActiveInt)
 	cluster.Balance = new(big.Int)
 	if _, ok := cluster.Balance.SetString(balanceStr, 10); !ok {
 		return nil, fmt.Errorf("invalid balance value: %s", balanceStr)
@@ -202,20 +246,23 @@ func (s *PostgresStorage) GetCluster(ctx context.Context, clusterID []byte) (*Cl
 	return &cluster, nil
 }
 
-func (s *PostgresStorage) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
+// InsertValidator adds a validator to a cluster.
+func (s *Storage) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
 	return insertValidator(ctx, s.db, clusterID, pubkey)
 }
 
-func (s *PostgresStorage) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
+// DeleteValidator removes a validator from a cluster.
+func (s *Storage) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
 	return deleteValidator(ctx, s.db, clusterID, pubkey)
 }
 
-func (s *PostgresStorage) GetActiveValidators(ctx context.Context) ([]ActiveValidator, error) {
+// GetActiveValidators returns all validators belonging to active clusters.
+func (s *Storage) GetActiveValidators(ctx context.Context) ([]ActiveValidator, error) {
 	query := `
 		SELECT v.cluster_id, v.validator_pubkey
 		FROM validators v
 		JOIN clusters c ON c.cluster_id = v.cluster_id
-		WHERE c.is_active = true
+		WHERE c.is_active = 1
 		ORDER BY v.cluster_id, v.validator_pubkey
 	`
 	rows, err := s.db.QueryContext(ctx, query)
@@ -235,7 +282,8 @@ func (s *PostgresStorage) GetActiveValidators(ctx context.Context) ([]ActiveVali
 	return validators, rows.Err()
 }
 
-func (s *PostgresStorage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ClusterBalance) error {
+// InsertPendingCommit stores a new oracle commit with pending status.
+func (s *Storage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ClusterBalance) error {
 	balancesJSON, err := json.Marshal(clusterBalances)
 	if err != nil {
 		return fmt.Errorf("failed to marshal cluster balances: %w", err)
@@ -243,7 +291,7 @@ func (s *PostgresStorage) InsertPendingCommit(ctx context.Context, roundID, targ
 
 	query := `
 		INSERT INTO oracle_commits (round_id, target_epoch, merkle_root, reference_block, cluster_balances, status)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (round_id) DO NOTHING
 	`
 	_, err = s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
@@ -253,8 +301,9 @@ func (s *PostgresStorage) InsertPendingCommit(ctx context.Context, roundID, targ
 	return nil
 }
 
-func (s *PostgresStorage) UpdateCommitStatus(ctx context.Context, roundID uint64, status CommitStatus, txHash []byte) error {
-	query := `UPDATE oracle_commits SET status = $1, tx_hash = $2 WHERE round_id = $3`
+// UpdateCommitStatus updates the status and transaction hash of a commit.
+func (s *Storage) UpdateCommitStatus(ctx context.Context, roundID uint64, status CommitStatus, txHash []byte) error {
+	query := `UPDATE oracle_commits SET status = ?, tx_hash = ? WHERE round_id = ?`
 	_, err := s.db.ExecContext(ctx, query, status, txHash, roundID)
 	if err != nil {
 		return fmt.Errorf("failed to update commit status: %w", err)
@@ -262,10 +311,11 @@ func (s *PostgresStorage) UpdateCommitStatus(ctx context.Context, roundID uint64
 	return nil
 }
 
-func (s *PostgresStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
+// GetCommitByBlock retrieves a commit by reference block, or nil if not found.
+func (s *Storage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
 	query := `
 		SELECT round_id, target_epoch, merkle_root, reference_block, cluster_balances, status, tx_hash
-		FROM oracle_commits WHERE reference_block = $1
+		FROM oracle_commits WHERE reference_block = ?
 	`
 	var c OracleCommit
 	var balancesJSON []byte
@@ -286,7 +336,8 @@ func (s *PostgresStorage) GetCommitByBlock(ctx context.Context, blockNum uint64)
 	return &c, nil
 }
 
-func (s *PostgresStorage) ClearAllState(ctx context.Context) error {
+// ClearAllState removes all data and resets sync progress.
+func (s *Storage) ClearAllState(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -297,14 +348,15 @@ func (s *PostgresStorage) ClearAllState(ctx context.Context) error {
 		}
 	}()
 
+	// Order matters: validators references clusters
 	tables := []string{"oracle_commits", "validators", "clusters", "contract_events"}
 	for _, table := range tables {
-		if _, err = tx.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table)); err != nil {
-			return fmt.Errorf("failed to truncate %s: %w", table, err)
+		if _, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", table)); err != nil {
+			return fmt.Errorf("failed to clear %s: %w", table, err)
 		}
 	}
 
-	_, err = tx.ExecContext(ctx, `UPDATE sync_progress SET chain_id = NULL, last_synced_block = 0, updated_at = NOW() WHERE id = 1`)
+	_, err = tx.ExecContext(ctx, `UPDATE sync_progress SET chain_id = NULL, last_synced_block = 0, updated_at = datetime('now') WHERE id = 1`)
 	if err != nil {
 		return fmt.Errorf("failed to reset sync progress: %w", err)
 	}
@@ -316,60 +368,59 @@ func (s *PostgresStorage) ClearAllState(ctx context.Context) error {
 	return nil
 }
 
-func (s *PostgresStorage) BeginTx(ctx context.Context) (Tx, error) {
+// BeginTx starts a new database transaction.
+func (s *Storage) BeginTx(ctx context.Context) (Tx, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	return &postgresTx{tx: tx}, nil
+	return &storageTx{tx: tx}, nil
 }
 
-// postgresTx wraps sql.Tx to implement Tx interface
-type postgresTx struct {
+// storageTx wraps sql.Tx to implement the Tx interface.
+type storageTx struct {
 	tx *sql.Tx
 }
 
-func (t *postgresTx) Commit() error   { return t.tx.Commit() }
-func (t *postgresTx) Rollback() error { return t.tx.Rollback() }
+func (t *storageTx) Commit() error   { return t.tx.Commit() }
+func (t *storageTx) Rollback() error { return t.tx.Rollback() }
 
-func (t *postgresTx) InsertEvent(ctx context.Context, event *ContractEvent) error {
+func (t *storageTx) InsertEvent(ctx context.Context, event *ContractEvent) error {
 	return insertEvent(ctx, t.tx, event)
 }
 
-func (t *postgresTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
+func (t *storageTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
 	return upsertCluster(ctx, t.tx, cluster)
 }
 
-func (t *postgresTx) DeleteCluster(ctx context.Context, clusterID []byte) error {
+func (t *storageTx) DeleteCluster(ctx context.Context, clusterID []byte) error {
 	return deleteCluster(ctx, t.tx, clusterID)
 }
 
-func (t *postgresTx) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
+func (t *storageTx) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
 	return insertValidator(ctx, t.tx, clusterID, pubkey)
 }
 
-func (t *postgresTx) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
+func (t *storageTx) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
 	return deleteValidator(ctx, t.tx, clusterID, pubkey)
 }
 
-func (t *postgresTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
+func (t *storageTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
 	return updateLastSyncedBlock(ctx, t.tx, blockNum)
 }
-
-// Shared implementations
 
 func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 	query := `
 		INSERT INTO contract_events (
 			block_number, log_index, event_type, slot, block_hash, block_time,
 			transaction_hash, transaction_index, cluster_id, raw_log, raw_event, error
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
 	_, err := e.ExecContext(ctx, query,
 		event.BlockNumber, event.LogIndex, event.EventType, event.Slot,
-		event.BlockHash, event.BlockTime, event.TransactionHash, event.TransactionIndex,
-		event.ClusterID, event.RawLog, event.RawEvent, event.Error,
+		event.BlockHash, event.BlockTime.Format(time.RFC3339), event.TransactionHash, event.TransactionIndex,
+		event.ClusterID, string(event.RawLog), string(event.RawEvent), event.Error,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert event: %w", err)
@@ -378,29 +429,30 @@ func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 }
 
 func upsertCluster(ctx context.Context, e executor, cluster *ClusterRow) error {
+	operatorIDsJSON, err := encodeOperatorIDs(cluster.OperatorIDs)
+	if err != nil {
+		return err
+	}
+
 	query := `
 		INSERT INTO clusters (
 			cluster_id, owner_address, operator_ids, validator_count,
-			network_fee_index, index, is_active, balance, last_updated_slot
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			network_fee_index, idx, is_active, balance, last_updated_slot
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (cluster_id) DO UPDATE SET
 			owner_address = EXCLUDED.owner_address,
 			operator_ids = EXCLUDED.operator_ids,
 			validator_count = EXCLUDED.validator_count,
 			network_fee_index = EXCLUDED.network_fee_index,
-			index = EXCLUDED.index,
+			idx = EXCLUDED.idx,
 			is_active = EXCLUDED.is_active,
 			balance = EXCLUDED.balance,
 			last_updated_slot = EXCLUDED.last_updated_slot
 	`
-	operatorIDs := make([]int64, len(cluster.OperatorIDs))
-	for i, id := range cluster.OperatorIDs {
-		operatorIDs[i] = int64(id)
-	}
-	_, err := e.ExecContext(ctx, query,
-		cluster.ClusterID, cluster.OwnerAddress, pq.Array(operatorIDs),
+	_, err = e.ExecContext(ctx, query,
+		cluster.ClusterID, cluster.OwnerAddress, operatorIDsJSON,
 		cluster.ValidatorCount, cluster.NetworkFeeIndex, cluster.Index,
-		cluster.IsActive, cluster.Balance.String(), cluster.LastUpdatedSlot,
+		boolToInt(cluster.IsActive), cluster.Balance.String(), cluster.LastUpdatedSlot,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert cluster: %w", err)
@@ -409,7 +461,7 @@ func upsertCluster(ctx context.Context, e executor, cluster *ClusterRow) error {
 }
 
 func deleteCluster(ctx context.Context, e executor, clusterID []byte) error {
-	_, err := e.ExecContext(ctx, `DELETE FROM clusters WHERE cluster_id = $1`, clusterID)
+	_, err := e.ExecContext(ctx, `DELETE FROM clusters WHERE cluster_id = ?`, clusterID)
 	if err != nil {
 		return fmt.Errorf("failed to delete cluster: %w", err)
 	}
@@ -421,7 +473,7 @@ func insertValidator(ctx context.Context, e executor, clusterID, pubkey []byte) 
 		return fmt.Errorf("invalid validator pubkey length: got %d, expected %d", len(pubkey), phase0.PublicKeyLength)
 	}
 	_, err := e.ExecContext(ctx,
-		`INSERT INTO validators (cluster_id, validator_pubkey) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		`INSERT INTO validators (cluster_id, validator_pubkey) VALUES (?, ?) ON CONFLICT DO NOTHING`,
 		clusterID, pubkey,
 	)
 	if err != nil {
@@ -432,7 +484,7 @@ func insertValidator(ctx context.Context, e executor, clusterID, pubkey []byte) 
 
 func deleteValidator(ctx context.Context, e executor, clusterID, pubkey []byte) error {
 	_, err := e.ExecContext(ctx,
-		`DELETE FROM validators WHERE cluster_id = $1 AND validator_pubkey = $2`,
+		`DELETE FROM validators WHERE cluster_id = ? AND validator_pubkey = ?`,
 		clusterID, pubkey,
 	)
 	if err != nil {
@@ -442,9 +494,36 @@ func deleteValidator(ctx context.Context, e executor, clusterID, pubkey []byte) 
 }
 
 func updateLastSyncedBlock(ctx context.Context, e executor, blockNum uint64) error {
-	_, err := e.ExecContext(ctx, `UPDATE sync_progress SET last_synced_block = $1, updated_at = NOW() WHERE id = 1`, blockNum)
+	_, err := e.ExecContext(ctx, `UPDATE sync_progress SET last_synced_block = ?, updated_at = datetime('now') WHERE id = 1`, blockNum)
 	if err != nil {
 		return fmt.Errorf("failed to update last synced block: %w", err)
 	}
 	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func intToBool(i int) bool {
+	return i != 0
+}
+
+func encodeOperatorIDs(ids []uint64) (string, error) {
+	data, err := json.Marshal(ids)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode operator IDs: %w", err)
+	}
+	return string(data), nil
+}
+
+func decodeOperatorIDs(data string) ([]uint64, error) {
+	var ids []uint64
+	if err := json.Unmarshal([]byte(data), &ids); err != nil {
+		return nil, fmt.Errorf("failed to decode operator IDs: %w", err)
+	}
+	return ids, nil
 }

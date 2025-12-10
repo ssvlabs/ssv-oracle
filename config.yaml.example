@@ -16,14 +16,10 @@ beacon_rpc: "http://127.0.0.1:5052"    # Consensus layer
 ssv_contract: "0x..."
 
 # ============================================================================
-# Database
+# Database (SQLite)
 # ============================================================================
 
-db_host: "localhost"
-db_port: 5432
-db_name: "ssv_oracle"
-db_user: "oracle"
-db_password_env: "DB_PASSWORD"         # Read password from this env var
+db_path: "./data/oracle.db"            # SQLite database file
 
 # ============================================================================
 # Event Syncing
