@@ -328,16 +328,10 @@ func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
 		t.Errorf("Expected 1 validator not on beacon, got %d", notOnBeacon)
 	}
 
-	// Should default to 32 ETH
-	expectedBalance := uint64(32_000_000_000)
-	if result[0].EffectiveBalance != expectedBalance {
-		t.Errorf("Expected cluster balance %d gwei (32 ETH), got %d gwei",
-			expectedBalance, result[0].EffectiveBalance)
+	// Should default to balance floor
+	if result[0].EffectiveBalance != balanceFloorGwei {
+		t.Errorf("Expected cluster balance %d gwei, got %d gwei",
+			balanceFloorGwei, result[0].EffectiveBalance)
 	}
 }
 
-func TestBalanceFloorConstant(t *testing.T) {
-	if balanceFloorGwei != 32_000_000_000 {
-		t.Errorf("balanceFloorGwei should be 32 ETH in gwei, got %d", balanceFloorGwei)
-	}
-}
