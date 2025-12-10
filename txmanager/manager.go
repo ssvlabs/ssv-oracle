@@ -20,30 +20,31 @@ import (
 	"ssv-oracle/wallet"
 )
 
+// Sentinel errors.
 var (
 	ErrMaxGasReached       = errors.New("max gas price reached, tx cancelled")
 	ErrMaxRetriesExhausted = errors.New("max retries exhausted")
+	ErrNonceTooLow         = errors.New("nonce too low")
 )
+
+const receiptPollInterval = 4 * time.Second
+
+// FailureReason categorizes transaction failures.
+type FailureReason string
 
 const (
-	receiptPollInterval = 4 * time.Second
+	FailureRevert    FailureReason = "revert"
+	FailureNonce     FailureReason = "nonce"
+	FailureGas       FailureReason = "gas"
+	FailureTimeout   FailureReason = "timeout"
+	FailureTransient FailureReason = "transient"
 )
 
-// errorSelectors maps custom error selectors to human-readable names.
-// Set via SetErrorSelectors, typically from contract.ErrorSelectors.
-var errorSelectors map[string]string
-
-// SetErrorSelectors sets the error selectors map for decoding revert reasons.
-// Should be called at startup with contract.ErrorSelectors.
-func SetErrorSelectors(selectors map[string]string) {
-	errorSelectors = selectors
-}
-
-// RevertError represents a call or transaction that reverted.
+// RevertError represents a contract call or transaction that reverted.
 type RevertError struct {
-	Reason    string // The decoded revert reason
-	Simulated bool   // True if failed during simulation (no tx sent)
-	TxHash    string // Transaction hash (empty if simulated)
+	Reason    string
+	Simulated bool
+	TxHash    string
 }
 
 func (e *RevertError) Error() string {
@@ -56,61 +57,15 @@ func (e *RevertError) Error() string {
 	return fmt.Sprintf("reverted: %s", e.Reason)
 }
 
-// IsRevertError checks if an error is a RevertError and returns it.
-func IsRevertError(err error) (*RevertError, bool) {
-	var revertErr *RevertError
-	if errors.As(err, &revertErr) {
-		return revertErr, true
-	}
-	return nil, false
-}
-
-// FailureReason classifies why a transaction failed.
-type FailureReason string
-
-const (
-	FailureRevert    FailureReason = "revert"    // Contract rejected (permanent)
-	FailureGas       FailureReason = "gas"       // Max gas reached (transient)
-	FailureTimeout   FailureReason = "timeout"   // Max retries exhausted (transient)
-	FailureTransient FailureReason = "transient" // Other transient errors
-)
-
-// ClassifyError determines if an error is permanent or transient.
-// Returns (reason, retryable) where retryable indicates if the operation
-// may succeed on retry. Permanent errors (reverts) won't succeed on retry.
-func ClassifyError(err error) (FailureReason, bool) {
-	if err == nil {
-		return "", false
-	}
-
-	// Contract reverts are permanent - retrying won't help
-	if _, ok := IsRevertError(err); ok {
-		return FailureRevert, false
-	}
-
-	// Gas limit reached - may recover when gas prices drop
-	if errors.Is(err, ErrMaxGasReached) {
-		return FailureGas, true
-	}
-
-	// Max retries exhausted - network congestion, may recover
-	if errors.Is(err, ErrMaxRetriesExhausted) {
-		return FailureTimeout, true
-	}
-
-	// Default: treat as transient (RPC issues, etc.)
-	return FailureTransient, true
-}
-
-// TxOpts specifies parameters for a transaction.
+// TxOpts specifies transaction parameters.
 type TxOpts struct {
 	To       common.Address
 	Data     []byte
 	Value    *big.Int
-	GasLimit uint64 // 0 = estimate
+	GasLimit uint64
 }
 
-// TxManager handles transaction lifecycle: submission, monitoring, gas bumping, and cancellation.
+// TxManager handles transaction submission, gas bumping, and cancellation.
 type TxManager struct {
 	client       *ethclient.Client
 	signer       wallet.Signer
@@ -119,21 +74,21 @@ type TxManager struct {
 	maxFeePerGas *big.Int
 }
 
-// New creates a TxManager with the given policy.
+// errorSelectors maps 4-byte selectors to custom error names for revert decoding.
+var errorSelectors map[string]string
+
+// New creates a TxManager.
 func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, policy *TxPolicy) (*TxManager, error) {
 	if policy == nil {
 		return nil, fmt.Errorf("tx policy is required")
 	}
-
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid tx policy: %w", err)
 	}
-
 	maxFee, err := policy.ParseMaxFeePerGas()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse max_fee_per_gas: %w", err)
 	}
-
 	return &TxManager{
 		client:       client,
 		signer:       signer,
@@ -143,28 +98,50 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 	}, nil
 }
 
-// SendTransaction submits a transaction and handles retries, gas bumping, and cancellation.
+// ClassifyError returns (reason, retryable) for a transaction error.
+func ClassifyError(err error) (FailureReason, bool) {
+	if err == nil {
+		return "", false
+	}
+	if _, ok := IsRevertError(err); ok {
+		return FailureRevert, false
+	}
+	if errors.Is(err, ErrNonceTooLow) {
+		return FailureNonce, false
+	}
+	if errors.Is(err, ErrMaxGasReached) {
+		return FailureGas, true
+	}
+	if errors.Is(err, ErrMaxRetriesExhausted) {
+		return FailureTimeout, true
+	}
+	return FailureTransient, true
+}
+
+// IsRevertError returns the RevertError if err wraps one.
+func IsRevertError(err error) (*RevertError, bool) {
+	var revertErr *RevertError
+	if errors.As(err, &revertErr) {
+		return revertErr, true
+	}
+	return nil, false
+}
+
+// SetErrorSelectors configures error selectors for decoding revert reasons.
+func SetErrorSelectors(selectors map[string]string) {
+	errorSelectors = selectors
+}
+
+// SendTransaction submits a transaction with automatic retries and gas bumping.
 func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.Receipt, error) {
 	from := m.signer.Address()
 
-	gasLimit := opts.GasLimit
-	if gasLimit == 0 {
-		callMsg := ethereum.CallMsg{
-			From:  from,
-			To:    &opts.To,
-			Data:  opts.Data,
-			Value: opts.Value,
-		}
-		estimated, err := m.client.EstimateGas(ctx, callMsg)
-		if err != nil {
-			reason := extractRevertReason(err)
-			return nil, &RevertError{Reason: reason, Simulated: true}
-		}
-		gasLimit = estimated * uint64(100+m.policy.GasBufferPercent) / 100
-		logger.Debugw("Gas estimated", "estimated", estimated, "withBuffer", gasLimit)
+	gasLimit, err := m.estimateGas(ctx, opts)
+	if err != nil {
+		return nil, err
 	}
 
-	gasTipCap, gasFeeCap, err := m.getGasPrice(ctx)
+	gasTipCap, gasFeeCap, err := m.suggestGasFees(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gas price: %w", err)
 	}
@@ -180,30 +157,30 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	}
 
 	var lastTx *types.Transaction
-	lastGasFeeCap := gasFeeCap
-	lastGasTipCap := gasTipCap
+	currentTip := gasTipCap
+	currentFeeCap := gasFeeCap
 
 	for attempt := 1; attempt <= m.policy.MaxRetries; attempt++ {
-		tx := types.NewTx(&types.DynamicFeeTx{
-			ChainID:   m.chainID,
-			Nonce:     nonce,
-			GasTipCap: lastGasTipCap,
-			GasFeeCap: lastGasFeeCap,
-			Gas:       gasLimit,
-			To:        &opts.To,
-			Value:     value,
-			Data:      opts.Data,
-		})
-
-		signedTx, err := m.signer.Sign(tx, m.chainID)
+		signedTx, err := m.buildAndSignTx(opts, nonce, gasLimit, currentTip, currentFeeCap, value)
 		if err != nil {
-			return nil, fmt.Errorf("failed to sign tx: %w", err)
+			return nil, err
 		}
 
 		if err := m.client.SendTransaction(ctx, signedTx); err != nil {
-			// If replacement underpriced, bump and retry
+			if isTxAlreadyKnown(err) {
+				logger.Infow("Tx already in mempool",
+					"hash", signedTx.Hash().Hex(),
+					"nonce", nonce)
+				lastTx = signedTx
+				goto waitForReceipt
+			}
+			if isNonceTooLow(err) {
+				return nil, fmt.Errorf("%w: %v", ErrNonceTooLow, err)
+			}
 			if attempt < m.policy.MaxRetries {
-				logger.Warnw("Failed to submit tx, retrying", "attempt", attempt, "error", err)
+				logger.Warnw("Tx submission failed, retrying",
+					"attempt", attempt,
+					"error", err)
 				time.Sleep(m.policy.RetryDelay)
 				continue
 			}
@@ -214,149 +191,96 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		logger.Infow("Tx submitted",
 			"hash", signedTx.Hash().Hex(),
 			"nonce", nonce,
-			"gasTipCap", lastGasTipCap,
-			"gasFeeCap", lastGasFeeCap,
+			"gasTipCap", currentTip,
+			"gasFeeCap", currentFeeCap,
 			"attempt", attempt)
 
+	waitForReceipt:
 		receipt, err := m.waitForReceipt(ctx, signedTx)
 		if err == nil {
-			if receipt.Status == 1 {
-				logger.Infow("Tx confirmed",
-					"hash", signedTx.Hash().Hex(),
-					"block", receipt.BlockNumber.Uint64(),
-					"gasUsed", receipt.GasUsed)
-				return receipt, nil
-			}
-			// Reverted - try to get reason
-			reason := m.getRevertReason(ctx, opts, receipt.BlockNumber)
-			logger.Warnw("Tx reverted",
-				"hash", signedTx.Hash().Hex(),
-				"block", receipt.BlockNumber.Uint64(),
-				"reason", reason)
-			return receipt, &RevertError{Reason: reason, TxHash: signedTx.Hash().Hex()}
+			return m.handleReceipt(ctx, opts, signedTx, receipt)
 		}
 
 		if attempt >= m.policy.MaxRetries {
 			break
 		}
 
-		logger.Warnw("Tx pending timeout, bumping gas",
-			"hash", signedTx.Hash().Hex(),
-			"attempt", attempt,
-			"timeoutBlocks", m.policy.PendingTimeoutBlocks)
-
-		bumpFactor := int64(100 + m.policy.GasBumpPercent)
-		newTip := new(big.Int).Mul(lastGasTipCap, big.NewInt(bumpFactor))
-		newTip.Div(newTip, big.NewInt(100))
-		newFeeCap := new(big.Int).Mul(lastGasFeeCap, big.NewInt(bumpFactor))
-		newFeeCap.Div(newFeeCap, big.NewInt(100))
-
-		if m.maxFeePerGas != nil && newFeeCap.Cmp(m.maxFeePerGas) > 0 {
-			logger.Warnw("Transaction stuck at max gas, attempting cancel",
+		newTip, newFeeCap, shouldCancel := m.bumpGas(currentTip, currentFeeCap)
+		if shouldCancel {
+			logger.Warnw("Max gas reached, cancelling",
 				"nonce", nonce,
 				"maxFeePerGas", m.maxFeePerGas,
-				"currentFeeCap", lastGasFeeCap,
-				"attempt", attempt)
-
-			if err := m.cancelTx(ctx, nonce, lastGasFeeCap); err != nil {
-				logger.Errorw("Failed to cancel tx", "error", err)
-			}
+				"currentFeeCap", currentFeeCap)
+			_ = m.cancelTx(ctx, nonce, currentFeeCap)
 			return nil, ErrMaxGasReached
 		}
 
-		logger.Infow("Bumping gas",
-			"oldTip", lastGasTipCap,
-			"newTip", newTip,
-			"oldFeeCap", lastGasFeeCap,
+		logger.Warnw("Tx pending timeout, bumping gas",
+			"hash", signedTx.Hash().Hex(),
+			"attempt", attempt,
+			"oldFeeCap", currentFeeCap,
 			"newFeeCap", newFeeCap)
 
-		lastGasTipCap = newTip
-		lastGasFeeCap = newFeeCap
+		currentTip = newTip
+		currentFeeCap = newFeeCap
 	}
 
 	if lastTx != nil {
-		logger.Warnw("Max retries exhausted, cancelling tx",
+		logger.Warnw("Max retries exhausted, cancelling",
 			"hash", lastTx.Hash().Hex(),
 			"nonce", nonce)
-
-		if err := m.cancelTx(ctx, nonce, lastGasFeeCap); err != nil {
-			logger.Errorw("Failed to cancel tx", "error", err)
-		}
+		_ = m.cancelTx(ctx, nonce, currentFeeCap)
 	}
 
 	return nil, ErrMaxRetriesExhausted
 }
 
-func (m *TxManager) getGasPrice(ctx context.Context) (*big.Int, *big.Int, error) {
-	gasTipCap, err := m.client.SuggestGasTipCap(ctx)
+// buildAndSignTx creates and signs a transaction.
+func (m *TxManager) buildAndSignTx(opts *TxOpts, nonce, gasLimit uint64, gasTipCap, gasFeeCap, value *big.Int) (*types.Transaction, error) {
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   m.chainID,
+		Nonce:     nonce,
+		GasTipCap: gasTipCap,
+		GasFeeCap: gasFeeCap,
+		Gas:       gasLimit,
+		To:        &opts.To,
+		Value:     value,
+		Data:      opts.Data,
+	})
+	signedTx, err := m.signer.Sign(tx, m.chainID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get gas tip cap: %w", err)
+		return nil, fmt.Errorf("failed to sign tx: %w", err)
 	}
-
-	header, err := m.client.HeaderByNumber(ctx, nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get latest header: %w", err)
-	}
-
-	// gasFeeCap = 2*baseFee + gasTipCap (EIP-1559 standard formula)
-	gasFeeCap := new(big.Int).Add(
-		new(big.Int).Mul(header.BaseFee, big.NewInt(2)),
-		gasTipCap,
-	)
-
-	if m.maxFeePerGas != nil && gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
-		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
-		// Adjust tip if needed
-		if gasTipCap.Cmp(gasFeeCap) > 0 {
-			gasTipCap = new(big.Int).Set(gasFeeCap)
-		}
-	}
-
-	return gasTipCap, gasFeeCap, nil
+	return signedTx, nil
 }
 
-func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (*types.Receipt, error) {
-	startBlock, err := m.client.BlockNumber(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get block number: %w", err)
+// bumpGas increases gas fees by the configured percentage.
+// Returns (newTip, newFeeCap, shouldCancel).
+func (m *TxManager) bumpGas(currentTip, currentFeeCap *big.Int) (*big.Int, *big.Int, bool) {
+	bumpFactor := big.NewInt(int64(100 + m.policy.GasBumpPercent))
+	hundred := big.NewInt(100)
+
+	newTip := new(big.Int).Mul(currentTip, bumpFactor)
+	newTip.Div(newTip, hundred)
+
+	newFeeCap := new(big.Int).Mul(currentFeeCap, bumpFactor)
+	newFeeCap.Div(newFeeCap, hundred)
+
+	if m.maxFeePerGas != nil && newFeeCap.Cmp(m.maxFeePerGas) > 0 {
+		return nil, nil, true
 	}
 
-	ticker := time.NewTicker(receiptPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-			receipt, err := m.client.TransactionReceipt(ctx, tx.Hash())
-			if err == nil {
-				return receipt, nil
-			}
-			logger.Debugw("Receipt not found", "hash", tx.Hash().Hex(), "error", err)
-
-			currentBlock, err := m.client.BlockNumber(ctx)
-			if err != nil {
-				logger.Warnw("Failed to get block number", "error", err)
-				continue
-			}
-
-			if currentBlock-startBlock >= uint64(m.policy.PendingTimeoutBlocks) {
-				return nil, fmt.Errorf("pending timeout after %d blocks", m.policy.PendingTimeoutBlocks)
-			}
-		}
-	}
+	return newTip, newFeeCap, false
 }
 
+// cancelTx sends a zero-value self-transfer to free the nonce.
 func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *big.Int) error {
 	from := m.signer.Address()
 
-	// Use higher gas price than previous tx to replace it
-	bumpFactor := int64(100 + m.policy.GasBumpPercent)
-	gasFeeCap := new(big.Int).Mul(prevGasFeeCap, big.NewInt(bumpFactor))
+	bumpFactor := big.NewInt(int64(100 + m.policy.GasBumpPercent))
+	gasFeeCap := new(big.Int).Mul(prevGasFeeCap, bumpFactor)
 	gasFeeCap.Div(gasFeeCap, big.NewInt(100))
 
-	// Use max if we have it and it's higher
 	if m.maxFeePerGas != nil && gasFeeCap.Cmp(m.maxFeePerGas) < 0 {
 		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
 	}
@@ -382,8 +306,7 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 
 	logger.Infow("Cancel tx submitted",
 		"hash", signedTx.Hash().Hex(),
-		"nonce", nonce,
-		"gasFeeCap", gasFeeCap)
+		"nonce", nonce)
 
 	receipt, err := m.waitForReceipt(ctx, signedTx)
 	if err != nil {
@@ -392,16 +315,60 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 
 	logger.Infow("Nonce freed",
 		"nonce", nonce,
-		"cancelTxHash", signedTx.Hash().Hex(),
 		"block", receipt.BlockNumber.Uint64())
 
 	return nil
 }
 
-// getRevertReason replays the call at the given block to extract the revert reason.
-func (m *TxManager) getRevertReason(ctx context.Context, opts *TxOpts, blockNum *big.Int) string {
-	from := m.signer.Address()
+// estimateGas estimates gas for the transaction, returning a RevertError if simulation fails.
+func (m *TxManager) estimateGas(ctx context.Context, opts *TxOpts) (uint64, error) {
+	if opts.GasLimit != 0 {
+		return opts.GasLimit, nil
+	}
 
+	from := m.signer.Address()
+	callMsg := ethereum.CallMsg{
+		From:  from,
+		To:    &opts.To,
+		Data:  opts.Data,
+		Value: opts.Value,
+	}
+
+	estimated, err := m.client.EstimateGas(ctx, callMsg)
+	if err != nil {
+		reason := extractRevertReason(err)
+		return 0, &RevertError{Reason: reason, Simulated: true}
+	}
+
+	gasLimit := estimated * uint64(100+m.policy.GasBufferPercent) / 100
+	logger.Debugw("Gas estimated",
+		"estimated", estimated,
+		"withBuffer", gasLimit)
+
+	return gasLimit, nil
+}
+
+// handleReceipt processes a mined transaction receipt.
+func (m *TxManager) handleReceipt(ctx context.Context, opts *TxOpts, tx *types.Transaction, receipt *types.Receipt) (*types.Receipt, error) {
+	if receipt.Status == 1 {
+		logger.Infow("Tx confirmed",
+			"hash", tx.Hash().Hex(),
+			"block", receipt.BlockNumber.Uint64(),
+			"gasUsed", receipt.GasUsed)
+		return receipt, nil
+	}
+
+	reason := m.replayForRevertReason(ctx, opts, receipt.BlockNumber)
+	logger.Warnw("Tx reverted",
+		"hash", tx.Hash().Hex(),
+		"block", receipt.BlockNumber.Uint64(),
+		"reason", reason)
+	return receipt, &RevertError{Reason: reason, TxHash: tx.Hash().Hex()}
+}
+
+// replayForRevertReason re-executes the call to extract the revert reason.
+func (m *TxManager) replayForRevertReason(ctx context.Context, opts *TxOpts, blockNum *big.Int) string {
+	from := m.signer.Address()
 	callMsg := ethereum.CallMsg{
 		From:  from,
 		To:    &opts.To,
@@ -413,41 +380,103 @@ func (m *TxManager) getRevertReason(ctx context.Context, opts *TxOpts, blockNum 
 	if err == nil {
 		return "unknown (call succeeded on replay)"
 	}
-
 	return extractRevertReason(err)
+}
+
+// suggestGasFees returns suggested tip and fee cap, capped at maxFeePerGas.
+func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, error) {
+	gasTipCap, err := m.client.SuggestGasTipCap(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get gas tip cap: %w", err)
+	}
+
+	header, err := m.client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get latest header: %w", err)
+	}
+
+	// EIP-1559: gasFeeCap = 2*baseFee + gasTipCap
+	gasFeeCap := new(big.Int).Mul(header.BaseFee, big.NewInt(2))
+	gasFeeCap.Add(gasFeeCap, gasTipCap)
+
+	if m.maxFeePerGas != nil && gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
+		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
+		if gasTipCap.Cmp(gasFeeCap) > 0 {
+			gasTipCap = new(big.Int).Set(gasFeeCap)
+		}
+	}
+
+	return gasTipCap, gasFeeCap, nil
+}
+
+// waitForReceipt polls for a transaction receipt until confirmed or timeout.
+func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (*types.Receipt, error) {
+	startBlock, err := m.client.BlockNumber(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block number: %w", err)
+	}
+
+	ticker := time.NewTicker(receiptPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			receipt, err := m.client.TransactionReceipt(ctx, tx.Hash())
+			if err == nil {
+				return receipt, nil
+			}
+
+			currentBlock, err := m.client.BlockNumber(ctx)
+			if err != nil {
+				logger.Warnw("Failed to get block number", "error", err)
+				continue
+			}
+
+			if currentBlock-startBlock >= uint64(m.policy.PendingTimeoutBlocks) {
+				return nil, fmt.Errorf("pending timeout after %d blocks", m.policy.PendingTimeoutBlocks)
+			}
+		}
+	}
+}
+
+// decodeErrorSelector attempts to decode a hex selector to a known error name.
+func decodeErrorSelector(reason string) string {
+	if strings.HasPrefix(reason, "0x") && len(reason) >= 10 {
+		selector := reason[2:10]
+		if name, found := errorSelectors[selector]; found {
+			return name
+		}
+	}
+	return reason
 }
 
 // extractRevertReason extracts a human-readable reason from a revert error.
 func extractRevertReason(err error) string {
-	// Use go-ethereum's built-in RevertErrorData to extract raw revert data
 	revertData, ok := ethclient.RevertErrorData(err)
 	if ok && len(revertData) > 0 {
-		// Use abi.UnpackRevert for standard Error(string) decoding
 		if reason, unpackErr := abi.UnpackRevert(revertData); unpackErr == nil {
 			return reason
 		}
-		// Try to decode as custom error from ABI
 		if len(revertData) >= 4 {
 			selector := hex.EncodeToString(revertData[:4])
 			if name, found := errorSelectors[selector]; found {
 				return name
 			}
 		}
-		// Unknown custom error - return hex
 		return fmt.Sprintf("0x%x", revertData)
 	}
 
-	// Fallback: check if error message contains the reason directly
-	// (some clients include it in the error string)
+	// Some RPC clients include reason in error string
 	errStr := err.Error()
 	if strings.Contains(errStr, "execution reverted:") {
 		parts := strings.SplitN(errStr, "execution reverted:", 2)
 		if len(parts) == 2 {
 			reason := strings.TrimSpace(parts[1])
 			if reason != "" {
-				// Check if it's a hex selector we can decode
-				reason = decodeErrorSelector(reason)
-				return reason
+				return decodeErrorSelector(reason)
 			}
 		}
 	}
@@ -455,14 +484,12 @@ func extractRevertReason(err error) string {
 	return errStr
 }
 
-// decodeErrorSelector tries to decode a hex error selector to a known error name.
-func decodeErrorSelector(reason string) string {
-	// Check if it looks like a hex selector (0x followed by hex chars)
-	if strings.HasPrefix(reason, "0x") && len(reason) >= 10 {
-		selector := reason[2:10] // First 4 bytes after 0x
-		if name, found := errorSelectors[selector]; found {
-			return name
-		}
-	}
-	return reason
+// isTxAlreadyKnown returns true if the error indicates the tx is already in mempool.
+func isTxAlreadyKnown(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "already known")
+}
+
+// isNonceTooLow returns true if the error indicates the nonce was already used.
+func isNonceTooLow(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "nonce too low")
 }

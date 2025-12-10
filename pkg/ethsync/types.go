@@ -10,6 +10,8 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+// Event type constants for SSV contract events.
+
 const (
 	EventValidatorAdded        = "ValidatorAdded"
 	EventValidatorRemoved      = "ValidatorRemoved"

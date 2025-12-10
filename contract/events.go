@@ -12,25 +12,20 @@ import (
 	"ssv-oracle/pkg/logger"
 )
 
-// RootCommittedEvent represents a RootCommitted event from the Oracle contract.
+// RootCommittedEvent represents a RootCommitted event from the contract.
 type RootCommittedEvent struct {
 	MerkleRoot [32]byte
-	BlockNum   uint64 // indexed
-	Timestamp  uint64 // block.timestamp when commit was made
+	BlockNum   uint64
+	Timestamp  uint64
 }
 
-// SubscribeRootCommitted subscribes to RootCommitted events from the SSV Network contract.
-// Returns a channel that receives events and an error channel for subscription errors.
-// The caller should handle reconnection on error.
-// If fromBlock is nil, subscribes to new events only (from "latest").
-// Requires WebSocket client to be configured (eth_ws_rpc in config).
+// SubscribeRootCommitted subscribes to RootCommitted events.
+// Returns event and error channels. Caller should handle reconnection on error.
+// Requires WebSocket client (eth_ws_rpc in config).
 func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) (<-chan *RootCommittedEvent, <-chan error, error) {
 	if c.wsClient == nil {
 		return nil, nil, fmt.Errorf("WebSocket client not configured (set eth_ws_rpc in config)")
 	}
-
-	eventChan := make(chan *RootCommittedEvent, 10)
-	errChan := make(chan error, 1)
 
 	event, ok := SSVNetworkABI.Events["RootCommitted"]
 	if !ok {
@@ -51,45 +46,51 @@ func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) 
 		return nil, nil, fmt.Errorf("failed to subscribe to logs: %w", err)
 	}
 
-	go func() {
-		defer close(eventChan)
-		defer close(errChan)
-		defer sub.Unsubscribe()
+	eventChan := make(chan *RootCommittedEvent, 10)
+	errChan := make(chan error, 1)
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case err := <-sub.Err():
-				if err != nil {
-					errChan <- err
-				}
-				return
-			case vLog := <-logs:
-				parsedEvent, err := c.parseRootCommittedEvent(vLog)
-				if err != nil {
-					logger.Warnw("Failed to parse RootCommitted event", "error", err)
-					continue
-				}
-
-				select {
-				case eventChan <- parsedEvent:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
+	go c.processRootCommittedLogs(ctx, sub, logs, eventChan, errChan)
 
 	return eventChan, errChan, nil
 }
 
+func (c *Client) processRootCommittedLogs(
+	ctx context.Context,
+	sub ethereum.Subscription,
+	logs <-chan types.Log,
+	eventChan chan<- *RootCommittedEvent,
+	errChan chan<- error,
+) {
+	defer close(eventChan)
+	defer close(errChan)
+	defer sub.Unsubscribe()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case err := <-sub.Err():
+			if err != nil {
+				errChan <- err
+			}
+			return
+		case vLog := <-logs:
+			parsedEvent, err := c.parseRootCommittedEvent(vLog)
+			if err != nil {
+				logger.Warnw("Failed to parse RootCommitted event", "error", err)
+				continue
+			}
+			select {
+			case eventChan <- parsedEvent:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
 // parseRootCommittedEvent parses a log into a RootCommittedEvent.
-// New ABI: RootCommitted(bytes32 indexed merkleRoot, uint64 indexed blockNum, uint256 timestamp)
-// Topic[0] = event signature
-// Topic[1] = merkleRoot (indexed)
-// Topic[2] = blockNum (indexed)
-// Data = [timestamp]
+// Event signature: RootCommitted(bytes32 indexed merkleRoot, uint64 indexed blockNum, uint256 timestamp)
 func (c *Client) parseRootCommittedEvent(vLog types.Log) (*RootCommittedEvent, error) {
 	event, ok := SSVNetworkABI.Events["RootCommitted"]
 	if !ok {
@@ -109,7 +110,6 @@ func (c *Client) parseRootCommittedEvent(vLog types.Log) (*RootCommittedEvent, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack event data: %w", err)
 	}
-
 	if len(unpacked) != 1 {
 		return nil, fmt.Errorf("expected 1 non-indexed param, got %d", len(unpacked))
 	}

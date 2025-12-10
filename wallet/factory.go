@@ -2,13 +2,7 @@ package wallet
 
 import "fmt"
 
-// Signer type constants.
-const (
-	TypeEnv      = "env"
-	TypeKeystore = "keystore"
-)
-
-// NewSigner creates a Signer based on the provided configuration.
+// NewSigner creates a Signer based on the configuration.
 func NewSigner(cfg *Config) (Signer, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("wallet config is nil")

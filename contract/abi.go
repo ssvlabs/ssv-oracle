@@ -11,12 +11,10 @@ import (
 //go:embed SSVNetwork.abi
 var ssvNetworkABIJSON string
 
-// SSVNetworkABI is the parsed ABI, loaded once at startup.
-// Used by both contract client and event parser.
+// SSVNetworkABI is the parsed ABI for the SSV Network contract.
 var SSVNetworkABI abi.ABI
 
-// ErrorSelectors maps custom error selectors to human-readable names.
-// Built dynamically from the SSVNetwork ABI.
+// ErrorSelectors maps 4-byte error selectors to human-readable names.
 var ErrorSelectors map[string]string
 
 func init() {

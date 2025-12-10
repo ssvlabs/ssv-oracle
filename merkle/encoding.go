@@ -5,7 +5,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Pre-computed ABI types for leaf encoding (initialized once at package load).
 var leafArguments abi.Arguments
 
 func init() {
@@ -23,17 +22,8 @@ func init() {
 	}
 }
 
-// EncodeMerkleLeaf encodes a cluster balance into a Merkle leaf.
+// EncodeMerkleLeaf encodes a cluster balance into a Merkle leaf hash.
 // Uses Solidity abi.encode(bytes32 clusterId, uint64 effectiveBalance).
-//
-// This produces 64 bytes:
-// - 32 bytes: clusterId (bytes32)
-// - 32 bytes: effectiveBalance (uint64 padded to 32 bytes)
-//
-// Then returns keccak256 of those 64 bytes.
-//
-// Panics on encoding failure, which indicates a programming error since the
-// ABI types are pre-validated at package init and inputs are strongly typed.
 func EncodeMerkleLeaf(clusterID [32]byte, effectiveBalance uint64) [32]byte {
 	encoded, err := leafArguments.Pack(clusterID, effectiveBalance)
 	if err != nil {

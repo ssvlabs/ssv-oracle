@@ -14,6 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+// Default configuration values.
+
 const (
 	maxBackoffDelay   = 30 * time.Second
 	defaultBatchSize  = 200

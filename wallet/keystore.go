@@ -46,22 +46,18 @@ func NewKeystoreSigner(keystorePath, passwordEnv, passwordFile string) (*Keystor
 	}, nil
 }
 
-func readPassword(passwordEnv, passwordFile string) (string, error) {
-	if passwordEnv != "" {
-		if password := os.Getenv(passwordEnv); password != "" {
-			return password, nil
-		}
-	}
+// Address returns the signer's Ethereum address.
+func (s *KeystoreSigner) Address() common.Address {
+	return s.address
+}
 
-	if passwordFile != "" {
-		data, err := os.ReadFile(passwordFile)
-		if err != nil {
-			return "", fmt.Errorf("failed to read password file: %w", err)
-		}
-		return strings.TrimSpace(string(data)), nil
+// Close zeros out the private key (best-effort).
+func (s *KeystoreSigner) Close() error {
+	if s.privateKey != nil && s.privateKey.D != nil {
+		s.privateKey.D.SetInt64(0)
 	}
-
-	return "", fmt.Errorf("no password source provided: set password_env or password_file")
+	s.privateKey = nil
+	return nil
 }
 
 // Sign signs a transaction with the private key.
@@ -69,16 +65,18 @@ func (s *KeystoreSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.T
 	return types.SignTx(tx, types.LatestSignerForChainID(chainID), s.privateKey)
 }
 
-// Address returns the signer's Ethereum address.
-func (s *KeystoreSigner) Address() common.Address {
-	return s.address
-}
-
-// Close zeros out the private key (best-effort; Go's GC doesn't guarantee secure erasure).
-func (s *KeystoreSigner) Close() error {
-	if s.privateKey != nil && s.privateKey.D != nil {
-		s.privateKey.D.SetInt64(0)
+func readPassword(passwordEnv, passwordFile string) (string, error) {
+	if passwordEnv != "" {
+		if password := os.Getenv(passwordEnv); password != "" {
+			return password, nil
+		}
 	}
-	s.privateKey = nil
-	return nil
+	if passwordFile != "" {
+		data, err := os.ReadFile(passwordFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read password file: %w", err)
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	return "", fmt.Errorf("no password source provided: set password_env or password_file")
 }

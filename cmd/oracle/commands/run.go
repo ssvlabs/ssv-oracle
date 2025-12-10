@@ -30,7 +30,6 @@ var (
 	withUpdater bool
 )
 
-// runCmd represents the run command
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Start the oracle service",
@@ -43,39 +42,30 @@ committed roots and updates cluster balances on-chain using merkle proofs.`,
 
 func init() {
 	runCmd.Flags().StringVarP(&configPath, "config", "c", "config.yaml", "Path to configuration file")
-	runCmd.Flags().BoolVar(&freshStart, "fresh", false, "Start fresh: clear all database state and sync from SSV contract genesis")
+	runCmd.Flags().BoolVar(&freshStart, "fresh", false, "Start fresh: clear all database state")
 	runCmd.Flags().BoolVar(&withUpdater, "updater", false, "Also run the cluster updater")
 }
 
-// Config represents the oracle configuration file
+// Config represents the oracle configuration file.
 type Config struct {
-	// Network
 	EthRPC    string `yaml:"eth_rpc"`
-	EthWSRPC  string `yaml:"eth_ws_rpc"` // WebSocket RPC for event subscriptions (required for updater)
+	EthWSRPC  string `yaml:"eth_ws_rpc"`
 	BeaconRPC string `yaml:"beacon_rpc"`
 
-	// Contract (unified SSV Network contract with oracle functionality)
 	SSVContract string `yaml:"ssv_contract"`
 
-	// Event Syncing
 	SyncFromBlock  uint64 `yaml:"sync_from_block"`
 	SyncBatchSize  uint64 `yaml:"sync_batch_size"`
 	SyncMaxRetries int    `yaml:"sync_max_retries"`
 
-	// Database
 	DBHost        string `yaml:"db_host"`
 	DBPort        int    `yaml:"db_port"`
 	DBName        string `yaml:"db_name"`
 	DBUser        string `yaml:"db_user"`
 	DBPasswordEnv string `yaml:"db_password_env"`
 
-	// Wallet / Key Management
-	Wallet wallet.Config `yaml:"wallet"`
-
-	// Transaction Policy
-	TxPolicy txmanager.TxPolicy `yaml:"tx_policy"`
-
-	// Commit Phases
+	Wallet       wallet.Config        `yaml:"wallet"`
+	TxPolicy     txmanager.TxPolicy   `yaml:"tx_policy"`
 	CommitPhases []oracle.CommitPhase `yaml:"commit_phases"`
 }
 
@@ -89,15 +79,14 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid commit phases: %w", err)
 	}
 
-	// Validate required environment variables before loading secrets
 	dbPassword := os.Getenv(cfg.DBPasswordEnv)
 	if dbPassword == "" {
-		return fmt.Errorf("database password not found in environment variable %s", cfg.DBPasswordEnv)
+		return fmt.Errorf("database password not found in %s", cfg.DBPasswordEnv)
 	}
 
 	signer, err := wallet.NewSigner(&cfg.Wallet)
 	if err != nil {
-		return fmt.Errorf("failed to create wallet signer: %w", err)
+		return fmt.Errorf("failed to create signer: %w", err)
 	}
 	defer func() { _ = signer.Close() }()
 
@@ -107,65 +96,22 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"signerAddress", signer.Address().Hex(),
 		"updater", withUpdater)
 
-	connString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		cfg.DBHost, cfg.DBPort, cfg.DBUser, url.QueryEscape(dbPassword), cfg.DBName)
-
-	storage, err := ethsync.NewPostgresStorage(connString)
+	storage, execClient, beaconClient, err := initClients(cfg, dbPassword)
 	if err != nil {
-		return fmt.Errorf("failed to create storage: %w", err)
+		return err
 	}
-	defer func() {
-		if err := storage.Close(); err != nil {
-			logger.Warnw("Failed to close storage", "error", err)
-		}
-	}()
+	defer func() { _ = storage.Close() }()
+	defer execClient.Close()
 
 	if freshStart {
 		logger.Info("Fresh start: clearing database")
-		ctx := context.Background()
-		if err := storage.ClearAllState(ctx); err != nil {
-			return fmt.Errorf("failed to clear database state: %w", err)
+		if err := storage.ClearAllState(context.Background()); err != nil {
+			return fmt.Errorf("failed to clear database: %w", err)
 		}
 	}
 
-	execClient, err := ethsync.NewExecutionClient(ethsync.ExecutionClientConfig{
-		URL:        cfg.EthRPC,
-		BatchSize:  cfg.SyncBatchSize,
-		MaxRetries: cfg.SyncMaxRetries,
-		RetryDelay: 5 * time.Second,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create execution client: %w", err)
-	}
-	defer execClient.Close()
-
-	chainID, err := execClient.GetChainID(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get chain ID: %w", err)
-	}
-	logger.Infow("Connected to chain", "chainID", chainID)
-
-	// Validate chain ID matches database to prevent accidental network changes
-	ctx := context.Background()
-	dbChainID, err := storage.GetChainID(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get chain ID from database: %w", err)
-	}
-
-	if dbChainID == nil {
-		if err := storage.SetChainID(ctx, chainID.Uint64()); err != nil {
-			return fmt.Errorf("failed to store chain ID: %w", err)
-		}
-		logger.Infow("Stored chain ID", "chainID", chainID)
-	} else if *dbChainID != chainID.Uint64() {
-		return fmt.Errorf("chain ID mismatch: database has %d, RPC has %d. Use --fresh to start with new chain", *dbChainID, chainID)
-	}
-
-	beaconClient, err := ethsync.NewBeaconClient(ctx, ethsync.BeaconClientConfig{
-		URL: cfg.BeaconRPC,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create beacon client: %w", err)
+	if err := validateChainID(storage, execClient); err != nil {
+		return err
 	}
 
 	spec, err := beaconClient.GetSpec(context.Background())
@@ -177,11 +123,10 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"slotsPerEpoch", spec.SlotsPerEpoch,
 		"slotDuration", spec.SlotDuration)
 
-	ssvContract := common.HexToAddress(cfg.SSVContract)
 	syncer, err := ethsync.NewEventSyncer(ethsync.EventSyncerConfig{
 		ExecutionClient: execClient,
 		Storage:         storage,
-		SSVContract:     ssvContract,
+		SSVContract:     common.HexToAddress(cfg.SSVContract),
 		Spec:            spec,
 	})
 	if err != nil {
@@ -194,21 +139,83 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"startEpoch", currentPhase.StartEpoch,
 		"interval", currentPhase.Interval)
 
-	// WebSocket URL is required for event subscriptions when running with --updater
 	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer, &cfg.TxPolicy)
 	if err != nil {
-		return fmt.Errorf("failed to create Ethereum client: %w", err)
+		return fmt.Errorf("failed to create contract client: %w", err)
 	}
 	defer ethClient.Close()
 
-	oracleCfg := &oracle.Config{
-		Storage:        storage,
-		ContractClient: ethClient,
-		Phases:         cfg.CommitPhases,
+	return runServices(cfg, storage, ethClient, syncer, beaconClient)
+}
+
+func initClients(cfg *Config, dbPassword string) (*ethsync.PostgresStorage, *ethsync.ExecutionClient, *ethsync.BeaconClient, error) {
+	connString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		cfg.DBHost, cfg.DBPort, cfg.DBUser, url.QueryEscape(dbPassword), cfg.DBName)
+
+	storage, err := ethsync.NewPostgresStorage(connString)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
-	oracleInstance := oracle.New(oracleCfg)
+	execClient, err := ethsync.NewExecutionClient(ethsync.ExecutionClientConfig{
+		URL:        cfg.EthRPC,
+		BatchSize:  cfg.SyncBatchSize,
+		MaxRetries: cfg.SyncMaxRetries,
+		RetryDelay: 5 * time.Second,
+	})
+	if err != nil {
+		_ = storage.Close()
+		return nil, nil, nil, fmt.Errorf("failed to create execution client: %w", err)
+	}
 
+	beaconClient, err := ethsync.NewBeaconClient(context.Background(), ethsync.BeaconClientConfig{
+		URL: cfg.BeaconRPC,
+	})
+	if err != nil {
+		_ = storage.Close()
+		execClient.Close()
+		return nil, nil, nil, fmt.Errorf("failed to create beacon client: %w", err)
+	}
+
+	return storage, execClient, beaconClient, nil
+}
+
+func validateChainID(storage *ethsync.PostgresStorage, execClient *ethsync.ExecutionClient) error {
+	ctx := context.Background()
+
+	chainID, err := execClient.GetChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %w", err)
+	}
+	logger.Infow("Connected to chain", "chainID", chainID)
+
+	dbChainID, err := storage.GetChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID from database: %w", err)
+	}
+
+	if dbChainID == nil {
+		if err := storage.SetChainID(ctx, chainID.Uint64()); err != nil {
+			return fmt.Errorf("failed to store chain ID: %w", err)
+		}
+		logger.Infow("Stored chain ID", "chainID", chainID)
+		return nil
+	}
+
+	if *dbChainID != chainID.Uint64() {
+		return fmt.Errorf("chain ID mismatch: database=%d, RPC=%d (use --fresh)", *dbChainID, chainID)
+	}
+
+	return nil
+}
+
+func runServices(
+	cfg *Config,
+	storage *ethsync.PostgresStorage,
+	ethClient *contract.Client,
+	syncer *ethsync.EventSyncer,
+	beaconClient *ethsync.BeaconClient,
+) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -225,6 +232,12 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	if err := syncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
 		return fmt.Errorf("initial sync failed: %w", err)
 	}
+
+	oracleInstance := oracle.New(&oracle.Config{
+		Storage:        storage,
+		ContractClient: ethClient,
+		Phases:         cfg.CommitPhases,
+	})
 
 	g, gCtx := errgroup.WithContext(ctx)
 

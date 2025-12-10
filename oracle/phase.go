@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// CommitPhase defines a commit schedule phase with start epoch and interval.
+// CommitPhase defines a commit schedule with start epoch and interval.
 type CommitPhase struct {
 	StartEpoch uint64 `yaml:"start_epoch"`
 	Interval   uint64 `yaml:"interval"`
@@ -14,24 +14,6 @@ type CommitPhase struct {
 // TargetEpoch returns the target epoch for a given round in this phase.
 func (p CommitPhase) TargetEpoch(round uint64) uint64 {
 	return p.StartEpoch + (round * p.Interval)
-}
-
-// ValidatePhases validates commit phase configuration.
-func ValidatePhases(phases []CommitPhase) error {
-	if len(phases) == 0 {
-		return errors.New("commit_phases: at least one phase required")
-	}
-
-	for i, p := range phases {
-		if p.Interval == 0 {
-			return fmt.Errorf("commit_phases[%d]: interval must be > 0", i)
-		}
-		if i > 0 && phases[i].StartEpoch <= phases[i-1].StartEpoch {
-			return errors.New("commit_phases: phases must be sorted by start_epoch ascending")
-		}
-	}
-
-	return nil
 }
 
 // GetPhaseForEpoch returns the active phase for a given epoch.
@@ -44,7 +26,7 @@ func GetPhaseForEpoch(phases []CommitPhase, epoch uint64) CommitPhase {
 	return phases[0]
 }
 
-// NextTargetEpoch calculates the next target epoch based on finalized epoch and phases.
+// NextTargetEpoch calculates the next target epoch based on finalized epoch.
 func NextTargetEpoch(phases []CommitPhase, finalizedEpoch uint64) uint64 {
 	phase := GetPhaseForEpoch(phases, finalizedEpoch)
 
@@ -77,4 +59,22 @@ func RoundInPhase(phase CommitPhase, targetEpoch uint64) uint64 {
 		return 0
 	}
 	return (targetEpoch - phase.StartEpoch) / phase.Interval
+}
+
+// ValidatePhases validates commit phase configuration.
+func ValidatePhases(phases []CommitPhase) error {
+	if len(phases) == 0 {
+		return errors.New("commit_phases: at least one phase required")
+	}
+
+	for i, p := range phases {
+		if p.Interval == 0 {
+			return fmt.Errorf("commit_phases[%d]: interval must be > 0", i)
+		}
+		if i > 0 && phases[i].StartEpoch <= phases[i-1].StartEpoch {
+			return errors.New("commit_phases: phases must be sorted by start_epoch ascending")
+		}
+	}
+
+	return nil
 }

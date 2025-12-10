@@ -14,9 +14,9 @@ import (
 
 // EnvSigner signs transactions using a private key from an environment variable.
 //
-// WARNING: For development/testing only. Not recommended for production use.
+// WARNING: For development/testing only. Not recommended for production.
 // Environment variables may be logged, visible in process listings, or persisted
-// in shell history. Private keys in memory are not securely erased by Go's GC.
+// in shell history. Private keys are not securely erased by Go's GC.
 // For production, use KeystoreSigner with encrypted keystore files.
 type EnvSigner struct {
 	privateKey *ecdsa.PrivateKey
@@ -45,21 +45,21 @@ func NewEnvSigner(envVarName string) (*EnvSigner, error) {
 	}, nil
 }
 
-// Sign signs a transaction with the private key.
-func (s *EnvSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
-	return types.SignTx(tx, types.LatestSignerForChainID(chainID), s.privateKey)
-}
-
 // Address returns the signer's Ethereum address.
 func (s *EnvSigner) Address() common.Address {
 	return s.address
 }
 
-// Close zeros out the private key (best-effort; Go's GC doesn't guarantee secure erasure).
+// Close zeros out the private key (best-effort).
 func (s *EnvSigner) Close() error {
 	if s.privateKey != nil && s.privateKey.D != nil {
 		s.privateKey.D.SetInt64(0)
 	}
 	s.privateKey = nil
 	return nil
+}
+
+// Sign signs a transaction with the private key.
+func (s *EnvSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+	return types.SignTx(tx, types.LatestSignerForChainID(chainID), s.privateKey)
 }

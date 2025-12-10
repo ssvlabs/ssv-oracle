@@ -7,24 +7,22 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+
 	"ssv-oracle/contract"
 	"ssv-oracle/merkle"
 	"ssv-oracle/pkg/ethsync"
 	"ssv-oracle/pkg/logger"
 	"ssv-oracle/txmanager"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
-const (
-	subscribeRetryDelay = 10 * time.Second
-	reconnectDelay      = 5 * time.Second
-)
+const retryDelay = 5 * time.Second
 
-// storage defines the interface the updater needs for persistence.
-type storage interface {
-	GetCluster(ctx context.Context, clusterID []byte) (*ethsync.ClusterRow, error)
-	GetCommitByBlock(ctx context.Context, blockNum uint64) (*ethsync.OracleCommit, error)
+// Config holds Updater configuration.
+type Config struct {
+	Storage        *ethsync.PostgresStorage
+	ContractClient *contract.Client
 }
 
 // Updater listens for RootCommitted events and updates cluster balances on-chain.
@@ -33,10 +31,9 @@ type Updater struct {
 	contractClient *contract.Client
 }
 
-// Config holds Updater configuration.
-type Config struct {
-	Storage        *ethsync.PostgresStorage
-	ContractClient *contract.Client
+type storage interface {
+	GetCluster(ctx context.Context, clusterID []byte) (*ethsync.ClusterRow, error)
+	GetCommitByBlock(ctx context.Context, blockNum uint64) (*ethsync.OracleCommit, error)
 }
 
 // New creates a new Updater instance.
@@ -50,71 +47,75 @@ func New(cfg *Config) *Updater {
 // Run starts the updater main loop, listening for RootCommitted events.
 func (u *Updater) Run(ctx context.Context) error {
 	for {
-		events, errChan, err := u.contractClient.SubscribeRootCommitted(ctx, nil)
+		delay, err := u.subscribeAndProcess(ctx)
 		if err != nil {
-			logger.Errorw("Failed to subscribe, retrying", "error", err)
-			select {
-			case <-time.After(subscribeRetryDelay):
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			continue
+			logger.Errorw("Subscription failed, reconnecting", "error", err, "retryDelay", delay)
 		}
 
-		logger.Info("Subscribed to RootCommitted events")
-
-	innerLoop:
-		for {
-			select {
-			case <-ctx.Done():
-				logger.Info("Updater stopping")
-				return ctx.Err()
-
-			case err := <-errChan:
-				logger.Errorw("Subscription error, reconnecting", "error", err)
-				break innerLoop
-
-			case event, ok := <-events:
-				if !ok {
-					logger.Warn("Event channel closed, reconnecting")
-					break innerLoop
-				}
-
-				log := logger.With("blockNum", event.BlockNum)
-				log.Infow("Received RootCommitted",
-					"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
-
-				commit, err := u.storage.GetCommitByBlock(ctx, event.BlockNum)
-				if err != nil {
-					log.Errorw("Failed to lookup commit", "error", err)
-					continue
-				}
-				if commit == nil {
-					log.Warnw("Skipping RootCommitted event - not from this oracle",
-						"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
-					continue
-				}
-
-				log.Infow("Found commit",
-					"targetEpoch", commit.TargetEpoch,
-					"round", commit.RoundID)
-
-				if err := u.processCommit(ctx, commit); err != nil {
-					log.Errorw("Failed to process commit", "error", err)
-				}
-			}
-		}
-
-		logger.Info("Reconnecting")
 		select {
-		case <-time.After(reconnectDelay):
+		case <-time.After(delay):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
 
-// processCommit rebuilds the merkle tree from stored balances, validates the root, and submits proofs.
+// subscribeAndProcess subscribes to events and processes them.
+// Returns the delay to use before retrying.
+func (u *Updater) subscribeAndProcess(ctx context.Context) (time.Duration, error) {
+	events, errChan, err := u.contractClient.SubscribeRootCommitted(ctx, nil)
+	if err != nil {
+		return retryDelay, fmt.Errorf("failed to subscribe: %w", err)
+	}
+
+	logger.Info("Subscribed to RootCommitted events")
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Updater stopping")
+			return 0, ctx.Err()
+
+		case err := <-errChan:
+			return retryDelay, fmt.Errorf("subscription error: %w", err)
+
+		case event, ok := <-events:
+			if !ok {
+				return retryDelay, fmt.Errorf("event channel closed")
+			}
+			u.handleEvent(ctx, event)
+		}
+	}
+}
+
+func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommittedEvent) {
+	log := logger.With("blockNum", event.BlockNum)
+	log.Infow("Received RootCommitted",
+		"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
+
+	commit, err := u.storage.GetCommitByBlock(ctx, event.BlockNum)
+	if err != nil {
+		log.Errorw("Failed to lookup commit", "error", err)
+		return
+	}
+	if commit == nil {
+		log.Warnw("Skipping RootCommitted event - not from this oracle",
+			"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
+		return
+	}
+
+	log.Infow("Found commit",
+		"targetEpoch", commit.TargetEpoch,
+		"round", commit.RoundID)
+
+	if err := u.processCommit(ctx, commit); err != nil {
+		log.Errorw("Failed to process commit", "error", err)
+	}
+}
+
 func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommit) error {
 	log := logger.With("blockNum", commit.ReferenceBlock, "targetEpoch", commit.TargetEpoch)
 	log.Infow("Processing root",
@@ -125,35 +126,48 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 		return nil
 	}
 
-	log.Infow("Found clusters", "count", len(commit.ClusterBalances))
-
-	clusterMap := make(map[[32]byte]uint64)
-	for _, bal := range commit.ClusterBalances {
-		var clusterID [32]byte
-		copy(clusterID[:], bal.ClusterID)
-		clusterMap[clusterID] = bal.EffectiveBalance
-	}
-
-	tree := merkle.BuildMerkleTreeWithProofs(clusterMap)
+	tree := u.buildMerkleTree(commit.ClusterBalances)
 	log.Infow("Merkle tree built",
-		"root", fmt.Sprintf("0x%x", tree.Root))
+		"root", fmt.Sprintf("0x%x", tree.Root),
+		"clusters", len(commit.ClusterBalances))
 
 	if !bytes.Equal(tree.Root[:], commit.MerkleRoot) {
 		return fmt.Errorf("root mismatch: computed=0x%x, committed=0x%x",
 			tree.Root, commit.MerkleRoot)
 	}
 
-	log.Infow("Root validated, processing clusters", "count", len(commit.ClusterBalances))
+	log.Info("Root validated, processing clusters")
 
-	updated := 0
-	skipped := 0
-	failures := make(map[txmanager.FailureReason]int)
+	stats := u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+	u.logStats(log, stats)
+
+	return nil
+}
+
+func (u *Updater) buildMerkleTree(balances []ethsync.ClusterBalance) *merkle.MerkleTree {
+	clusterMap := make(map[[32]byte]uint64)
+	for _, bal := range balances {
+		var clusterID [32]byte
+		copy(clusterID[:], bal.ClusterID)
+		clusterMap[clusterID] = bal.EffectiveBalance
+	}
+	return merkle.BuildMerkleTreeWithProofs(clusterMap)
+}
+
+type processStats struct {
+	updated  int
+	skipped  int
+	failures map[txmanager.FailureReason]int
+}
+
+func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) processStats {
+	stats := processStats{failures: make(map[txmanager.FailureReason]int)}
 
 	for _, leaf := range tree.Leaves {
-		ok, err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree)
+		ok, err := u.processCluster(ctx, blockNum, leaf, tree)
 		if err != nil {
 			reason, retryable := txmanager.ClassifyError(err)
-			failures[reason]++
+			stats.failures[reason]++
 
 			logFunc := logger.Warnw
 			if !retryable {
@@ -167,28 +181,26 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 			continue
 		}
 		if ok {
-			updated++
+			stats.updated++
 		} else {
-			skipped++
+			stats.skipped++
 		}
 	}
 
-	logFields := []interface{}{
-		"updated", updated,
-		"skipped", skipped,
-	}
-	for reason, count := range failures {
-		logFields = append(logFields, string(reason), count)
-	}
-	log.Infow("Commit complete", logFields...)
-
-	return nil
+	return stats
 }
 
-// processCluster updates a single cluster's effective balance on-chain.
-// Returns (true, nil) if update was submitted successfully.
-// Returns (false, nil) if update was skipped (balance unchanged or cluster not found).
-// Returns (false, err) if update failed.
+func (u *Updater) logStats(log logger.Logger, stats processStats) {
+	fields := []interface{}{
+		"updated", stats.updated,
+		"skipped", stats.skipped,
+	}
+	for reason, count := range stats.failures {
+		fields = append(fields, string(reason), count)
+	}
+	log.Infow("Commit complete", fields...)
+}
+
 func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) (bool, error) {
 	clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
@@ -217,27 +229,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		return false, nil
 	}
 
-	owner := common.BytesToAddress(cluster.OwnerAddress)
-	contractCluster := contract.Cluster{
-		ValidatorCount:  cluster.ValidatorCount,
-		NetworkFeeIndex: cluster.NetworkFeeIndex,
-		Index:           cluster.Index,
-		Active:          cluster.IsActive,
-		Balance:         cluster.Balance,
-	}
-
-	effectiveBalanceBig := new(big.Int).SetUint64(leaf.EffectiveBalance)
-
-	// TxManager handles gas estimation, bumping, retries, and cancellation
-	receipt, err := u.contractClient.UpdateClusterBalance(
-		ctx,
-		blockNum,
-		owner,
-		cluster.OperatorIDs,
-		contractCluster,
-		effectiveBalanceBig,
-		proof,
-	)
+	receipt, err := u.submitUpdate(ctx, blockNum, cluster, leaf, proof)
 	if err != nil {
 		return false, err
 	}
@@ -249,4 +241,31 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		"block", receipt.BlockNumber.Uint64())
 
 	return true, nil
+}
+
+func (u *Updater) submitUpdate(
+	ctx context.Context,
+	blockNum uint64,
+	cluster *ethsync.ClusterRow,
+	leaf merkle.Leaf,
+	proof [][32]byte,
+) (*types.Receipt, error) {
+	owner := common.BytesToAddress(cluster.OwnerAddress)
+	contractCluster := contract.Cluster{
+		ValidatorCount:  cluster.ValidatorCount,
+		NetworkFeeIndex: cluster.NetworkFeeIndex,
+		Index:           cluster.Index,
+		Active:          cluster.IsActive,
+		Balance:         cluster.Balance,
+	}
+
+	return u.contractClient.UpdateClusterBalance(
+		ctx,
+		blockNum,
+		owner,
+		cluster.OperatorIDs,
+		contractCluster,
+		new(big.Int).SetUint64(leaf.EffectiveBalance),
+		proof,
+	)
 }

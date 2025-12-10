@@ -28,7 +28,7 @@ type Tx interface {
 	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
 }
 
-// executor is the common interface for *sql.DB and *sql.Tx
+// executor abstracts *sql.DB and *sql.Tx for shared query implementations.
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
@@ -103,6 +103,7 @@ type PostgresStorage struct {
 //go:embed schema.sql
 var schemaSQL string
 
+// NewPostgresStorage creates a new PostgreSQL storage and applies the schema.
 func NewPostgresStorage(connString string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", connString)
 	if err != nil {

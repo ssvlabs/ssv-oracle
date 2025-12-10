@@ -8,24 +8,24 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// Logger is an alias for zap.SugaredLogger for use in type signatures.
+type Logger = *zap.SugaredLogger
+
 // L is the global logger instance.
 var L *zap.SugaredLogger
 
 func init() {
-	// Default to development logger - ensures logs work even if Init() is forgotten.
-	// In production, Init() should be called to configure proper settings.
 	L = zap.Must(zap.NewDevelopment()).Sugar()
 }
 
 // Init initializes the global logger.
-// Call this at application startup.
 func Init(development bool) {
 	var config zap.Config
 	if development {
 		config = zap.NewDevelopmentConfig()
 		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05")
-		config.DisableStacktrace = true // Stack traces only clutter normal error logs
+		config.DisableStacktrace = true
 	} else {
 		config = zap.NewProductionConfig()
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
@@ -50,16 +50,13 @@ func Init(development bool) {
 	L = logger.Sugar()
 }
 
-// InitFromEnv initializes the logger based on environment.
-// Uses development mode if DEV=true.
-// Log level can be set via LOG_LEVEL (debug, info, warn, error).
+// InitFromEnv initializes the logger based on DEV and LOG_LEVEL env vars.
 func InitFromEnv() {
 	dev := os.Getenv("DEV") == "true"
 	Init(dev)
 }
 
 // Sync flushes any buffered log entries.
-// Call this before application exit.
 func Sync() {
 	if L != nil {
 		_ = L.Sync()
@@ -71,7 +68,7 @@ func With(keysAndValues ...any) *zap.SugaredLogger {
 	return L.With(keysAndValues...)
 }
 
-// Convenience functions that use the global logger
+// Level functions
 
 func Debug(args ...any)                       { L.Debug(args...) }
 func Debugf(template string, args ...any)     { L.Debugf(template, args...) }
