@@ -16,13 +16,13 @@ func setupTestStorage(t *testing.T) *Storage {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Register cleanup
 	t.Cleanup(func() {
-		os.Remove(tmpFile.Name())
-		os.Remove(tmpFile.Name() + "-wal")
-		os.Remove(tmpFile.Name() + "-shm")
+		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name() + "-wal")
+		_ = os.Remove(tmpFile.Name() + "-shm")
 	})
 
 	storage, err := NewStorage(tmpFile.Name())
@@ -31,7 +31,7 @@ func setupTestStorage(t *testing.T) *Storage {
 	}
 
 	t.Cleanup(func() {
-		storage.Close()
+		_ = storage.Close()
 	})
 
 	return storage
@@ -307,7 +307,7 @@ func TestStorage_Transaction(t *testing.T) {
 	}
 	err = tx.UpsertCluster(ctx, cluster)
 	if err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		t.Fatalf("Failed to upsert in tx: %v", err)
 	}
 
@@ -317,7 +317,7 @@ func TestStorage_Transaction(t *testing.T) {
 
 	err = tx.InsertValidator(ctx, clusterID, pubkey)
 	if err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		t.Fatalf("Failed to insert validator in tx: %v", err)
 	}
 
@@ -364,7 +364,7 @@ func TestStorage_TransactionRollback(t *testing.T) {
 	}
 	err = tx.UpsertCluster(ctx, cluster)
 	if err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		t.Fatalf("Failed to upsert in tx: %v", err)
 	}
 
