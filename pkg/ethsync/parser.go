@@ -23,7 +23,7 @@ func NewEventParser() *EventParser {
 }
 
 // ParseLog parses an Ethereum log into a structured event.
-func (p *EventParser) ParseLog(log *types.Log) (string, interface{}, error) {
+func (p *EventParser) ParseLog(log *types.Log) (string, any, error) {
 	if len(log.Topics) == 0 {
 		return "", nil, fmt.Errorf("log has no topics")
 	}
@@ -270,7 +270,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 }
 
 // EncodeEventToJSON encodes a parsed event to JSON for storage.
-func EncodeEventToJSON(event interface{}) (json.RawMessage, error) {
+func EncodeEventToJSON(event any) (json.RawMessage, error) {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal event: %w", err)
@@ -280,7 +280,7 @@ func EncodeEventToJSON(event interface{}) (json.RawMessage, error) {
 
 // EncodeLogToJSON encodes an Ethereum log to JSON for storage.
 func EncodeLogToJSON(log *types.Log) (json.RawMessage, error) {
-	logData := map[string]interface{}{
+	logData := map[string]any{
 		"address": log.Address.Hex(),
 		"topics":  make([]string, len(log.Topics)),
 		"data":    common.Bytes2Hex(log.Data),

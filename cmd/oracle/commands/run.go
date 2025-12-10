@@ -75,7 +75,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	}
 
 	if cfg.DBPath == "" {
-		return fmt.Errorf("db_path is required")
+		cfg.DBPath = "./data/oracle.db"
 	}
 
 	signer, err := wallet.NewSigner(&cfg.Wallet)

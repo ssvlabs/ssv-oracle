@@ -191,7 +191,7 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 }
 
 func (u *Updater) logStats(log logger.Logger, stats processStats) {
-	fields := []interface{}{
+	fields := []any{
 		"updated", stats.updated,
 		"skipped", stats.skipped,
 	}

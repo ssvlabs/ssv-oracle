@@ -80,7 +80,7 @@ func TestEncodeLogToJSON(t *testing.T) {
 	}
 
 	// Verify JSON structure
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(result, &decoded); err != nil {
 		t.Fatalf("Failed to unmarshal result: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestEncodeLogToJSON(t *testing.T) {
 		t.Errorf("Address mismatch: expected %s, got %v", log.Address.Hex(), decoded["address"])
 	}
 
-	topics, ok := decoded["topics"].([]interface{})
+	topics, ok := decoded["topics"].([]any)
 	if !ok {
 		t.Fatal("Topics should be an array")
 	}
@@ -110,12 +110,12 @@ func TestEncodeLogToJSON_EmptyLog(t *testing.T) {
 		t.Fatalf("EncodeLogToJSON() error = %v", err)
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(result, &decoded); err != nil {
 		t.Fatalf("Failed to unmarshal result: %v", err)
 	}
 
-	topics, ok := decoded["topics"].([]interface{})
+	topics, ok := decoded["topics"].([]any)
 	if !ok {
 		t.Fatal("Topics should be an array")
 	}
@@ -141,7 +141,7 @@ func TestEncodeEventToJSON(t *testing.T) {
 	}
 
 	// Verify it's valid JSON
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(result, &decoded); err != nil {
 		t.Fatalf("Failed to unmarshal result: %v", err)
 	}

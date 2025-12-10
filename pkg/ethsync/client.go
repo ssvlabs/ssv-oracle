@@ -244,7 +244,7 @@ func (c *ExecutionClient) getBlockTimestampsBatch(ctx context.Context, blockNumb
 		results[i] = new(types.Header)
 		batch[i] = rpc.BatchElem{
 			Method: "eth_getBlockByNumber",
-			Args:   []interface{}{fmt.Sprintf("0x%x", blockNum), false}, // false = don't include txs
+			Args:   []any{fmt.Sprintf("0x%x", blockNum), false}, // false = don't include txs
 			Result: results[i],
 		}
 	}

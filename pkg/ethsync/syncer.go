@@ -259,7 +259,7 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx Tx, log *types.Log, 
 	return tx.InsertEvent(ctx, contractEvent)
 }
 
-func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, eventData interface{}, clusterID []byte, slot uint64) error {
+func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, eventData any, clusterID []byte, slot uint64) error {
 	switch eventType {
 	case EventValidatorAdded:
 		return s.handleValidatorAdded(ctx, tx, eventData.(*ValidatorAddedEvent), clusterID, slot)
@@ -400,7 +400,7 @@ func (e *ClusterMigratedToETHEvent) clusterKey() (common.Address, []uint64) {
 }
 
 // computeClusterIDFromEvent extracts cluster ID from event data, or nil if unknown type.
-func computeClusterIDFromEvent(eventData interface{}) []byte {
+func computeClusterIDFromEvent(eventData any) []byte {
 	if e, ok := eventData.(clusterEvent); ok {
 		owner, operatorIDs := e.clusterKey()
 		id := ComputeClusterID(owner, operatorIDs)
