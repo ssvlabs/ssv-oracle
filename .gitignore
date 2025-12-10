@@ -1,6 +1,9 @@
 # Binaries
 ssv-oracle
 
+# Database
+data/
+
 # IDE
 .idea/
 .vscode/
