@@ -209,6 +209,14 @@ func (o *Oracle) deduplicatePubkeys(validators []ethsync.ActiveValidator) [][]by
 	return pubkeys
 }
 
+// Balance thresholds in Gwei.
+const (
+	// ejectionBalanceGwei is the threshold below which validators are considered near ejection (16 ETH).
+	ejectionBalanceGwei = 16_000_000_000
+	// defaultBalanceGwei is the default effective balance for new/exited/low-balance validators (32 ETH).
+	defaultBalanceGwei = 32_000_000_000
+)
+
 func (o *Oracle) aggregateByCluster(validators []ethsync.ActiveValidator, balanceMap map[phase0.BLSPubKey]uint64) ([]ethsync.ClusterBalance, int) {
 	clusterTotals := make(map[[32]byte]uint64)
 	var notOnBeacon int
@@ -216,11 +224,15 @@ func (o *Oracle) aggregateByCluster(validators []ethsync.ActiveValidator, balanc
 	for _, v := range validators {
 		var pk phase0.BLSPubKey
 		copy(pk[:], v.ValidatorPubkey)
+
 		balance, onBeacon := balanceMap[pk]
 		if !onBeacon {
 			notOnBeacon++
-			continue
+			balance = defaultBalanceGwei
+		} else if balance <= ejectionBalanceGwei {
+			balance = defaultBalanceGwei
 		}
+
 		var clusterID [32]byte
 		copy(clusterID[:], v.ClusterID)
 		clusterTotals[clusterID] += balance
@@ -302,9 +314,6 @@ func (o *Oracle) waitForFinalization(
 		retries = 0
 
 		if targetEpoch < checkpoint.Epoch {
-			logger.Infow("Epoch finalized",
-				"targetEpoch", targetEpoch,
-				"checkpoint", checkpoint.Epoch)
 			return checkpoint, nil
 		}
 

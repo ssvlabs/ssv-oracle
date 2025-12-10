@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/attestantio/go-eth2-client/spec/phase0"
+
 	"ssv-oracle/pkg/ethsync"
 )
 
@@ -208,5 +210,138 @@ func TestOraclePhases(t *testing.T) {
 
 	if o.phases[1].Interval != 450 {
 		t.Errorf("Phase 1 interval: expected 450, got %d", o.phases[1].Interval)
+	}
+}
+
+func TestAggregateByCluster_BalanceFloor(t *testing.T) {
+	o := &Oracle{}
+
+	// Create test pubkeys
+	pk1 := make([]byte, 48)
+	pk1[0] = 0x01
+	pk2 := make([]byte, 48)
+	pk2[0] = 0x02
+	pk3 := make([]byte, 48)
+	pk3[0] = 0x03
+	pk4 := make([]byte, 48)
+	pk4[0] = 0x04
+
+	clusterID := make([]byte, 32)
+	clusterID[0] = 0xAA
+
+	validators := []ethsync.ActiveValidator{
+		{ClusterID: clusterID, ValidatorPubkey: pk1},
+		{ClusterID: clusterID, ValidatorPubkey: pk2},
+		{ClusterID: clusterID, ValidatorPubkey: pk3},
+		{ClusterID: clusterID, ValidatorPubkey: pk4},
+	}
+
+	// Build balance map with various scenarios
+	balanceMap := make(map[phase0.BLSPubKey]uint64)
+
+	var blsPk1, blsPk2, blsPk3 phase0.BLSPubKey
+	copy(blsPk1[:], pk1)
+	copy(blsPk2[:], pk2)
+	copy(blsPk3[:], pk3)
+	// pk4 not in map (not on beacon)
+
+	balanceMap[blsPk1] = 32_000_000_000 // 32 ETH - normal
+	balanceMap[blsPk2] = 64_000_000_000 // 64 ETH - above 32, use actual
+	balanceMap[blsPk3] = 16_000_000_000 // 16 ETH - at ejection threshold, should become 32
+
+	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
+
+	if notOnBeacon != 1 {
+		t.Errorf("Expected 1 validator not on beacon, got %d", notOnBeacon)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("Expected 1 cluster, got %d", len(result))
+	}
+
+	// Expected: 32 (normal) + 64 (high) + 32 (floored from 16) + 32 (not on beacon) = 160 ETH
+	expectedBalance := uint64(160_000_000_000)
+	if result[0].EffectiveBalance != expectedBalance {
+		t.Errorf("Expected cluster balance %d gwei (160 ETH), got %d gwei",
+			expectedBalance, result[0].EffectiveBalance)
+	}
+}
+
+func TestAggregateByCluster_AllBelowThreshold(t *testing.T) {
+	o := &Oracle{}
+
+	pk1 := make([]byte, 48)
+	pk1[0] = 0x01
+	pk2 := make([]byte, 48)
+	pk2[0] = 0x02
+
+	clusterID := make([]byte, 32)
+	clusterID[0] = 0xBB
+
+	validators := []ethsync.ActiveValidator{
+		{ClusterID: clusterID, ValidatorPubkey: pk1},
+		{ClusterID: clusterID, ValidatorPubkey: pk2},
+	}
+
+	balanceMap := make(map[phase0.BLSPubKey]uint64)
+
+	var blsPk1, blsPk2 phase0.BLSPubKey
+	copy(blsPk1[:], pk1)
+	copy(blsPk2[:], pk2)
+
+	balanceMap[blsPk1] = 0              // Exited with 0
+	balanceMap[blsPk2] = 15_000_000_000 // Below threshold
+
+	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
+
+	if notOnBeacon != 0 {
+		t.Errorf("Expected 0 validators not on beacon, got %d", notOnBeacon)
+	}
+
+	// Both should be floored to 32 ETH each = 64 ETH total
+	expectedBalance := uint64(64_000_000_000)
+	if result[0].EffectiveBalance != expectedBalance {
+		t.Errorf("Expected cluster balance %d gwei (64 ETH), got %d gwei",
+			expectedBalance, result[0].EffectiveBalance)
+	}
+}
+
+func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
+	o := &Oracle{}
+
+	pk1 := make([]byte, 48)
+	pk1[0] = 0x01
+
+	clusterID := make([]byte, 32)
+	clusterID[0] = 0xCC
+
+	validators := []ethsync.ActiveValidator{
+		{ClusterID: clusterID, ValidatorPubkey: pk1},
+	}
+
+	// Empty balance map - validator not on beacon
+	balanceMap := make(map[phase0.BLSPubKey]uint64)
+
+	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
+
+	if notOnBeacon != 1 {
+		t.Errorf("Expected 1 validator not on beacon, got %d", notOnBeacon)
+	}
+
+	// Should default to 32 ETH
+	expectedBalance := uint64(32_000_000_000)
+	if result[0].EffectiveBalance != expectedBalance {
+		t.Errorf("Expected cluster balance %d gwei (32 ETH), got %d gwei",
+			expectedBalance, result[0].EffectiveBalance)
+	}
+}
+
+func TestBalanceThresholdConstants(t *testing.T) {
+	// Verify constants are correct
+	if ejectionBalanceGwei != 16_000_000_000 {
+		t.Errorf("ejectionBalanceGwei should be 16 ETH in gwei, got %d", ejectionBalanceGwei)
+	}
+	if defaultBalanceGwei != 32_000_000_000 {
+		t.Errorf("defaultBalanceGwei should be 32 ETH in gwei, got %d", defaultBalanceGwei)
 	}
 }
