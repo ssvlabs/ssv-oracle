@@ -12,11 +12,12 @@ import (
 	"ssv-oracle/pkg/logger"
 )
 
+const eventRootCommitted = "RootCommitted"
+
 // RootCommittedEvent represents a RootCommitted event from the contract.
 type RootCommittedEvent struct {
 	MerkleRoot [32]byte
 	BlockNum   uint64
-	Timestamp  uint64
 }
 
 // SubscribeRootCommitted subscribes to RootCommitted events.
@@ -27,9 +28,9 @@ func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) 
 		return nil, nil, fmt.Errorf("WebSocket client not configured (set eth_ws_rpc in config)")
 	}
 
-	event, ok := SSVNetworkABI.Events["RootCommitted"]
+	event, ok := SSVNetworkABI.Events[eventRootCommitted]
 	if !ok {
-		return nil, nil, fmt.Errorf("RootCommitted event not found in ABI")
+		return nil, nil, fmt.Errorf("%s event not found in ABI", eventRootCommitted)
 	}
 
 	query := ethereum.FilterQuery{
@@ -90,13 +91,8 @@ func (c *Client) processRootCommittedLogs(
 }
 
 // parseRootCommittedEvent parses a log into a RootCommittedEvent.
-// Event signature: RootCommitted(bytes32 indexed merkleRoot, uint64 indexed blockNum, uint256 timestamp)
+// Event signature: RootCommitted(bytes32 indexed merkleRoot, uint64 indexed blockNum)
 func (c *Client) parseRootCommittedEvent(vLog types.Log) (*RootCommittedEvent, error) {
-	event, ok := SSVNetworkABI.Events["RootCommitted"]
-	if !ok {
-		return nil, fmt.Errorf("RootCommitted event not found in ABI")
-	}
-
 	if len(vLog.Topics) < 3 {
 		return nil, fmt.Errorf("invalid log: expected 3 topics, got %d", len(vLog.Topics))
 	}
@@ -106,22 +102,8 @@ func (c *Client) parseRootCommittedEvent(vLog types.Log) (*RootCommittedEvent, e
 
 	blockNum := new(big.Int).SetBytes(vLog.Topics[2].Bytes()).Uint64()
 
-	unpacked, err := event.Inputs.NonIndexed().Unpack(vLog.Data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unpack event data: %w", err)
-	}
-	if len(unpacked) != 1 {
-		return nil, fmt.Errorf("expected 1 non-indexed param, got %d", len(unpacked))
-	}
-
-	timestampBig, ok := unpacked[0].(*big.Int)
-	if !ok {
-		return nil, fmt.Errorf("timestamp is not *big.Int")
-	}
-
 	return &RootCommittedEvent{
 		MerkleRoot: merkleRoot,
 		BlockNum:   blockNum,
-		Timestamp:  timestampBig.Uint64(),
 	}, nil
 }

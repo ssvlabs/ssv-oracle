@@ -138,6 +138,21 @@ func TestComputeClusterIDFromEvent_ClusterDeposited(t *testing.T) {
 	}
 }
 
+func TestComputeClusterIDFromEvent_ClusterMigratedToETH(t *testing.T) {
+	event := &ClusterMigratedToETHEvent{
+		Owner:        common.HexToAddress("0xabc123"),
+		OperatorIDs:  []uint64{1, 2, 3, 4},
+		ETHDeposited: big.NewInt(1000),
+		SSVRefunded:  big.NewInt(500),
+		Cluster:      Cluster{Balance: big.NewInt(1000)},
+	}
+
+	clusterID := computeClusterIDFromEvent(event)
+	if clusterID == nil {
+		t.Fatal("computeClusterIDFromEvent returned nil for ClusterMigratedToETHEvent")
+	}
+}
+
 func TestClusterBalanceUpdatedEvent_HasClusterIDDirectly(t *testing.T) {
 	var clusterID [32]byte
 	copy(clusterID[:], []byte("test-cluster-id-12345678901234"))
@@ -184,6 +199,7 @@ func TestClusterKey_AllEventTypes(t *testing.T) {
 		{"ClusterReactivated", &ClusterReactivatedEvent{Owner: owner, OperatorIDs: operatorIDs}},
 		{"ClusterWithdrawn", &ClusterWithdrawnEvent{Owner: owner, OperatorIDs: operatorIDs}},
 		{"ClusterDeposited", &ClusterDepositedEvent{Owner: owner, OperatorIDs: operatorIDs}},
+		{"ClusterMigratedToETH", &ClusterMigratedToETHEvent{Owner: owner, OperatorIDs: operatorIDs}},
 	}
 
 	for _, tt := range tests {

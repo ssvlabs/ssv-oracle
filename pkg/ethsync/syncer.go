@@ -273,6 +273,8 @@ func (s *EventSyncer) updateState(ctx context.Context, tx Tx, eventType string, 
 		return s.handleClusterWithdrawn(ctx, tx, eventData.(*ClusterWithdrawnEvent), clusterID, slot)
 	case EventClusterDeposited:
 		return s.handleClusterDeposited(ctx, tx, eventData.(*ClusterDepositedEvent), clusterID, slot)
+	case EventClusterMigratedToETH:
+		return s.handleClusterMigratedToETH(ctx, tx, eventData.(*ClusterMigratedToETHEvent), clusterID, slot)
 	case EventClusterBalanceUpdated:
 		return s.handleClusterBalanceUpdated(ctx, tx, eventData.(*ClusterBalanceUpdatedEvent), slot)
 	default:
@@ -340,6 +342,10 @@ func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster, slot)
 }
 
+func (s *EventSyncer) handleClusterMigratedToETH(ctx context.Context, tx Tx, event *ClusterMigratedToETHEvent, clusterID []byte, slot uint64) error {
+	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster, slot)
+}
+
 func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, event *ClusterBalanceUpdatedEvent, slot uint64) error {
 	row := &ClusterRow{
 		ClusterID:       event.ClusterID[:],
@@ -387,6 +393,9 @@ func (e *ClusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
 func (e *ClusterDepositedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterMigratedToETHEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
 

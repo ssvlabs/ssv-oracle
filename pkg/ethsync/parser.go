@@ -49,6 +49,9 @@ func (p *EventParser) ParseLog(log *types.Log) (string, interface{}, error) {
 	case EventSigClusterDeposited:
 		event, err := p.parseClusterDeposited(log)
 		return EventClusterDeposited, event, err
+	case EventSigClusterMigratedToETH:
+		event, err := p.parseClusterMigratedToETH(log)
+		return EventClusterMigratedToETH, event, err
 	case EventSigClusterBalanceUpdated:
 		event, err := p.parseClusterBalanceUpdated(log)
 		return EventClusterBalanceUpdated, event, err
@@ -72,7 +75,7 @@ func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent,
 		Cluster     Cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, "ValidatorAdded", log.Data)
+	err := p.abi.UnpackIntoInterface(&result, EventValidatorAdded, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack ValidatorAdded: %w", err)
 	}
@@ -99,7 +102,7 @@ func (p *EventParser) parseValidatorRemoved(log *types.Log) (*ValidatorRemovedEv
 		Cluster     Cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, "ValidatorRemoved", log.Data)
+	err := p.abi.UnpackIntoInterface(&result, EventValidatorRemoved, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack ValidatorRemoved: %w", err)
 	}
@@ -124,7 +127,7 @@ func (p *EventParser) parseClusterLiquidated(log *types.Log) (*ClusterLiquidated
 		Cluster     Cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, "ClusterLiquidated", log.Data)
+	err := p.abi.UnpackIntoInterface(&result, EventClusterLiquidated, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack ClusterLiquidated: %w", err)
 	}
@@ -148,7 +151,7 @@ func (p *EventParser) parseClusterReactivated(log *types.Log) (*ClusterReactivat
 		Cluster     Cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, "ClusterReactivated", log.Data)
+	err := p.abi.UnpackIntoInterface(&result, EventClusterReactivated, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack ClusterReactivated: %w", err)
 	}
@@ -173,7 +176,7 @@ func (p *EventParser) parseClusterWithdrawn(log *types.Log) (*ClusterWithdrawnEv
 		Cluster     Cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, "ClusterWithdrawn", log.Data)
+	err := p.abi.UnpackIntoInterface(&result, EventClusterWithdrawn, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack ClusterWithdrawn: %w", err)
 	}
@@ -199,13 +202,41 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 		Cluster     Cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, "ClusterDeposited", log.Data)
+	err := p.abi.UnpackIntoInterface(&result, EventClusterDeposited, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack ClusterDeposited: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
 	event.Value = result.Value
+	event.Cluster = result.Cluster
+
+	return event, nil
+}
+
+func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigratedToETHEvent, error) {
+	event := &ClusterMigratedToETHEvent{}
+
+	if len(log.Topics) < 2 {
+		return nil, fmt.Errorf("missing owner topic")
+	}
+	event.Owner = common.BytesToAddress(log.Topics[1].Bytes())
+
+	var result struct {
+		OperatorIds  []uint64
+		ETHDeposited *big.Int
+		SSVRefunded  *big.Int
+		Cluster      Cluster
+	}
+
+	err := p.abi.UnpackIntoInterface(&result, EventClusterMigratedToETH, log.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unpack ClusterMigratedToETH: %w", err)
+	}
+
+	event.OperatorIDs = result.OperatorIds
+	event.ETHDeposited = result.ETHDeposited
+	event.SSVRefunded = result.SSVRefunded
 	event.Cluster = result.Cluster
 
 	return event, nil
@@ -226,7 +257,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 		Cluster          Cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, "ClusterBalanceUpdated", log.Data)
+	err := p.abi.UnpackIntoInterface(&result, EventClusterBalanceUpdated, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack ClusterBalanceUpdated: %w", err)
 	}

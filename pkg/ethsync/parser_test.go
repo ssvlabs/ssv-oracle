@@ -168,6 +168,7 @@ func TestEventSignatures(t *testing.T) {
 		EventSigClusterReactivated,
 		EventSigClusterWithdrawn,
 		EventSigClusterDeposited,
+		EventSigClusterMigratedToETH,
 		EventSigClusterBalanceUpdated,
 	}
 
@@ -180,5 +181,39 @@ func TestEventSignatures(t *testing.T) {
 			t.Errorf("Signature %d is duplicate: %s", i, sig.Hex())
 		}
 		seen[sig] = true
+	}
+}
+
+func TestEventSignatures_MatchABI(t *testing.T) {
+	// Verify our hardcoded event signatures match the ABI
+	// This catches ABI changes that would break event parsing
+	parser := NewEventParser()
+
+	tests := []struct {
+		name     string
+		expected common.Hash
+	}{
+		{EventValidatorAdded, EventSigValidatorAdded},
+		{EventValidatorRemoved, EventSigValidatorRemoved},
+		{EventClusterLiquidated, EventSigClusterLiquidated},
+		{EventClusterReactivated, EventSigClusterReactivated},
+		{EventClusterWithdrawn, EventSigClusterWithdrawn},
+		{EventClusterDeposited, EventSigClusterDeposited},
+		{EventClusterMigratedToETH, EventSigClusterMigratedToETH},
+		{EventClusterBalanceUpdated, EventSigClusterBalanceUpdated},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event, ok := parser.abi.Events[tt.name]
+			if !ok {
+				t.Fatalf("Event %s not found in ABI", tt.name)
+			}
+
+			if event.ID != tt.expected {
+				t.Errorf("Event %s signature mismatch:\n  ABI:      %s\n  hardcoded: %s",
+					tt.name, event.ID.Hex(), tt.expected.Hex())
+			}
+		})
 	}
 }

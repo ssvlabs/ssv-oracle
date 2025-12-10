@@ -19,6 +19,7 @@ const (
 	EventClusterReactivated    = "ClusterReactivated"
 	EventClusterWithdrawn      = "ClusterWithdrawn"
 	EventClusterDeposited      = "ClusterDeposited"
+	EventClusterMigratedToETH  = "ClusterMigratedToETH"
 	EventClusterBalanceUpdated = "ClusterBalanceUpdated"
 )
 
@@ -30,6 +31,7 @@ var (
 	EventSigClusterReactivated    = crypto.Keccak256Hash([]byte("ClusterReactivated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterWithdrawn      = crypto.Keccak256Hash([]byte("ClusterWithdrawn(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterDeposited      = crypto.Keccak256Hash([]byte("ClusterDeposited(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
+	EventSigClusterMigratedToETH  = crypto.Keccak256Hash([]byte("ClusterMigratedToETH(address,uint64[],uint256,uint256,(uint32,uint64,uint64,bool,uint256))"))
 	EventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(bytes32,uint64,uint256,uint64,(uint32,uint64,uint64,bool,uint256))"))
 )
 
@@ -87,6 +89,15 @@ type ClusterDepositedEvent struct {
 	OperatorIDs []uint64
 	Value       *big.Int
 	Cluster     Cluster
+}
+
+// ClusterMigratedToETHEvent is emitted when a cluster migrates to ETH payments.
+type ClusterMigratedToETHEvent struct {
+	Owner        common.Address
+	OperatorIDs  []uint64
+	ETHDeposited *big.Int
+	SSVRefunded  *big.Int
+	Cluster      Cluster
 }
 
 // ClusterBalanceUpdatedEvent is emitted when a cluster's effective balance is updated.
