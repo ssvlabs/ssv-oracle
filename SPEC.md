@@ -97,7 +97,7 @@ For each cluster `c`:
 - `effectiveBalance` – integer `uint64` representing units in gwei.
 
 The `effectiveBalance` of the cluster is the sum of all its SSV validators.
-If the `effectiveBalance` of a validator is below or equal to the (EJECTION_BALANCE)(https://eth2book.info/capella/annotated-spec/#validator-cycle) of 16 ETH,
+If the `effectiveBalance` of a validator is below or equal to the 32 ETH,
 then round it up to 32 ETH for cluster sum calculations.
 
 ---
