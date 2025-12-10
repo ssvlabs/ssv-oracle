@@ -87,6 +87,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	logger.Infow("SSV Oracle starting",
 		"version", Version,
 		"contract", cfg.SSVContract,
+		"dbPath", cfg.DBPath,
 		"signerAddress", signer.Address().Hex(),
 		"updater", withUpdater)
 
