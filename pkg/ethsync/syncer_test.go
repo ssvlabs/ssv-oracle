@@ -4,46 +4,21 @@ import (
 	"bytes"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestNewEventSyncer(t *testing.T) {
-	spec := &Spec{
-		GenesisTime:   time.Now(),
-		SlotDuration:  12 * time.Second,
-		SlotsPerEpoch: 32,
-	}
-
 	cfg := EventSyncerConfig{
 		ExecutionClient: nil, // Would be real client
 		Storage:         nil, // Would be real storage
 		SSVContract:     common.HexToAddress("0x1234"),
-		Spec:            spec,
 	}
 
-	syncer, err := NewEventSyncer(cfg)
-	if err != nil {
-		t.Fatalf("NewEventSyncer failed: %v", err)
-	}
+	syncer := NewEventSyncer(cfg)
 
 	if syncer == nil {
 		t.Fatal("NewEventSyncer returned nil")
-	}
-}
-
-func TestNewEventSyncer_NilSpec(t *testing.T) {
-	cfg := EventSyncerConfig{
-		ExecutionClient: nil,
-		Storage:         nil,
-		SSVContract:     common.HexToAddress("0x1234"),
-		Spec:            nil, // Missing spec
-	}
-
-	_, err := NewEventSyncer(cfg)
-	if err == nil {
-		t.Fatal("Expected error when spec is nil")
 	}
 }
 

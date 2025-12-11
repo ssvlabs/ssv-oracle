@@ -13,20 +13,15 @@ CREATE TABLE IF NOT EXISTS contract_events (
     block_number INTEGER NOT NULL,
     log_index INTEGER NOT NULL,
     event_type TEXT NOT NULL,
-    slot INTEGER NOT NULL,
     block_hash BLOB NOT NULL,
     block_time TEXT NOT NULL,
     transaction_hash BLOB NOT NULL,
     transaction_index INTEGER NOT NULL,
-    cluster_id BLOB,
     raw_log TEXT NOT NULL,
     raw_event TEXT NOT NULL,
     error TEXT,
     PRIMARY KEY (block_number, log_index)
 );
-
-CREATE INDEX IF NOT EXISTS idx_contract_events_slot ON contract_events(slot);
-CREATE INDEX IF NOT EXISTS idx_contract_events_cluster ON contract_events(cluster_id);
 
 -- Current cluster state (upserted on events, deleted when validator_count = 0)
 CREATE TABLE IF NOT EXISTS clusters (
@@ -37,8 +32,7 @@ CREATE TABLE IF NOT EXISTS clusters (
     network_fee_index INTEGER NOT NULL,
     idx INTEGER NOT NULL,
     is_active INTEGER NOT NULL CHECK (is_active IN (0, 1)),
-    balance TEXT NOT NULL,
-    last_updated_slot INTEGER NOT NULL
+    balance TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_clusters_active ON clusters(is_active) WHERE is_active = 1;

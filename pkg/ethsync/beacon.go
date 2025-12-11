@@ -12,6 +12,8 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
+
+	"ssv-oracle/pkg/logger"
 )
 
 const (
@@ -32,7 +34,7 @@ type BeaconAPI interface {
 // BeaconClient wraps a beacon node client for fetching chain data.
 type BeaconClient struct {
 	client BeaconAPI
-	spec   *Spec
+	Spec   *Spec
 }
 
 // BeaconClientConfig holds configuration for the beacon client.
@@ -41,7 +43,7 @@ type BeaconClientConfig struct {
 	Timeout time.Duration
 }
 
-// NewBeaconClient creates a new beacon client.
+// NewBeaconClient creates a new beacon client and fetches the chain spec.
 func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = defaultBeaconTimeout
@@ -53,47 +55,58 @@ func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient
 		http.WithLogLevel(zerolog.Disabled),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create beacon client: %w", err)
+		return nil, fmt.Errorf("beacon node %s: %w", cfg.URL, err)
 	}
 
-	return &BeaconClient{
+	bc := &BeaconClient{
 		client: client.(BeaconAPI),
-	}, nil
+	}
+
+	if err := bc.fetchSpec(ctx); err != nil {
+		return nil, err
+	}
+
+	return bc, nil
 }
 
-// GetSpec returns the beacon chain spec (cached).
-func (c *BeaconClient) GetSpec(ctx context.Context) (*Spec, error) {
-	if c.spec != nil {
-		return c.spec, nil
-	}
-
+func (c *BeaconClient) fetchSpec(ctx context.Context) error {
 	genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get genesis: %w", err)
+		return fmt.Errorf("failed to get genesis: %w", err)
 	}
 
 	specResp, err := c.client.Spec(ctx, &api.SpecOpts{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get spec: %w", err)
+		return fmt.Errorf("failed to get spec: %w", err)
 	}
 
 	slotsPerEpoch, ok := specResp.Data["SLOTS_PER_EPOCH"].(uint64)
 	if !ok {
-		return nil, fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec")
+		return fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec")
 	}
 
 	secondsPerSlot, ok := specResp.Data["SECONDS_PER_SLOT"].(time.Duration)
 	if !ok {
-		return nil, fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec")
+		return fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec")
 	}
 
-	c.spec = &Spec{
+	c.Spec = &Spec{
 		GenesisTime:   genesisResp.Data.GenesisTime,
 		SlotsPerEpoch: slotsPerEpoch,
 		SlotDuration:  secondsPerSlot,
 	}
 
-	return c.spec, nil
+	logger.Infow("Beacon spec loaded",
+		"genesis", c.Spec.GenesisTime.Format(time.RFC3339),
+		"slotsPerEpoch", c.Spec.SlotsPerEpoch,
+		"slotDuration", c.Spec.SlotDuration)
+
+	return nil
+}
+
+// CurrentEpoch returns the current epoch based on wall clock time.
+func (c *BeaconClient) CurrentEpoch() uint64 {
+	return c.Spec.CurrentEpoch()
 }
 
 // FinalizedCheckpoint contains the finalized epoch and corresponding execution block.

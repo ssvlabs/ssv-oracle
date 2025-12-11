@@ -39,14 +39,12 @@ type executor interface {
 // ContractEvent represents a stored SSV contract event.
 type ContractEvent struct {
 	EventType        string
-	Slot             uint64
 	BlockNumber      uint64
 	BlockHash        []byte
 	BlockTime        time.Time
 	TransactionHash  []byte
 	TransactionIndex uint32
 	LogIndex         uint32
-	ClusterID        []byte
 	RawLog           json.RawMessage
 	RawEvent         json.RawMessage
 	Error            *string
@@ -62,7 +60,6 @@ type ClusterRow struct {
 	Index           uint64
 	IsActive        bool
 	Balance         *big.Int
-	LastUpdatedSlot uint64
 }
 
 // ActiveValidator represents an active validator with its cluster.
@@ -212,7 +209,7 @@ func (s *Storage) DeleteCluster(ctx context.Context, clusterID []byte) error {
 func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow, error) {
 	query := `
 		SELECT cluster_id, owner_address, operator_ids, validator_count,
-		       network_fee_index, idx, is_active, balance, last_updated_slot
+		       network_fee_index, idx, is_active, balance
 		FROM clusters WHERE cluster_id = ?
 	`
 	var cluster ClusterRow
@@ -223,7 +220,7 @@ func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow
 	err := s.db.QueryRowContext(ctx, query, clusterID).Scan(
 		&cluster.ClusterID, &cluster.OwnerAddress, &operatorIDsJSON,
 		&cluster.ValidatorCount, &cluster.NetworkFeeIndex, &cluster.Index,
-		&isActiveInt, &balanceStr, &cluster.LastUpdatedSlot,
+		&isActiveInt, &balanceStr,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -412,15 +409,15 @@ func (t *storageTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) 
 func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 	query := `
 		INSERT INTO contract_events (
-			block_number, log_index, event_type, slot, block_hash, block_time,
-			transaction_hash, transaction_index, cluster_id, raw_log, raw_event, error
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			block_number, log_index, event_type, block_hash, block_time,
+			transaction_hash, transaction_index, raw_log, raw_event, error
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
 	_, err := e.ExecContext(ctx, query,
-		event.BlockNumber, event.LogIndex, event.EventType, event.Slot,
+		event.BlockNumber, event.LogIndex, event.EventType,
 		event.BlockHash, event.BlockTime.Format(time.RFC3339), event.TransactionHash, event.TransactionIndex,
-		event.ClusterID, string(event.RawLog), string(event.RawEvent), event.Error,
+		string(event.RawLog), string(event.RawEvent), event.Error,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert event: %w", err)
@@ -437,8 +434,8 @@ func upsertCluster(ctx context.Context, e executor, cluster *ClusterRow) error {
 	query := `
 		INSERT INTO clusters (
 			cluster_id, owner_address, operator_ids, validator_count,
-			network_fee_index, idx, is_active, balance, last_updated_slot
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			network_fee_index, idx, is_active, balance
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (cluster_id) DO UPDATE SET
 			owner_address = EXCLUDED.owner_address,
 			operator_ids = EXCLUDED.operator_ids,
@@ -446,13 +443,12 @@ func upsertCluster(ctx context.Context, e executor, cluster *ClusterRow) error {
 			network_fee_index = EXCLUDED.network_fee_index,
 			idx = EXCLUDED.idx,
 			is_active = EXCLUDED.is_active,
-			balance = EXCLUDED.balance,
-			last_updated_slot = EXCLUDED.last_updated_slot
+			balance = EXCLUDED.balance
 	`
 	_, err = e.ExecContext(ctx, query,
 		cluster.ClusterID, cluster.OwnerAddress, operatorIDsJSON,
 		cluster.ValidatorCount, cluster.NetworkFeeIndex, cluster.Index,
-		boolToInt(cluster.IsActive), cluster.Balance.String(), cluster.LastUpdatedSlot,
+		boolToInt(cluster.IsActive), cluster.Balance.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert cluster: %w", err)
@@ -536,8 +532,7 @@ func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow
 			network_fee_index = ?,
 			idx = ?,
 			is_active = ?,
-			balance = ?,
-			last_updated_slot = ?
+			balance = ?
 		WHERE cluster_id = ?
 	`
 	_, err := s.db.ExecContext(ctx, query,
@@ -545,7 +540,6 @@ func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow
 		cluster.Index,
 		boolToInt(cluster.IsActive),
 		cluster.Balance.String(),
-		cluster.LastUpdatedSlot,
 		cluster.ClusterID,
 	)
 	if err != nil {

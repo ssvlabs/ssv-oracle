@@ -143,21 +143,21 @@ type Spec struct {
 	SlotDuration  time.Duration
 }
 
-// SlotAt returns the slot number at the given time.
-func (s *Spec) SlotAt(t time.Time) uint64 {
-	if t.Before(s.GenesisTime) {
+// CurrentSlot returns the current slot based on wall clock time.
+func (s *Spec) CurrentSlot() uint64 {
+	elapsed := time.Since(s.GenesisTime)
+	if elapsed < 0 {
 		return 0
 	}
-	return uint64(t.Sub(s.GenesisTime) / s.SlotDuration)
+	return uint64(elapsed / s.SlotDuration)
 }
 
-// EpochAtTimestamp returns the epoch number for a given Unix timestamp.
-func (s *Spec) EpochAtTimestamp(timestamp uint64) uint64 {
-	t := time.Unix(int64(timestamp), 0)
-	if t.Before(s.GenesisTime) {
-		return 0
-	}
-	elapsed := t.Sub(s.GenesisTime)
-	epochDuration := s.SlotDuration * time.Duration(s.SlotsPerEpoch)
-	return uint64(elapsed / epochDuration)
+// CurrentEpoch returns the current epoch based on wall clock time.
+func (s *Spec) CurrentEpoch() uint64 {
+	return s.CurrentSlot() / s.SlotsPerEpoch
+}
+
+// SlotInEpoch returns the slot position within the current epoch (1 to SlotsPerEpoch).
+func (s *Spec) SlotInEpoch() uint64 {
+	return s.CurrentSlot()%s.SlotsPerEpoch + 1
 }

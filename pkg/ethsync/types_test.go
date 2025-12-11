@@ -74,61 +74,22 @@ func TestComputeClusterID_SortingInvariant(t *testing.T) {
 	t.Logf("Cluster ID (sorted): 0x%s", hex.EncodeToString(id1[:]))
 }
 
-// TestSpec tests the Spec struct methods for slot/epoch calculations
-func TestSpec(t *testing.T) {
-	// Use Mainnet genesis time: Dec 1, 2020 12:00:23 UTC
-	genesisTime := time.Date(2020, 12, 1, 12, 0, 23, 0, time.UTC)
+// TestSpec_CurrentEpoch tests the CurrentEpoch method
+func TestSpec_CurrentEpoch(t *testing.T) {
+	// Use a genesis time 10 epochs ago
+	epochDuration := 32 * 12 * time.Second // 384 seconds per epoch
+	genesisTime := time.Now().Add(-10 * epochDuration)
 	spec := newTestSpec(genesisTime)
 
-	t.Run("SlotAt", func(t *testing.T) {
-		// Slot 0 at genesis
-		slot := spec.SlotAt(genesisTime)
-		if slot != 0 {
-			t.Errorf("Expected slot 0 at genesis, got %d", slot)
-		}
+	epoch := spec.CurrentEpoch()
+	if epoch < 10 || epoch > 11 {
+		t.Errorf("Expected epoch around 10, got %d", epoch)
+	}
 
-		// Slot 1 at genesis + 12 seconds
-		slot = spec.SlotAt(genesisTime.Add(12 * time.Second))
-		if slot != 1 {
-			t.Errorf("Expected slot 1, got %d", slot)
-		}
-
-		// Slot 32 at genesis + 384 seconds (1 epoch)
-		slot = spec.SlotAt(genesisTime.Add(384 * time.Second))
-		if slot != 32 {
-			t.Errorf("Expected slot 32, got %d", slot)
-		}
-
-		// Before genesis should return 0
-		slot = spec.SlotAt(genesisTime.Add(-1 * time.Hour))
-		if slot != 0 {
-			t.Errorf("Expected slot 0 before genesis, got %d", slot)
-		}
-	})
-
-	t.Run("EpochAtTimestamp", func(t *testing.T) {
-		// Epoch 0 at genesis
-		epoch := spec.EpochAtTimestamp(uint64(genesisTime.Unix()))
-		if epoch != 0 {
-			t.Errorf("Expected epoch 0 at genesis, got %d", epoch)
-		}
-
-		// Epoch 1 at genesis + 32 slots (384 seconds)
-		epoch = spec.EpochAtTimestamp(uint64(genesisTime.Add(384 * time.Second).Unix()))
-		if epoch != 1 {
-			t.Errorf("Expected epoch 1, got %d", epoch)
-		}
-
-		// Epoch 10 at genesis + 320 slots (3840 seconds)
-		epoch = spec.EpochAtTimestamp(uint64(genesisTime.Add(3840 * time.Second).Unix()))
-		if epoch != 10 {
-			t.Errorf("Expected epoch 10, got %d", epoch)
-		}
-
-		// Before genesis should return 0
-		epoch = spec.EpochAtTimestamp(uint64(genesisTime.Add(-1 * time.Hour).Unix()))
-		if epoch != 0 {
-			t.Errorf("Expected epoch 0 before genesis, got %d", epoch)
-		}
-	})
+	// Test with future genesis (should return 0)
+	futureSpec := newTestSpec(time.Now().Add(1 * time.Hour))
+	futureEpoch := futureSpec.CurrentEpoch()
+	if futureEpoch != 0 {
+		t.Errorf("Expected epoch 0 for future genesis, got %d", futureEpoch)
+	}
 }

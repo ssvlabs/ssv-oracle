@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/cobra"
@@ -65,6 +64,9 @@ type Config struct {
 }
 
 func runOracle(_ *cobra.Command, _ []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -84,14 +86,23 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = signer.Close() }()
 
-	logger.Infow("SSV Oracle starting",
+	startupFields := []any{
 		"version", Version,
 		"contract", cfg.SSVContract,
+		"ethRPC", cfg.EthRPC,
+		"beaconRPC", cfg.BeaconRPC,
+	}
+	if cfg.EthWSRPC != "" {
+		startupFields = append(startupFields, "ethWSRPC", cfg.EthWSRPC)
+	}
+	startupFields = append(startupFields,
 		"dbPath", cfg.DBPath,
 		"signerAddress", signer.Address().Hex(),
-		"updater", withUpdater)
+		"updater", withUpdater,
+	)
+	logger.Infow("SSV Oracle starting", startupFields...)
 
-	storage, execClient, beaconClient, err := initClients(cfg)
+	storage, execClient, beaconClient, err := initClients(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -100,33 +111,20 @@ func runOracle(_ *cobra.Command, _ []string) error {
 
 	if freshStart {
 		logger.Info("Fresh start: clearing database")
-		if err := storage.ClearAllState(context.Background()); err != nil {
+		if err := storage.ClearAllState(ctx); err != nil {
 			return fmt.Errorf("failed to clear database: %w", err)
 		}
 	}
 
-	if err := validateChainID(storage, execClient); err != nil {
+	if err := validateChainID(ctx, storage, execClient); err != nil {
 		return err
 	}
 
-	spec, err := beaconClient.GetSpec(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get beacon spec: %w", err)
-	}
-	logger.Infow("Beacon spec loaded",
-		"genesis", spec.GenesisTime.Format(time.RFC3339),
-		"slotsPerEpoch", spec.SlotsPerEpoch,
-		"slotDuration", spec.SlotDuration)
-
-	syncer, err := ethsync.NewEventSyncer(ethsync.EventSyncerConfig{
+	syncer := ethsync.NewEventSyncer(ethsync.EventSyncerConfig{
 		ExecutionClient: execClient,
 		Storage:         storage,
 		SSVContract:     common.HexToAddress(cfg.SSVContract),
-		Spec:            spec,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to create event syncer: %w", err)
-	}
 
 	currentPhase := oracle.GetPhaseForEpoch(cfg.CommitPhases, 0)
 	logger.Infow("Commit phases configured",
@@ -134,16 +132,16 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"startEpoch", currentPhase.StartEpoch,
 		"interval", currentPhase.Interval)
 
-	ethClient, err := contract.NewClient(cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer, &cfg.TxPolicy)
+	ethClient, err := contract.NewClient(ctx, cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer, &cfg.TxPolicy)
 	if err != nil {
 		return fmt.Errorf("failed to create contract client: %w", err)
 	}
 	defer ethClient.Close()
 
-	return runServices(cfg, storage, ethClient, syncer, beaconClient)
+	return runServices(ctx, cfg, storage, ethClient, syncer, beaconClient)
 }
 
-func initClients(cfg *Config) (*ethsync.Storage, *ethsync.ExecutionClient, *ethsync.BeaconClient, error) {
+func initClients(ctx context.Context, cfg *Config) (*ethsync.Storage, *ethsync.ExecutionClient, *ethsync.BeaconClient, error) {
 	storage, err := ethsync.NewStorage(cfg.DBPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create storage: %w", err)
@@ -159,21 +157,19 @@ func initClients(cfg *Config) (*ethsync.Storage, *ethsync.ExecutionClient, *eths
 		return nil, nil, nil, fmt.Errorf("failed to create execution client: %w", err)
 	}
 
-	beaconClient, err := ethsync.NewBeaconClient(context.Background(), ethsync.BeaconClientConfig{
+	beaconClient, err := ethsync.NewBeaconClient(ctx, ethsync.BeaconClientConfig{
 		URL: cfg.BeaconRPC,
 	})
 	if err != nil {
-		_ = storage.Close()
 		execClient.Close()
+		_ = storage.Close()
 		return nil, nil, nil, fmt.Errorf("failed to create beacon client: %w", err)
 	}
 
 	return storage, execClient, beaconClient, nil
 }
 
-func validateChainID(storage *ethsync.Storage, execClient *ethsync.ExecutionClient) error {
-	ctx := context.Background()
-
+func validateChainID(ctx context.Context, storage *ethsync.Storage, execClient *ethsync.ExecutionClient) error {
 	chainID, err := execClient.GetChainID(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get chain ID: %w", err)
@@ -201,24 +197,13 @@ func validateChainID(storage *ethsync.Storage, execClient *ethsync.ExecutionClie
 }
 
 func runServices(
+	ctx context.Context,
 	cfg *Config,
 	storage *ethsync.Storage,
 	ethClient *contract.Client,
 	syncer *ethsync.EventSyncer,
 	beaconClient *ethsync.BeaconClient,
 ) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigChan
-		logger.Infow("Received signal, shutting down", "signal", sig)
-		cancel()
-	}()
-
 	logger.Info("Syncing SSV contract events")
 	if err := syncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
 		return fmt.Errorf("initial sync failed: %w", err)
@@ -227,13 +212,15 @@ func runServices(
 	oracleInstance := oracle.New(&oracle.Config{
 		Storage:        storage,
 		ContractClient: ethClient,
+		Syncer:         syncer,
+		BeaconClient:   beaconClient,
 		Phases:         cfg.CommitPhases,
 	})
 
 	g, gCtx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		return oracleInstance.Run(gCtx, syncer, beaconClient)
+		return oracleInstance.Run(gCtx)
 	})
 
 	if withUpdater {
@@ -247,8 +234,12 @@ func runServices(
 		})
 	}
 
-	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("error: %w", err)
+	err := g.Wait()
+	if ctx.Err() != nil {
+		logger.Info("Received shutdown signal")
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
+		return err
 	}
 
 	logger.Info("Shutdown complete")
@@ -258,12 +249,12 @@ func runServices(
 func loadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read config %s: %w", path, err)
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse config %s: %w", path, err)
 	}
 
 	return &cfg, nil

@@ -120,7 +120,6 @@ func TestStorage_Cluster(t *testing.T) {
 		Index:           67890,
 		IsActive:        true,
 		Balance:         big.NewInt(1000000000000000000),
-		LastUpdatedSlot: 100,
 	}
 
 	err := storage.UpsertCluster(ctx, cluster)
@@ -151,7 +150,6 @@ func TestStorage_Cluster(t *testing.T) {
 	// Update cluster
 	cluster.ValidatorCount = 3
 	cluster.IsActive = false
-	cluster.LastUpdatedSlot = 101
 
 	err = storage.UpsertCluster(ctx, cluster)
 	if err != nil {
@@ -206,7 +204,6 @@ func TestStorage_Validator(t *testing.T) {
 		Index:           0,
 		IsActive:        true,
 		Balance:         big.NewInt(0),
-		LastUpdatedSlot: 0,
 	}
 	err := storage.UpsertCluster(ctx, cluster)
 	if err != nil {
@@ -303,7 +300,6 @@ func TestStorage_Transaction(t *testing.T) {
 		Index:           0,
 		IsActive:        true,
 		Balance:         big.NewInt(0),
-		LastUpdatedSlot: 0,
 	}
 	err = tx.UpsertCluster(ctx, cluster)
 	if err != nil {
@@ -360,7 +356,6 @@ func TestStorage_TransactionRollback(t *testing.T) {
 		Index:           0,
 		IsActive:        true,
 		Balance:         big.NewInt(0),
-		LastUpdatedSlot: 0,
 	}
 	err = tx.UpsertCluster(ctx, cluster)
 	if err != nil {
@@ -389,7 +384,6 @@ func TestStorage_InsertEvent(t *testing.T) {
 
 	event := &ContractEvent{
 		EventType:        "ValidatorAdded",
-		Slot:             12345,
 		BlockNumber:      500000,
 		BlockHash:        []byte{0x01, 0x02},
 		BlockTime:        time.Now(),
@@ -520,7 +514,6 @@ func TestStorage_ClearAllState(t *testing.T) {
 		Index:           0,
 		IsActive:        true,
 		Balance:         big.NewInt(0),
-		LastUpdatedSlot: 0,
 	}
 	err = storage.UpsertCluster(ctx, cluster)
 	if err != nil {
@@ -574,7 +567,6 @@ func TestStorage_DeleteCluster_CascadesValidators(t *testing.T) {
 		Index:           0,
 		IsActive:        true,
 		Balance:         big.NewInt(0),
-		LastUpdatedSlot: 0,
 	}
 	err := storage.UpsertCluster(ctx, cluster)
 	if err != nil {

@@ -34,7 +34,7 @@ type Client struct {
 
 // NewClient creates a contract client with auto-detected chain ID.
 // wsRPCURL is optional; if provided, enables event subscriptions.
-func NewClient(rpcURL, wsRPCURL, contractAddress string, signer wallet.Signer, txPolicy *txmanager.TxPolicy) (*Client, error) {
+func NewClient(ctx context.Context, rpcURL, wsRPCURL, contractAddress string, signer wallet.Signer, txPolicy *txmanager.TxPolicy) (*Client, error) {
 	if signer == nil {
 		return nil, fmt.Errorf("signer cannot be nil")
 	}
@@ -49,7 +49,7 @@ func NewClient(rpcURL, wsRPCURL, contractAddress string, signer wallet.Signer, t
 		return nil, fmt.Errorf("failed to connect to Ethereum node: %w", err)
 	}
 
-	chainID, err := ethClient.ChainID(context.Background())
+	chainID, err := ethClient.ChainID(ctx)
 	if err != nil {
 		ethClient.Close()
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
