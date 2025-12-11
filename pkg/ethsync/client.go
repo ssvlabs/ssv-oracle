@@ -109,6 +109,20 @@ func (c *ExecutionClient) GetFinalizedBlock(ctx context.Context) (uint64, error)
 	return result.Number.Uint64(), nil
 }
 
+// GetHeadBlock returns the latest block number (head of chain).
+func (c *ExecutionClient) GetHeadBlock(ctx context.Context) (uint64, error) {
+	var result *types.Header
+	err := c.withRetry(ctx, func() error {
+		var err error
+		result, err = c.client.HeaderByNumber(ctx, nil) // nil = latest
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to get head block: %w", err)
+	}
+	return result.Number.Uint64(), nil
+}
+
 // GetBlockByNumber returns a block header by number.
 func (c *ExecutionClient) GetBlockByNumber(ctx context.Context, number uint64) (*types.Header, error) {
 	var result *types.Header

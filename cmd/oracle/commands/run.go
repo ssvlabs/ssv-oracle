@@ -240,6 +240,7 @@ func runServices(
 		updaterInstance := updater.New(&updater.Config{
 			Storage:        storage,
 			ContractClient: ethClient,
+			Syncer:         syncer,
 		})
 		g.Go(func() error {
 			return updaterInstance.Run(gCtx)

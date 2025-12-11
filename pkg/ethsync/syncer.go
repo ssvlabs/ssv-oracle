@@ -16,6 +16,7 @@ type storage interface {
 	GetLastSyncedBlock(ctx context.Context) (uint64, error)
 	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
 	BeginTx(ctx context.Context) (Tx, error)
+	UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow) error
 }
 
 // EventSyncer continuously syncs SSV contract events to the database.
@@ -365,33 +366,48 @@ func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx Tx, owner c
 	return tx.UpsertCluster(ctx, row)
 }
 
-// clusterEvent is implemented by all events that have Owner and OperatorIDs.
 type clusterEvent interface {
 	clusterKey() (common.Address, []uint64)
+	cluster() *Cluster
 }
 
 func (e *ValidatorAddedEvent) clusterKey() (common.Address, []uint64) { return e.Owner, e.OperatorIDs }
+func (e *ValidatorAddedEvent) cluster() *Cluster                      { return &e.Cluster }
+
 func (e *ValidatorRemovedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
+func (e *ValidatorRemovedEvent) cluster() *Cluster { return &e.Cluster }
+
 func (e *ClusterLiquidatedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
+func (e *ClusterLiquidatedEvent) cluster() *Cluster { return &e.Cluster }
+
 func (e *ClusterReactivatedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
+func (e *ClusterReactivatedEvent) cluster() *Cluster { return &e.Cluster }
+
 func (e *ClusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
+func (e *ClusterWithdrawnEvent) cluster() *Cluster { return &e.Cluster }
+
 func (e *ClusterDepositedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
+func (e *ClusterDepositedEvent) cluster() *Cluster { return &e.Cluster }
+
 func (e *ClusterMigratedToETHEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
+func (e *ClusterMigratedToETHEvent) cluster() *Cluster { return &e.Cluster }
+
 func (e *ClusterBalanceUpdatedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
+func (e *ClusterBalanceUpdatedEvent) cluster() *Cluster { return &e.Cluster }
 
 // computeClusterIDFromEvent extracts cluster ID from event data, or nil if unknown type.
 func computeClusterIDFromEvent(eventData any) []byte {
@@ -399,6 +415,74 @@ func computeClusterIDFromEvent(eventData any) []byte {
 		owner, operatorIDs := e.clusterKey()
 		id := ComputeClusterID(owner, operatorIDs)
 		return id[:]
+	}
+	return nil
+}
+
+// SyncClustersToHead fetches events from finalized to head and updates
+// only the clusters table. Does not modify contract_events, validators,
+// or sync_progress. Used by updater to get fresh cluster data.
+func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
+	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get last synced block: %w", err)
+	}
+
+	headBlock, err := s.client.GetHeadBlock(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get head block: %w", err)
+	}
+
+	if fromBlock >= headBlock {
+		return nil
+	}
+
+	logger.Debugw("Syncing clusters to head",
+		"fromBlock", fromBlock+1,
+		"headBlock", headBlock)
+
+	return s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock,
+		func(batchEnd uint64, logs []BlockLogs) error {
+			for _, blockLogs := range logs {
+				if err := s.applyClusterUpdates(ctx, blockLogs); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+}
+
+// applyClusterUpdates processes events and updates only the clusters table.
+// Does not insert events, validators, or update sync progress.
+func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs BlockLogs) error {
+	for _, log := range blockLogs.Logs {
+		_, eventData, err := s.parser.ParseLog(&log)
+		if err != nil {
+			continue // skip unknown events
+		}
+
+		e, ok := eventData.(clusterEvent)
+		if !ok {
+			continue
+		}
+
+		owner, operatorIDs := e.clusterKey()
+		clusterID := ComputeClusterID(owner, operatorIDs)
+		cluster := e.cluster()
+
+		slot := s.spec.SlotAt(blockLogs.BlockTime)
+		row := &ClusterRow{
+			ClusterID:       clusterID[:],
+			NetworkFeeIndex: cluster.NetworkFeeIndex,
+			Index:           cluster.Index,
+			IsActive:        cluster.Active,
+			Balance:         cluster.Balance,
+			LastUpdatedSlot: slot,
+		}
+
+		if err := s.storage.UpdateClusterIfExists(ctx, row); err != nil {
+			return err
+		}
 	}
 	return nil
 }

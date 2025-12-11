@@ -19,16 +19,23 @@ import (
 
 const retryDelay = 5 * time.Second
 
+// Syncer defines the interface for head sync operations.
+type Syncer interface {
+	SyncClustersToHead(ctx context.Context) error
+}
+
 // Config holds Updater configuration.
 type Config struct {
 	Storage        *ethsync.Storage
 	ContractClient *contract.Client
+	Syncer         Syncer
 }
 
 // Updater listens for RootCommitted events and updates cluster balances on-chain.
 type Updater struct {
 	storage        storage
 	contractClient *contract.Client
+	syncer         Syncer
 }
 
 type storage interface {
@@ -41,6 +48,7 @@ func New(cfg *Config) *Updater {
 	return &Updater{
 		storage:        cfg.Storage,
 		contractClient: cfg.ContractClient,
+		syncer:         cfg.Syncer,
 	}
 }
 
@@ -124,6 +132,11 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 	if len(commit.ClusterBalances) == 0 {
 		log.Info("No clusters to update")
 		return nil
+	}
+
+	// Sync clusters to head once before processing all clusters
+	if err := u.syncer.SyncClustersToHead(ctx); err != nil {
+		return fmt.Errorf("failed to sync clusters to head: %w", err)
 	}
 
 	tree := u.buildMerkleTree(commit.ClusterBalances)

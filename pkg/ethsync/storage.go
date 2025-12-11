@@ -527,3 +527,29 @@ func decodeOperatorIDs(data string) ([]uint64, error) {
 	}
 	return ids, nil
 }
+
+// UpdateClusterIfExists updates cluster data only if the cluster exists.
+// Used by head sync to update cluster state without creating new clusters.
+func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow) error {
+	query := `
+		UPDATE clusters SET
+			network_fee_index = ?,
+			idx = ?,
+			is_active = ?,
+			balance = ?,
+			last_updated_slot = ?
+		WHERE cluster_id = ?
+	`
+	_, err := s.db.ExecContext(ctx, query,
+		cluster.NetworkFeeIndex,
+		cluster.Index,
+		boolToInt(cluster.IsActive),
+		cluster.Balance.String(),
+		cluster.LastUpdatedSlot,
+		cluster.ClusterID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update cluster: %w", err)
+	}
+	return nil
+}
