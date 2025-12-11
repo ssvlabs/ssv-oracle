@@ -50,7 +50,8 @@ type Config struct {
 	EthWSRPC  string `yaml:"eth_ws_rpc"`
 	BeaconRPC string `yaml:"beacon_rpc"`
 
-	SSVContract string `yaml:"ssv_contract"`
+	SSVContract      string `yaml:"ssv_contract"`
+	SSVViewsContract string `yaml:"ssv_views_contract"`
 
 	SyncFromBlock  uint64 `yaml:"sync_from_block"`
 	SyncBatchSize  uint64 `yaml:"sync_batch_size"`
@@ -132,7 +133,7 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		"startEpoch", currentPhase.StartEpoch,
 		"interval", currentPhase.Interval)
 
-	ethClient, err := contract.NewClient(ctx, cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, signer, &cfg.TxPolicy)
+	ethClient, err := contract.NewClient(ctx, cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, cfg.SSVViewsContract, signer, &cfg.TxPolicy)
 	if err != nil {
 		return fmt.Errorf("failed to create contract client: %w", err)
 	}

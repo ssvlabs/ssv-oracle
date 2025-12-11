@@ -31,6 +31,7 @@ cp config.yaml.example config.yaml
 # - eth_ws_rpc: Execution layer WebSocket (required for --updater)
 # - beacon_rpc: Beacon node API
 # - ssv_contract: SSV Network contract address (includes oracle functionality)
+# - ssv_views_contract: SSV Network Views contract address (for getBalance)
 
 # Load environment variables
 source .env
@@ -73,6 +74,7 @@ beacon_rpc: "http://localhost:5052"
 
 # Contract
 ssv_contract: "0x..."
+ssv_views_contract: "0x..."  # SSV Network Views contract (for getBalance)
 
 # Syncing
 sync_from_block: 17507487  # SSV contract deployment block (mainnet example)

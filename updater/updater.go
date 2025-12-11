@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -41,6 +42,12 @@ type Updater struct {
 type storage interface {
 	GetCluster(ctx context.Context, clusterID []byte) (*ethsync.ClusterRow, error)
 	GetCommitByBlock(ctx context.Context, blockNum uint64) (*ethsync.OracleCommit, error)
+}
+
+type processStats struct {
+	updated  int
+	skipped  int
+	failures map[txmanager.FailureReason]int
 }
 
 // New creates a new Updater instance.
@@ -134,11 +141,6 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 		return nil
 	}
 
-	// Sync clusters to head once before processing all clusters
-	if err := u.syncer.SyncClustersToHead(ctx); err != nil {
-		return fmt.Errorf("failed to sync clusters to head: %w", err)
-	}
-
 	tree := u.buildMerkleTree(commit.ClusterBalances)
 	log.Infow("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", tree.Root),
@@ -151,7 +153,17 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 
 	log.Info("Root validated, processing clusters")
 
-	stats := u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+	// View calls validate cluster state for free - only sync if needed
+	stats, hadStaleData := u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+	if hadStaleData {
+		log.Info("Stale cluster data detected, syncing to head and retrying")
+		if err := u.syncer.SyncClustersToHead(ctx); err != nil {
+			log.Errorw("Failed to sync clusters to head", "error", err)
+		} else {
+			stats, _ = u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+		}
+	}
+
 	u.logStats(log, stats)
 
 	return nil
@@ -167,18 +179,29 @@ func (u *Updater) buildMerkleTree(balances []ethsync.ClusterBalance) *merkle.Mer
 	return merkle.BuildMerkleTreeWithProofs(clusterMap)
 }
 
-type processStats struct {
-	updated  int
-	skipped  int
-	failures map[txmanager.FailureReason]int
+// isStaleClusterError checks for IncorrectClusterState revert from the contract,
+// which indicates local cluster data doesn't match on-chain state.
+func isStaleClusterError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "IncorrectClusterState")
 }
 
-func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) processStats {
+func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) (processStats, bool) {
 	stats := processStats{failures: make(map[txmanager.FailureReason]int)}
+	hadStaleData := false
 
 	for _, leaf := range tree.Leaves {
 		ok, err := u.processCluster(ctx, blockNum, leaf, tree)
 		if err != nil {
+			if isStaleClusterError(err) {
+				hadStaleData = true
+				logger.Debugw("Cluster data stale",
+					"clusterID", fmt.Sprintf("%x", leaf.ClusterID))
+				continue
+			}
+
 			reason, retryable := txmanager.ClassifyError(err)
 			stats.failures[reason]++
 
@@ -200,7 +223,7 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 		}
 	}
 
-	return stats
+	return stats, hadStaleData
 }
 
 func (u *Updater) logStats(log logger.Logger, stats processStats) {
@@ -231,7 +254,15 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		return false, fmt.Errorf("failed to get proof: %w", err)
 	}
 
-	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, leaf.ClusterID)
+	owner := common.BytesToAddress(cluster.OwnerAddress)
+	contractCluster := contract.Cluster{
+		ValidatorCount:  cluster.ValidatorCount,
+		NetworkFeeIndex: cluster.NetworkFeeIndex,
+		Index:           cluster.Index,
+		Active:          cluster.IsActive,
+		Balance:         cluster.Balance,
+	}
+	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, owner, cluster.OperatorIDs, contractCluster)
 	if err != nil {
 		return false, fmt.Errorf("failed to check current balance: %w", err)
 	}

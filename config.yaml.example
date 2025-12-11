@@ -13,7 +13,8 @@ beacon_rpc: "http://127.0.0.1:5052"    # Consensus layer
 # Contract
 # ============================================================================
 
-ssv_contract: "0x..."
+ssv_contract: "0x..."                   # SSV Network contract address
+ssv_views_contract: "0x..."             # SSV Network Views contract (for getBalance)
 
 # ============================================================================
 # Database (SQLite)

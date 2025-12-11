@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -25,21 +26,25 @@ type Cluster struct {
 
 // Client interacts with the SSV Network contract.
 type Client struct {
-	ethClient       *ethclient.Client
-	wsClient        *ethclient.Client
-	contractAddress common.Address
-	txManager       *txmanager.TxManager
-	chainID         *big.Int
+	ethClient            *ethclient.Client
+	wsClient             *ethclient.Client
+	contractAddress      common.Address
+	viewsContractAddress common.Address
+	txManager            *txmanager.TxManager
+	chainID              *big.Int
 }
 
 // NewClient creates a contract client with auto-detected chain ID.
 // wsRPCURL is optional; if provided, enables event subscriptions.
-func NewClient(ctx context.Context, rpcURL, wsRPCURL, contractAddress string, signer wallet.Signer, txPolicy *txmanager.TxPolicy) (*Client, error) {
+func NewClient(ctx context.Context, rpcURL, wsRPCURL, contractAddress, viewsContractAddress string, signer wallet.Signer, txPolicy *txmanager.TxPolicy) (*Client, error) {
 	if signer == nil {
 		return nil, fmt.Errorf("signer cannot be nil")
 	}
 	if !common.IsHexAddress(contractAddress) {
 		return nil, fmt.Errorf("invalid contract address: %s", contractAddress)
+	}
+	if !common.IsHexAddress(viewsContractAddress) {
+		return nil, fmt.Errorf("invalid views contract address: %s", viewsContractAddress)
 	}
 
 	txmanager.SetErrorSelectors(ErrorSelectors)
@@ -62,10 +67,11 @@ func NewClient(ctx context.Context, rpcURL, wsRPCURL, contractAddress string, si
 	}
 
 	client := &Client{
-		ethClient:       ethClient,
-		contractAddress: common.HexToAddress(contractAddress),
-		txManager:       txMgr,
-		chainID:         chainID,
+		ethClient:            ethClient,
+		contractAddress:      common.HexToAddress(contractAddress),
+		viewsContractAddress: common.HexToAddress(viewsContractAddress),
+		txManager:            txMgr,
+		chainID:              chainID,
 	}
 
 	if wsRPCURL != "" {
@@ -104,10 +110,32 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum, 
 	})
 }
 
-// GetClusterEffectiveBalance returns the effective balance for a cluster.
-func (c *Client) GetClusterEffectiveBalance(ctx context.Context, clusterID [32]byte) (uint64, error) {
-	// TODO: Implement when contract adds getClusterEffectiveBalance function.
-	return 0, nil
+// GetClusterEffectiveBalance returns the effective balance for a cluster by calling
+// the getBalance function on the SSVNetworkViews contract.
+func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster Cluster) (uint64, error) {
+	data, err := SSVNetworkViewsABI.Pack("getBalance", owner, operatorIDs, cluster)
+	if err != nil {
+		return 0, fmt.Errorf("failed to pack getBalance: %w", err)
+	}
+
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{
+		To:   &c.viewsContractAddress,
+		Data: data,
+	}, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to call getBalance: %w", err)
+	}
+
+	// Unpack returns (balance, ebBalance)
+	var output struct {
+		Balance   *big.Int
+		EbBalance *big.Int
+	}
+	if err := SSVNetworkViewsABI.UnpackIntoInterface(&output, "getBalance", result); err != nil {
+		return 0, fmt.Errorf("failed to unpack getBalance result: %w", err)
+	}
+
+	return output.EbBalance.Uint64(), nil
 }
 
 // UpdateClusterBalance updates a cluster's balance using a merkle proof.

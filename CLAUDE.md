@@ -107,6 +107,7 @@ eth_rpc: "http://localhost:8545"      # Execution layer RPC (HTTP)
 eth_ws_rpc: "ws://localhost:8546"     # Execution layer WebSocket (for updater)
 beacon_rpc: "http://localhost:5052"   # Beacon node RPC
 ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
+ssv_views_contract: "0x..."           # SSV Network Views contract (for getBalance)
 db_path: "./data/oracle.db"           # SQLite database path
 ```
 
