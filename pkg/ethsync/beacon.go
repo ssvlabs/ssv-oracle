@@ -9,6 +9,7 @@ import (
 
 	eth2client "github.com/attestantio/go-eth2-client"
 	"github.com/attestantio/go-eth2-client/api"
+	apiv1 "github.com/attestantio/go-eth2-client/api/v1"
 	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/rs/zerolog"
@@ -47,6 +48,7 @@ type BeaconAPI interface {
 	eth2client.FinalityProvider
 	eth2client.SignedBeaconBlockProvider
 	eth2client.ValidatorsProvider
+	eth2client.EventsProvider
 }
 
 // BeaconClient wraps a beacon node client for fetching chain data.
@@ -213,4 +215,64 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 	}
 
 	return merged, nil
+}
+
+// SubscribeFinalizedCheckpoints starts an SSE subscription for finalized checkpoints.
+// Returns a channel that receives checkpoints. Close the context to stop the subscription.
+// Note: go-eth2-client handles SSE reconnection internally with exponential backoff.
+func (c *BeaconClient) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *FinalizedCheckpoint, error) {
+	ch := make(chan *FinalizedCheckpoint, 1)
+
+	err := c.client.Events(ctx, &api.EventsOpts{
+		Topics: []string{"finalized_checkpoint"},
+		FinalizedCheckpointHandler: func(_ context.Context, event *apiv1.FinalizedCheckpointEvent) {
+			checkpoint, err := c.handleFinalizedEvent(ctx, event)
+			if err != nil {
+				logger.Warnw("Failed to process finalized checkpoint event",
+					"epoch", event.Epoch,
+					"error", err)
+				return
+			}
+
+			select {
+			case ch <- checkpoint:
+				logger.Debugw("Finalized checkpoint event",
+					"epoch", checkpoint.Epoch,
+					"blockNum", checkpoint.BlockNum)
+			default:
+				// Channel full, skip (consumer will get next one)
+			}
+		},
+	})
+	if err != nil {
+		close(ch)
+		return nil, fmt.Errorf("subscribe to finalized checkpoints: %w", err)
+	}
+
+	// Close channel when context is done
+	go func() {
+		<-ctx.Done()
+		close(ch)
+	}()
+
+	return ch, nil
+}
+
+func (c *BeaconClient) handleFinalizedEvent(ctx context.Context, event *apiv1.FinalizedCheckpointEvent) (*FinalizedCheckpoint, error) {
+	blockResp, err := c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
+		Block: event.Block.String(),
+	})
+	if err != nil {
+		return nil, wrapBeaconError(err, "get finalized block")
+	}
+
+	blockNum, err := blockResp.Data.ExecutionBlockNumber()
+	if err != nil {
+		return nil, fmt.Errorf("get execution block number: %w", err)
+	}
+
+	return &FinalizedCheckpoint{
+		Epoch:    uint64(event.Epoch),
+		BlockNum: blockNum,
+	}, nil
 }

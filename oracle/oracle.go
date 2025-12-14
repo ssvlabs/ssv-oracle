@@ -17,7 +17,7 @@ import (
 
 const (
 	errorRetryDelay  = 10 * time.Second
-	balanceFloorGwei = 32_000_000_000 // Floor for low/missing validator balances (32 ETH)
+	balanceFloorGwei = 32_000_000_000
 )
 
 // Config holds Oracle configuration.
@@ -36,6 +36,8 @@ type Oracle struct {
 	syncer         *ethsync.EventSyncer
 	beaconClient   *ethsync.BeaconClient
 	phases         []CommitPhase
+
+	finalizedCh <-chan *ethsync.FinalizedCheckpoint
 }
 
 type storage interface {
@@ -57,7 +59,24 @@ func New(cfg *Config) *Oracle {
 
 // Run starts the oracle main loop, committing roots at each target epoch.
 func (o *Oracle) Run(ctx context.Context) error {
-	var lastTargetEpoch uint64
+	var err error
+	o.finalizedCh, err = o.beaconClient.SubscribeFinalizedCheckpoints(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to finalized checkpoints: %w", err)
+	}
+	logger.Info("Subscribed to finalized checkpoint events")
+
+	// On startup, skip current target epoch and wait for the next one.
+	// This avoids attempting to commit for epochs that may already be committed.
+	checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get initial checkpoint: %w", err)
+	}
+	lastTargetEpoch := NextTargetEpoch(o.phases, checkpoint.Epoch)
+	logger.Infow("Oracle started, waiting for next target epoch",
+		"currentTarget", lastTargetEpoch,
+		"currentEpoch", o.beaconClient.CurrentEpoch())
+
 	for {
 		targetEpoch, err := o.processNextCommit(ctx, lastTargetEpoch)
 		if err != nil {
@@ -65,7 +84,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 				logger.Info("Oracle stopping")
 				return ctx.Err()
 			}
-			logger.Errorw("Commit failed", "error", err)
+			logger.Errorw("Commit failed, retrying", "error", err, "retryDelay", errorRetryDelay)
 			select {
 			case <-ctx.Done():
 				logger.Info("Oracle stopping")
@@ -79,36 +98,18 @@ func (o *Oracle) Run(ctx context.Context) error {
 }
 
 func (o *Oracle) processNextCommit(ctx context.Context, lastTargetEpoch uint64) (uint64, error) {
-	checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
+	// Wait for a finalized checkpoint that gives us a new target epoch
+	checkpoint, targetEpoch, err := o.waitForNewTarget(ctx, lastTargetEpoch)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get checkpoint: %w", err)
-	}
-
-	targetEpoch := NextTargetEpoch(o.phases, checkpoint.Epoch)
-
-	// Already committed for this target epoch - wait for next finalization
-	if targetEpoch <= lastTargetEpoch && lastTargetEpoch > 0 {
-		checkpoint, err = o.waitForFinalization(ctx, lastTargetEpoch+1)
-		if err != nil {
-			return 0, err
-		}
-		targetEpoch = NextTargetEpoch(o.phases, checkpoint.Epoch)
+		return 0, err
 	}
 
 	phase := GetPhaseForEpoch(o.phases, targetEpoch)
 	round := RoundInPhase(phase, targetEpoch)
 
 	log := logger.With("targetEpoch", targetEpoch, "round", round)
-	log.Info("Processing round")
-
-	checkpoint, err = o.waitForFinalization(ctx, targetEpoch)
-	if err != nil {
-		return 0, err
-	}
-
-	currentEpoch := o.beaconClient.CurrentEpoch()
 	log.Infow("Epoch finalized",
-		"currentEpoch", currentEpoch,
+		"currentEpoch", o.beaconClient.CurrentEpoch(),
 		"checkpointEpoch", checkpoint.Epoch,
 		"checkpointBlock", checkpoint.BlockNum)
 
@@ -255,86 +256,55 @@ func (o *Oracle) handleCommitError(
 	return 0, fmt.Errorf("failed to commit: %w", err)
 }
 
-// waitForFinalization blocks until targetEpoch is finalized.
-// Returns when checkpoint.Epoch > targetEpoch.
-func (o *Oracle) waitForFinalization(ctx context.Context, targetEpoch uint64) (*ethsync.FinalizedCheckpoint, error) {
-	const maxRetries = 10
+// waitForNewTarget returns the next finalized checkpoint with a new target epoch to commit.
+func (o *Oracle) waitForNewTarget(ctx context.Context, lastTargetEpoch uint64) (*ethsync.FinalizedCheckpoint, uint64, error) {
+	// Check if we can commit immediately
+	if checkpoint, target, err := o.checkpointForTarget(ctx, lastTargetEpoch); err != nil {
+		return nil, 0, err
+	} else if checkpoint != nil {
+		return checkpoint, target, nil
+	}
 
-	var lastLoggedCheckpoint uint64
-	var retries int
+	phase := GetPhaseForEpoch(o.phases, lastTargetEpoch)
+	logger.Infow("Waiting for next finalization",
+		"nextTarget", lastTargetEpoch+phase.Interval,
+		"currentEpoch", o.beaconClient.CurrentEpoch())
 
 	for {
-		currentEpoch := o.beaconClient.CurrentEpoch()
-
-		checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			retries++
-			if retries > maxRetries {
-				return nil, fmt.Errorf("checkpoint fetch failed after %d attempts: %w", retries, err)
-			}
-			// Exponential backoff: 1, 2, 4, 8 slots (12s, 24s, 48s, 96s at 12s/slot)
-			backoff := o.beaconClient.Spec.SlotDuration * time.Duration(1<<min(retries-1, 3))
-			logger.Warnw("Checkpoint fetch failed",
-				"attempt", retries,
-				"backoff", backoff.Round(time.Second),
-				"error", err)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(backoff):
-			}
-			continue
-		}
-		retries = 0
-
-		if targetEpoch < checkpoint.Epoch {
-			return checkpoint, nil
-		}
-
-		if checkpoint.Epoch != lastLoggedCheckpoint {
-			targetCheckpoint := targetEpoch + 1
-			logger.Infow("Waiting for finalization",
-				"checkpoint", fmt.Sprintf("current=%d target=%d", checkpoint.Epoch, targetCheckpoint),
-				"epoch", fmt.Sprintf("head=%d finalized=%d target=%d", currentEpoch, checkpoint.Epoch-1, targetEpoch))
-			lastLoggedCheckpoint = checkpoint.Epoch
-		}
-
-		waitTime := o.calculateWaitTime(checkpoint.Epoch, targetEpoch)
-
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(waitTime):
-			logger.Debugw("Slot tick",
-				"slot", o.beaconClient.Spec.CurrentSlot(),
-				"slotInEpoch", fmt.Sprintf("%d/%d", o.beaconClient.Spec.SlotInEpoch(), o.beaconClient.Spec.SlotsPerEpoch),
-				"epoch", o.beaconClient.CurrentEpoch())
+			return nil, 0, ctx.Err()
+		case checkpoint, ok := <-o.finalizedCh:
+			if !ok {
+				return nil, 0, fmt.Errorf("finalized checkpoint subscription closed")
+			}
+			if checkpoint, target, _ := o.validateCheckpoint(checkpoint, lastTargetEpoch); checkpoint != nil {
+				return checkpoint, target, nil
+			}
 		}
 	}
 }
 
-func (o *Oracle) calculateWaitTime(checkpointEpoch, targetEpoch uint64) time.Duration {
-	epochsUntilFinalization := (targetEpoch + 1) - checkpointEpoch
+// checkpointForTarget gets current checkpoint and validates it for committing.
+func (o *Oracle) checkpointForTarget(ctx context.Context, lastTargetEpoch uint64) (*ethsync.FinalizedCheckpoint, uint64, error) {
+	checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get checkpoint: %w", err)
+	}
+	return o.validateCheckpoint(checkpoint, lastTargetEpoch)
+}
 
-	if epochsUntilFinalization > 1 {
-		epochsToSleep := epochsUntilFinalization - 1
-		waitTime := time.Duration(epochsToSleep) * time.Duration(o.beaconClient.Spec.SlotsPerEpoch) * o.beaconClient.Spec.SlotDuration
-		logger.Debugw("Target epoch far ahead, sleeping",
-			"epochsToSleep", epochsToSleep,
-			"sleepDuration", waitTime.Round(time.Second))
-		return waitTime
+// validateCheckpoint checks if checkpoint can be used to commit a new target.
+func (o *Oracle) validateCheckpoint(checkpoint *ethsync.FinalizedCheckpoint, lastTargetEpoch uint64) (*ethsync.FinalizedCheckpoint, uint64, error) {
+	targetEpoch := NextTargetEpoch(o.phases, checkpoint.Epoch)
+
+	if targetEpoch <= lastTargetEpoch && lastTargetEpoch > 0 {
+		return nil, 0, nil
 	}
 
-	// Wait until next slot boundary
-	currentSlot := o.beaconClient.Spec.CurrentSlot()
-	nextSlotTime := o.beaconClient.Spec.GenesisTime.Add(time.Duration(currentSlot+1) * o.beaconClient.Spec.SlotDuration)
-	waitTime := time.Until(nextSlotTime)
+	logger.Infow("Found target epoch",
+		"targetEpoch", targetEpoch,
+		"checkpointEpoch", checkpoint.Epoch)
 
-	if waitTime < 0 {
-		return o.beaconClient.Spec.SlotDuration
-	}
-	return waitTime
+	return checkpoint, targetEpoch, nil
 }
