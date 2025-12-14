@@ -302,7 +302,7 @@ func (o *Oracle) waitForFinalization(ctx context.Context, targetEpoch uint64) (*
 			lastLoggedCheckpoint = checkpoint.Epoch
 		}
 
-		waitTime := o.calculateWaitTime(checkpoint.Epoch, targetEpoch, currentEpoch)
+		waitTime := o.calculateWaitTime(checkpoint.Epoch, targetEpoch)
 
 		select {
 		case <-ctx.Done():
@@ -316,7 +316,7 @@ func (o *Oracle) waitForFinalization(ctx context.Context, targetEpoch uint64) (*
 	}
 }
 
-func (o *Oracle) calculateWaitTime(checkpointEpoch, targetEpoch, currentEpoch uint64) time.Duration {
+func (o *Oracle) calculateWaitTime(checkpointEpoch, targetEpoch uint64) time.Duration {
 	epochsUntilFinalization := (targetEpoch + 1) - checkpointEpoch
 
 	if epochsUntilFinalization > 1 {
@@ -328,11 +328,8 @@ func (o *Oracle) calculateWaitTime(checkpointEpoch, targetEpoch, currentEpoch ui
 		return waitTime
 	}
 
-	elapsed := time.Since(o.beaconClient.Spec.GenesisTime)
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	currentSlot := uint64(elapsed / o.beaconClient.Spec.SlotDuration)
+	// Wait until next slot boundary
+	currentSlot := o.beaconClient.Spec.CurrentSlot()
 	nextSlotTime := o.beaconClient.Spec.GenesisTime.Add(time.Duration(currentSlot+1) * o.beaconClient.Spec.SlotDuration)
 	waitTime := time.Until(nextSlotTime)
 

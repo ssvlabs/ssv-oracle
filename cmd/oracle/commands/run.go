@@ -90,13 +90,14 @@ func runOracle(_ *cobra.Command, _ []string) error {
 	startupFields := []any{
 		"version", Version,
 		"contract", cfg.SSVContract,
+		"viewsContract", cfg.SSVViewsContract,
 		"ethRPC", cfg.EthRPC,
-		"beaconRPC", cfg.BeaconRPC,
 	}
 	if cfg.EthWSRPC != "" {
 		startupFields = append(startupFields, "ethWSRPC", cfg.EthWSRPC)
 	}
 	startupFields = append(startupFields,
+		"beaconRPC", cfg.BeaconRPC,
 		"dbPath", cfg.DBPath,
 		"signerAddress", signer.Address().Hex(),
 		"updater", withUpdater,

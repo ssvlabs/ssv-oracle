@@ -4,14 +4,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Build-time version info populated by main.
 var (
-	// Version info (set by main)
 	Version   string
 	GitCommit string
 	BuildTime string
 )
 
-// rootCmd represents the base command
 var rootCmd = &cobra.Command{
 	Use:   "ssv-oracle",
 	Short: "SSV Oracle Client",

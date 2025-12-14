@@ -68,8 +68,6 @@ func With(keysAndValues ...any) *zap.SugaredLogger {
 	return L.With(keysAndValues...)
 }
 
-// Level functions
-
 func Debug(args ...any)                       { L.Debug(args...) }
 func Debugf(template string, args ...any)     { L.Debugf(template, args...) }
 func Debugw(msg string, keysAndValues ...any) { L.Debugw(msg, keysAndValues...) }

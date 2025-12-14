@@ -2,6 +2,7 @@ package ethsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -21,6 +22,23 @@ const (
 	validatorBatchSize   = 1000 // Max validators per beacon API request
 	maxParallelRequests  = 5
 )
+
+// ErrBeaconSyncing indicates the beacon node is still syncing.
+var ErrBeaconSyncing = errors.New("beacon node is syncing")
+
+// wrapBeaconError provides context-specific error messages for beacon API failures.
+func wrapBeaconError(err error, operation string) error {
+	var apiErr *api.Error
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 404:
+			return fmt.Errorf("%s: not found", operation)
+		case 503:
+			return fmt.Errorf("%s: %w", operation, ErrBeaconSyncing)
+		}
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
 
 // BeaconAPI defines the beacon node capabilities required by the oracle.
 type BeaconAPI interface {
@@ -72,12 +90,12 @@ func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient
 func (c *BeaconClient) fetchSpec(ctx context.Context) error {
 	genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
 	if err != nil {
-		return fmt.Errorf("failed to get genesis: %w", err)
+		return wrapBeaconError(err, "get genesis")
 	}
 
 	specResp, err := c.client.Spec(ctx, &api.SpecOpts{})
 	if err != nil {
-		return fmt.Errorf("failed to get spec: %w", err)
+		return wrapBeaconError(err, "get spec")
 	}
 
 	slotsPerEpoch, ok := specResp.Data["SLOTS_PER_EPOCH"].(uint64)
@@ -121,7 +139,7 @@ func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCh
 		State: "head",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get finality: %w", err)
+		return nil, wrapBeaconError(err, "get finality")
 	}
 
 	epoch := uint64(finalityResp.Data.Finalized.Epoch)
@@ -131,12 +149,12 @@ func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCh
 		Block: root.String(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get beacon block: %w", err)
+		return nil, wrapBeaconError(err, "get beacon block")
 	}
 
 	blockNum, err := blockResp.Data.ExecutionBlockNumber()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get execution block number: %w", err)
+		return nil, fmt.Errorf("get execution block number: %w", err)
 	}
 
 	return &FinalizedCheckpoint{
@@ -178,7 +196,7 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 				PubKeys: batch,
 			})
 			if err != nil {
-				return fmt.Errorf("failed to get validators: %w", err)
+				return wrapBeaconError(err, "get validators")
 			}
 
 			mu.Lock()

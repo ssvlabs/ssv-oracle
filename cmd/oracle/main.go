@@ -8,8 +8,8 @@ import (
 	"ssv-oracle/pkg/logger"
 )
 
+// Build-time variables set via ldflags.
 var (
-	// Version info (set via ldflags during build)
 	Version   = "dev"
 	GitCommit = "unknown"
 	BuildTime = "unknown"
