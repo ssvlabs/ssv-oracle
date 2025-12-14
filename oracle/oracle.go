@@ -15,10 +15,7 @@ import (
 	"ssv-oracle/txmanager"
 )
 
-const (
-	errorRetryDelay  = 10 * time.Second
-	balanceFloorGwei = 32_000_000_000
-)
+const balanceFloorGwei = 32_000_000_000
 
 // Config holds Oracle configuration.
 type Config struct {
@@ -26,7 +23,7 @@ type Config struct {
 	ContractClient *contract.Client
 	Syncer         *ethsync.EventSyncer
 	BeaconClient   *ethsync.BeaconClient
-	Phases         []CommitPhase
+	Schedule       CommitSchedule
 }
 
 // Oracle commits merkle roots of cluster effective balances to the SSV contract.
@@ -35,9 +32,9 @@ type Oracle struct {
 	contractClient *contract.Client
 	syncer         *ethsync.EventSyncer
 	beaconClient   *ethsync.BeaconClient
-	phases         []CommitPhase
+	schedule       CommitSchedule
 
-	finalizedCh <-chan *ethsync.FinalizedCheckpoint
+	lastCommitted uint64
 }
 
 type storage interface {
@@ -53,73 +50,86 @@ func New(cfg *Config) *Oracle {
 		contractClient: cfg.ContractClient,
 		syncer:         cfg.Syncer,
 		beaconClient:   cfg.BeaconClient,
-		phases:         cfg.Phases,
+		schedule:       cfg.Schedule,
 	}
 }
 
 // Run starts the oracle main loop, committing roots at each target epoch.
 func (o *Oracle) Run(ctx context.Context) error {
-	var err error
-	o.finalizedCh, err = o.beaconClient.SubscribeFinalizedCheckpoints(ctx)
+	finalizedCh, err := o.beaconClient.SubscribeFinalizedCheckpoints(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to finalized checkpoints: %w", err)
 	}
 	logger.Info("Subscribed to finalized checkpoint events")
 
-	// On startup, skip current target epoch and wait for the next one.
-	// This avoids attempting to commit for epochs that may already be committed.
+	// The finalized checkpoint epoch means the first block of that epoch was proposed,
+	// so the previous epoch (Epoch - 1) is fully finalized.
 	checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get initial checkpoint: %w", err)
 	}
-	lastTargetEpoch := NextTargetEpoch(o.phases, checkpoint.Epoch)
-	logger.Infow("Oracle started, waiting for next target epoch",
-		"currentTarget", lastTargetEpoch,
-		"currentEpoch", o.beaconClient.CurrentEpoch())
+	fullyFinalized := checkpoint.Epoch - 1
+	o.lastCommitted = o.schedule.LatestTarget(fullyFinalized)
 
+	phase := o.schedule.PhaseAt(o.lastCommitted)
+	nextTarget := o.lastCommitted + phase.Interval
+	logger.Infow("Oracle started",
+		"skipping", o.lastCommitted,
+		"waitingFor", nextTarget,
+		"fullyFinalized", fullyFinalized)
+
+	// Main loop: react to finalized checkpoint events
 	for {
-		targetEpoch, err := o.processNextCommit(ctx, lastTargetEpoch)
-		if err != nil {
-			if ctx.Err() != nil {
-				logger.Info("Oracle stopping")
-				return ctx.Err()
+		select {
+		case <-ctx.Done():
+			logger.Info("Oracle stopping")
+			return ctx.Err()
+
+		case checkpoint, ok := <-finalizedCh:
+			if !ok {
+				return fmt.Errorf("finalized checkpoint subscription closed")
 			}
-			logger.Errorw("Commit failed, retrying", "error", err, "retryDelay", errorRetryDelay)
-			select {
-			case <-ctx.Done():
-				logger.Info("Oracle stopping")
-				return ctx.Err()
-			case <-time.After(errorRetryDelay):
+
+			// checkpoint.Epoch - 1 is the fully finalized epoch
+			fullyFinalized := checkpoint.Epoch - 1
+			target := o.schedule.LatestTarget(fullyFinalized)
+			if target == 0 || target <= o.lastCommitted {
+				logger.Debugw("Skipping checkpoint",
+					"fullyFinalized", fullyFinalized,
+					"target", target,
+					"lastCommitted", o.lastCommitted)
+				continue
 			}
-			continue
+
+			if err := o.commit(ctx, checkpoint, target); err != nil {
+				logger.Errorw("Commit failed", "target", target, "error", err)
+				continue
+			}
+
+			o.lastCommitted = target
+
+			phase := o.schedule.PhaseAt(target)
+			logger.Infow("Waiting for finalization", "nextTarget", target+phase.Interval)
 		}
-		lastTargetEpoch = targetEpoch
 	}
 }
 
-func (o *Oracle) processNextCommit(ctx context.Context, lastTargetEpoch uint64) (uint64, error) {
-	// Wait for a finalized checkpoint that gives us a new target epoch
-	checkpoint, targetEpoch, err := o.waitForNewTarget(ctx, lastTargetEpoch)
-	if err != nil {
-		return 0, err
-	}
+// commit performs a single commit for the given target epoch.
+func (o *Oracle) commit(ctx context.Context, checkpoint *ethsync.FinalizedCheckpoint, target uint64) error {
+	round := o.schedule.RoundAt(target)
+	log := logger.With("target", target, "round", round)
 
-	phase := GetPhaseForEpoch(o.phases, targetEpoch)
-	round := RoundInPhase(phase, targetEpoch)
-
-	log := logger.With("targetEpoch", targetEpoch, "round", round)
-	log.Infow("Epoch finalized",
-		"currentEpoch", o.beaconClient.CurrentEpoch(),
-		"checkpointEpoch", checkpoint.Epoch,
-		"checkpointBlock", checkpoint.BlockNum)
+	log.Infow("Committing",
+		"fullyFinalized", checkpoint.Epoch-1,
+		"referenceBlock", checkpoint.BlockNum)
 
 	if err := o.syncer.SyncToBlock(ctx, checkpoint.BlockNum); err != nil {
-		return 0, fmt.Errorf("failed to sync to block %d: %w", checkpoint.BlockNum, err)
+		return fmt.Errorf("sync to block %d: %w", checkpoint.BlockNum, err)
 	}
 
 	clusterBalances, err := o.fetchClusterBalances(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch balances: %w", err)
+		return fmt.Errorf("fetch balances: %w", err)
 	}
 
 	merkleRoot := o.buildMerkleRoot(clusterBalances)
@@ -127,13 +137,13 @@ func (o *Oracle) processNextCommit(ctx context.Context, lastTargetEpoch uint64) 
 		"root", fmt.Sprintf("0x%x", merkleRoot),
 		"clusters", len(clusterBalances))
 
-	if err := o.storage.InsertPendingCommit(ctx, round, targetEpoch, merkleRoot[:], checkpoint.BlockNum, clusterBalances); err != nil {
-		return 0, fmt.Errorf("failed to store pending commit: %w", err)
+	if err := o.storage.InsertPendingCommit(ctx, round, target, merkleRoot[:], checkpoint.BlockNum, clusterBalances); err != nil {
+		return fmt.Errorf("store pending commit: %w", err)
 	}
 
-	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum, round, targetEpoch)
+	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum, round, target)
 	if err != nil {
-		return o.handleCommitError(ctx, log, round, targetEpoch, receipt, err)
+		return o.handleCommitError(ctx, log, round, target, receipt, err)
 	}
 
 	if err := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusConfirmed, receipt.TxHash.Bytes()); err != nil {
@@ -141,7 +151,7 @@ func (o *Oracle) processNextCommit(ctx context.Context, lastTargetEpoch uint64) 
 	}
 
 	log.Infow("Committed", "txHash", receipt.TxHash.Hex())
-	return targetEpoch, nil
+	return nil
 }
 
 func (o *Oracle) buildMerkleRoot(balances []ethsync.ClusterBalance) [32]byte {
@@ -157,7 +167,7 @@ func (o *Oracle) buildMerkleRoot(balances []ethsync.ClusterBalance) [32]byte {
 func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]ethsync.ClusterBalance, error) {
 	validators, err := o.storage.GetActiveValidators(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get active validators: %w", err)
+		return nil, fmt.Errorf("get active validators: %w", err)
 	}
 
 	if len(validators) == 0 {
@@ -170,7 +180,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]ethsync.ClusterBal
 	start := time.Now()
 	balanceMap, err := o.beaconClient.GetFinalizedValidatorBalances(ctx, pubkeys)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch validator balances: %w", err)
+		return nil, fmt.Errorf("fetch validator balances: %w", err)
 	}
 
 	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
@@ -234,10 +244,10 @@ func (o *Oracle) aggregateByCluster(validators []ethsync.ActiveValidator, balanc
 func (o *Oracle) handleCommitError(
 	ctx context.Context,
 	log logger.Logger,
-	round, targetEpoch uint64,
+	round, target uint64,
 	receipt *types.Receipt,
 	err error,
-) (uint64, error) {
+) error {
 	var txHash []byte
 	if receipt != nil {
 		txHash = receipt.TxHash.Bytes()
@@ -247,64 +257,11 @@ func (o *Oracle) handleCommitError(
 	}
 
 	if revertErr, ok := txmanager.IsRevertError(err); ok {
-		log.Errorw("Commit reverted, skipping to next epoch",
+		log.Errorw("Commit reverted, skipping",
 			"reason", revertErr.Reason,
 			"simulated", revertErr.Simulated)
-		return targetEpoch, nil
+		return nil // Skip to next target
 	}
 
-	return 0, fmt.Errorf("failed to commit: %w", err)
-}
-
-// waitForNewTarget returns the next finalized checkpoint with a new target epoch to commit.
-func (o *Oracle) waitForNewTarget(ctx context.Context, lastTargetEpoch uint64) (*ethsync.FinalizedCheckpoint, uint64, error) {
-	// Check if we can commit immediately
-	if checkpoint, target, err := o.checkpointForTarget(ctx, lastTargetEpoch); err != nil {
-		return nil, 0, err
-	} else if checkpoint != nil {
-		return checkpoint, target, nil
-	}
-
-	phase := GetPhaseForEpoch(o.phases, lastTargetEpoch)
-	logger.Infow("Waiting for next finalization",
-		"nextTarget", lastTargetEpoch+phase.Interval,
-		"currentEpoch", o.beaconClient.CurrentEpoch())
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, 0, ctx.Err()
-		case checkpoint, ok := <-o.finalizedCh:
-			if !ok {
-				return nil, 0, fmt.Errorf("finalized checkpoint subscription closed")
-			}
-			if checkpoint, target, _ := o.validateCheckpoint(checkpoint, lastTargetEpoch); checkpoint != nil {
-				return checkpoint, target, nil
-			}
-		}
-	}
-}
-
-// checkpointForTarget gets current checkpoint and validates it for committing.
-func (o *Oracle) checkpointForTarget(ctx context.Context, lastTargetEpoch uint64) (*ethsync.FinalizedCheckpoint, uint64, error) {
-	checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get checkpoint: %w", err)
-	}
-	return o.validateCheckpoint(checkpoint, lastTargetEpoch)
-}
-
-// validateCheckpoint checks if checkpoint can be used to commit a new target.
-func (o *Oracle) validateCheckpoint(checkpoint *ethsync.FinalizedCheckpoint, lastTargetEpoch uint64) (*ethsync.FinalizedCheckpoint, uint64, error) {
-	targetEpoch := NextTargetEpoch(o.phases, checkpoint.Epoch)
-
-	if targetEpoch <= lastTargetEpoch && lastTargetEpoch > 0 {
-		return nil, 0, nil
-	}
-
-	logger.Infow("Found target epoch",
-		"targetEpoch", targetEpoch,
-		"checkpointEpoch", checkpoint.Epoch)
-
-	return checkpoint, targetEpoch, nil
+	return fmt.Errorf("commit failed: %w", err)
 }

@@ -41,7 +41,7 @@ committed roots and updates cluster balances on-chain using merkle proofs.`,
 func init() {
 	runCmd.Flags().StringVarP(&configPath, "config", "c", "config.yaml", "Path to configuration file")
 	runCmd.Flags().BoolVar(&freshStart, "fresh", false, "Start fresh: clear all database state")
-	runCmd.Flags().BoolVar(&withUpdater, "updater", false, "Also run the cluster updater")
+	runCmd.Flags().BoolVar(&withUpdater, "updater", false, "Enable the cluster updater")
 }
 
 // Config represents the oracle configuration file.
@@ -53,15 +53,14 @@ type Config struct {
 	SSVContract      string `yaml:"ssv_contract"`
 	SSVViewsContract string `yaml:"ssv_views_contract"`
 
-	SyncFromBlock  uint64 `yaml:"sync_from_block"`
-	SyncBatchSize  uint64 `yaml:"sync_batch_size"`
-	SyncMaxRetries int    `yaml:"sync_max_retries"`
+	SyncFromBlock uint64 `yaml:"sync_from_block"`
+	SyncBatchSize uint64 `yaml:"sync_batch_size"`
 
 	DBPath string `yaml:"db_path"`
 
-	Wallet       wallet.Config        `yaml:"wallet"`
-	TxPolicy     txmanager.TxPolicy   `yaml:"tx_policy"`
-	CommitPhases []oracle.CommitPhase `yaml:"commit_phases"`
+	Wallet   wallet.Config         `yaml:"wallet"`
+	TxPolicy txmanager.TxPolicy    `yaml:"tx_policy"`
+	Schedule oracle.CommitSchedule `yaml:"commit_phases"`
 }
 
 func runOracle(_ *cobra.Command, _ []string) error {
@@ -73,8 +72,8 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if err := oracle.ValidatePhases(cfg.CommitPhases); err != nil {
-		return fmt.Errorf("invalid commit phases: %w", err)
+	if err := cfg.Schedule.Validate(); err != nil {
+		return fmt.Errorf("invalid commit schedule: %w", err)
 	}
 
 	if cfg.DBPath == "" {
@@ -128,11 +127,11 @@ func runOracle(_ *cobra.Command, _ []string) error {
 		SSVContract:     common.HexToAddress(cfg.SSVContract),
 	})
 
-	currentPhase := oracle.GetPhaseForEpoch(cfg.CommitPhases, 0)
-	logger.Infow("Commit phases configured",
-		"phases", len(cfg.CommitPhases),
-		"startEpoch", currentPhase.StartEpoch,
-		"interval", currentPhase.Interval)
+	firstPhase := cfg.Schedule.PhaseAt(0)
+	logger.Infow("Commit schedule configured",
+		"phases", len(cfg.Schedule),
+		"startEpoch", firstPhase.StartEpoch,
+		"interval", firstPhase.Interval)
 
 	ethClient, err := contract.NewClient(ctx, cfg.EthRPC, cfg.EthWSRPC, cfg.SSVContract, cfg.SSVViewsContract, signer, &cfg.TxPolicy)
 	if err != nil {
@@ -150,9 +149,8 @@ func initClients(ctx context.Context, cfg *Config) (*ethsync.Storage, *ethsync.E
 	}
 
 	execClient, err := ethsync.NewExecutionClient(ethsync.ExecutionClientConfig{
-		URL:        cfg.EthRPC,
-		BatchSize:  cfg.SyncBatchSize,
-		MaxRetries: cfg.SyncMaxRetries,
+		URL:       cfg.EthRPC,
+		BatchSize: cfg.SyncBatchSize,
 	})
 	if err != nil {
 		_ = storage.Close()
@@ -216,7 +214,7 @@ func runServices(
 		ContractClient: ethClient,
 		Syncer:         syncer,
 		BeaconClient:   beaconClient,
-		Phases:         cfg.CommitPhases,
+		Schedule:       cfg.Schedule,
 	})
 
 	g, gCtx := errgroup.WithContext(ctx)

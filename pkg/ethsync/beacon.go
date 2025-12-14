@@ -28,12 +28,13 @@ const (
 var ErrBeaconSyncing = errors.New("beacon node is syncing")
 
 // wrapBeaconError provides context-specific error messages for beacon API failures.
+// Returns permanent errors for 404 (not found) to prevent retrying.
 func wrapBeaconError(err error, operation string) error {
 	var apiErr *api.Error
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
 		case 404:
-			return fmt.Errorf("%s: not found", operation)
+			return Permanent(fmt.Errorf("%s: not found", operation))
 		case 503:
 			return fmt.Errorf("%s: %w", operation, ErrBeaconSyncing)
 		}
@@ -53,14 +54,16 @@ type BeaconAPI interface {
 
 // BeaconClient wraps a beacon node client for fetching chain data.
 type BeaconClient struct {
-	client BeaconAPI
-	Spec   *Spec
+	client      BeaconAPI
+	Spec        *Spec
+	retryConfig RetryConfig
 }
 
 // BeaconClientConfig holds configuration for the beacon client.
 type BeaconClientConfig struct {
-	URL     string
-	Timeout time.Duration
+	URL         string
+	Timeout     time.Duration
+	RetryConfig *RetryConfig // nil uses DefaultRetryConfig()
 }
 
 // NewBeaconClient creates a new beacon client and fetches the chain spec.
@@ -78,8 +81,14 @@ func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient
 		return nil, fmt.Errorf("beacon node %s: %w", cfg.URL, err)
 	}
 
+	retryConfig := DefaultRetryConfig()
+	if cfg.RetryConfig != nil {
+		retryConfig = *cfg.RetryConfig
+	}
+
 	bc := &BeaconClient{
-		client: client.(BeaconAPI),
+		client:      client.(BeaconAPI),
+		retryConfig: retryConfig,
 	}
 
 	if err := bc.fetchSpec(ctx); err != nil {
@@ -137,32 +146,37 @@ type FinalizedCheckpoint struct {
 
 // GetFinalizedCheckpoint returns the latest finalized checkpoint.
 func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoint, error) {
-	finalityResp, err := c.client.Finality(ctx, &api.FinalityOpts{
-		State: "head",
+	var checkpoint *FinalizedCheckpoint
+	err := WithRetry(ctx, c.retryConfig, func() error {
+		finalityResp, err := c.client.Finality(ctx, &api.FinalityOpts{
+			State: "head",
+		})
+		if err != nil {
+			return wrapBeaconError(err, "get finality")
+		}
+
+		epoch := uint64(finalityResp.Data.Finalized.Epoch)
+		root := finalityResp.Data.Finalized.Root
+
+		blockResp, err := c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
+			Block: root.String(),
+		})
+		if err != nil {
+			return wrapBeaconError(err, "get beacon block")
+		}
+
+		blockNum, err := blockResp.Data.ExecutionBlockNumber()
+		if err != nil {
+			return fmt.Errorf("get execution block number: %w", err)
+		}
+
+		checkpoint = &FinalizedCheckpoint{
+			Epoch:    epoch,
+			BlockNum: blockNum,
+		}
+		return nil
 	})
-	if err != nil {
-		return nil, wrapBeaconError(err, "get finality")
-	}
-
-	epoch := uint64(finalityResp.Data.Finalized.Epoch)
-	root := finalityResp.Data.Finalized.Root
-
-	blockResp, err := c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
-		Block: root.String(),
-	})
-	if err != nil {
-		return nil, wrapBeaconError(err, "get beacon block")
-	}
-
-	blockNum, err := blockResp.Data.ExecutionBlockNumber()
-	if err != nil {
-		return nil, fmt.Errorf("get execution block number: %w", err)
-	}
-
-	return &FinalizedCheckpoint{
-		Epoch:    epoch,
-		BlockNum: blockNum,
-	}, nil
+	return checkpoint, err
 }
 
 // GetFinalizedValidatorBalances returns effective balances in Gwei for the given validators.
@@ -193,20 +207,22 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 
 	for _, batch := range batches {
 		g.Go(func() error {
-			resp, err := c.client.Validators(ctx, &api.ValidatorsOpts{
-				State:   "finalized",
-				PubKeys: batch,
-			})
-			if err != nil {
-				return wrapBeaconError(err, "get validators")
-			}
+			return WithRetry(ctx, c.retryConfig, func() error {
+				resp, err := c.client.Validators(ctx, &api.ValidatorsOpts{
+					State:   "finalized",
+					PubKeys: batch,
+				})
+				if err != nil {
+					return wrapBeaconError(err, "get validators")
+				}
 
-			mu.Lock()
-			for _, v := range resp.Data {
-				merged[v.Validator.PublicKey] = uint64(v.Validator.EffectiveBalance)
-			}
-			mu.Unlock()
-			return nil
+				mu.Lock()
+				for _, v := range resp.Data {
+					merged[v.Validator.PublicKey] = uint64(v.Validator.EffectiveBalance)
+				}
+				mu.Unlock()
+				return nil
+			})
 		})
 	}
 
@@ -237,8 +253,9 @@ func (c *BeaconClient) SubscribeFinalizedCheckpoints(ctx context.Context) (<-cha
 			select {
 			case ch <- checkpoint:
 				logger.Debugw("Finalized checkpoint event",
-					"epoch", checkpoint.Epoch,
-					"blockNum", checkpoint.BlockNum)
+					"checkpointEpoch", checkpoint.Epoch,
+					"fullyFinalized", checkpoint.Epoch-1,
+					"referenceBlock", checkpoint.BlockNum)
 			default:
 				// Channel full, skip (consumer will get next one)
 			}

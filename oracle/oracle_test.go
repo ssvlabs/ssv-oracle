@@ -65,12 +65,12 @@ func (m *mockStorage) UpdateCommitStatus(ctx context.Context, roundID uint64, st
 
 func TestNew(t *testing.T) {
 	storage := newMockStorage()
-	phases := []CommitPhase{{StartEpoch: 0, Interval: 225}}
+	schedule := CommitSchedule{{StartEpoch: 0, Interval: 225}}
 
 	cfg := &Config{
 		Storage:        nil, // Would be *ethsync.Storage
 		ContractClient: nil, // Would be *contract.Client
-		Phases:         phases,
+		Schedule:       schedule,
 	}
 
 	o := New(cfg)
@@ -78,9 +78,9 @@ func TestNew(t *testing.T) {
 		t.Fatal("New() returned nil")
 	}
 
-	// Check phases are set
-	if len(o.phases) != 1 {
-		t.Errorf("Expected 1 phase, got %d", len(o.phases))
+	// Check schedule is set
+	if len(o.schedule) != 1 {
+		t.Errorf("Expected 1 phase, got %d", len(o.schedule))
 	}
 
 	// Use storage variable to avoid unused warning
@@ -97,8 +97,8 @@ func TestNew_EmptyConfig(t *testing.T) {
 
 	// Note: Go interfaces holding nil concrete pointers are not nil interfaces.
 	// We just verify the oracle was created successfully with empty config.
-	if len(o.phases) != 0 {
-		t.Errorf("Expected 0 phases with empty config, got %d", len(o.phases))
+	if len(o.schedule) != 0 {
+		t.Errorf("Expected 0 phases with empty config, got %d", len(o.schedule))
 	}
 }
 
@@ -179,37 +179,37 @@ func TestEmptyValidators(t *testing.T) {
 	}
 }
 
-func TestOraclePhases(t *testing.T) {
-	// Verify Oracle correctly stores phases from config
-	phases := []CommitPhase{
+func TestOracleSchedule(t *testing.T) {
+	// Verify Oracle correctly stores schedule from config
+	schedule := CommitSchedule{
 		{StartEpoch: 0, Interval: 225},
 		{StartEpoch: 1000, Interval: 450},
 	}
 
 	cfg := &Config{
-		Phases: phases,
+		Schedule: schedule,
 	}
 
 	o := New(cfg)
 
-	if len(o.phases) != 2 {
-		t.Fatalf("Expected 2 phases, got %d", len(o.phases))
+	if len(o.schedule) != 2 {
+		t.Fatalf("Expected 2 phases, got %d", len(o.schedule))
 	}
 
-	if o.phases[0].StartEpoch != 0 {
-		t.Errorf("Phase 0 start epoch: expected 0, got %d", o.phases[0].StartEpoch)
+	if o.schedule[0].StartEpoch != 0 {
+		t.Errorf("Phase 0 start epoch: expected 0, got %d", o.schedule[0].StartEpoch)
 	}
 
-	if o.phases[0].Interval != 225 {
-		t.Errorf("Phase 0 interval: expected 225, got %d", o.phases[0].Interval)
+	if o.schedule[0].Interval != 225 {
+		t.Errorf("Phase 0 interval: expected 225, got %d", o.schedule[0].Interval)
 	}
 
-	if o.phases[1].StartEpoch != 1000 {
-		t.Errorf("Phase 1 start epoch: expected 1000, got %d", o.phases[1].StartEpoch)
+	if o.schedule[1].StartEpoch != 1000 {
+		t.Errorf("Phase 1 start epoch: expected 1000, got %d", o.schedule[1].StartEpoch)
 	}
 
-	if o.phases[1].Interval != 450 {
-		t.Errorf("Phase 1 interval: expected 450, got %d", o.phases[1].Interval)
+	if o.schedule[1].Interval != 450 {
+		t.Errorf("Phase 1 interval: expected 450, got %d", o.schedule[1].Interval)
 	}
 }
 

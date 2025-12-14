@@ -79,7 +79,6 @@ ssv_views_contract: "0x..."  # SSV Network Views contract (for getBalance)
 # Syncing
 sync_from_block: 17507487  # SSV contract deployment block (mainnet example)
 sync_batch_size: 200
-sync_max_retries: 3
 
 # Database (SQLite)
 db_path: "./data/oracle.db"
@@ -135,14 +134,27 @@ tx_policy:
 
 ## Oracle Cycle
 
-The oracle executes the following steps each round:
+The oracle is event-driven, reacting to beacon chain finalization:
 
-1. **Sync events** - Fetch SSV contract events up to finalized epoch
-2. **Calculate round** - Determine current round from finalized epoch and config
-3. **Fetch balances** - Query beacon chain for validator effective balances
-4. **Build Merkle tree** - Aggregate balances by cluster, construct tree
-5. **Commit root** - Submit transaction with Merkle root and metadata
-6. **Wait for confirmation** - Ensure transaction is mined successfully
+1. **Subscribe** - Connect to beacon node SSE for finalized checkpoint events
+2. **On finalization** - When a new epoch finalizes, check if a target epoch is ready
+3. **Sync events** - Fetch SSV contract events up to the finalized block
+4. **Fetch balances** - Query beacon chain for validator effective balances
+5. **Build Merkle tree** - Aggregate balances by cluster, construct tree
+6. **Commit root** - Submit transaction with Merkle root and reference block
+
+### Beacon Chain Finalization
+
+Understanding Ethereum's finalization is critical for this codebase:
+
+- **Finalized checkpoint epoch** = the first proposed block of that epoch
+- **Fully finalized epoch** = `checkpoint.Epoch - 1` (all slots complete)
+
+When the beacon node reports `checkpoint.Epoch = 100`, it means epoch 99 is fully finalized. The oracle uses `checkpoint.Epoch - 1` to determine which target epochs can be committed.
+
+```
+Checkpoint epoch: 100  →  Fully finalized: 99  →  Can commit targets ≤ 99
+```
 
 ## Cluster Updater
 

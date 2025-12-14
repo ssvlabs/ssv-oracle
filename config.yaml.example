@@ -28,7 +28,6 @@ db_path: "./data/oracle.db"            # SQLite database file
 
 sync_from_block: 0                     # Block when SSV contract was deployed
 sync_batch_size: 1000                  # Blocks per batch
-sync_max_retries: 3                    # Max RPC retry attempts
 
 # ============================================================================
 # Wallet

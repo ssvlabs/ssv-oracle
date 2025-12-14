@@ -128,7 +128,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	_ = bar.Finish()
 	fmt.Println() // New line after progress bar
-	logger.Infow("Events synced", "block", targetBlock, "newEvents", knownEvents)
+	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "newEvents", knownEvents)
 	return nil
 }
 

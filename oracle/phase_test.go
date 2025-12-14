@@ -2,7 +2,7 @@ package oracle
 
 import "testing"
 
-func TestCommitPhase_TargetEpoch(t *testing.T) {
+func TestCommitPhase_TargetAt(t *testing.T) {
 	phase := CommitPhase{StartEpoch: 100, Interval: 10}
 
 	tests := []struct {
@@ -16,63 +16,63 @@ func TestCommitPhase_TargetEpoch(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := phase.TargetEpoch(tt.round)
+		got := phase.TargetAt(tt.round)
 		if got != tt.expected {
-			t.Errorf("TargetEpoch(%d) = %d, want %d", tt.round, got, tt.expected)
+			t.Errorf("TargetAt(%d) = %d, want %d", tt.round, got, tt.expected)
 		}
 	}
 }
 
-func TestValidatePhases(t *testing.T) {
+func TestCommitSchedule_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
-		phases  []CommitPhase
-		wantErr bool
+		name     string
+		schedule CommitSchedule
+		wantErr  bool
 	}{
 		{
-			name:    "valid single phase",
-			phases:  []CommitPhase{{StartEpoch: 100, Interval: 10}},
-			wantErr: false,
+			name:     "valid single phase",
+			schedule: CommitSchedule{{StartEpoch: 100, Interval: 10}},
+			wantErr:  false,
 		},
 		{
-			name:    "valid multiple phases",
-			phases:  []CommitPhase{{StartEpoch: 100, Interval: 10}, {StartEpoch: 200, Interval: 5}},
-			wantErr: false,
+			name:     "valid multiple phases",
+			schedule: CommitSchedule{{StartEpoch: 100, Interval: 10}, {StartEpoch: 200, Interval: 5}},
+			wantErr:  false,
 		},
 		{
-			name:    "empty phases",
-			phases:  []CommitPhase{},
-			wantErr: true,
+			name:     "empty schedule",
+			schedule: CommitSchedule{},
+			wantErr:  true,
 		},
 		{
-			name:    "zero interval",
-			phases:  []CommitPhase{{StartEpoch: 100, Interval: 0}},
-			wantErr: true,
+			name:     "zero interval",
+			schedule: CommitSchedule{{StartEpoch: 100, Interval: 0}},
+			wantErr:  true,
 		},
 		{
-			name:    "unsorted phases",
-			phases:  []CommitPhase{{StartEpoch: 200, Interval: 10}, {StartEpoch: 100, Interval: 5}},
-			wantErr: true,
+			name:     "unsorted phases",
+			schedule: CommitSchedule{{StartEpoch: 200, Interval: 10}, {StartEpoch: 100, Interval: 5}},
+			wantErr:  true,
 		},
 		{
-			name:    "duplicate start epochs",
-			phases:  []CommitPhase{{StartEpoch: 100, Interval: 10}, {StartEpoch: 100, Interval: 5}},
-			wantErr: true,
+			name:     "duplicate start epochs",
+			schedule: CommitSchedule{{StartEpoch: 100, Interval: 10}, {StartEpoch: 100, Interval: 5}},
+			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePhases(tt.phases)
+			err := tt.schedule.Validate()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidatePhases() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestGetPhaseForEpoch(t *testing.T) {
-	phases := []CommitPhase{
+func TestCommitSchedule_PhaseAt(t *testing.T) {
+	schedule := CommitSchedule{
 		{StartEpoch: 100, Interval: 10},
 		{StartEpoch: 200, Interval: 5},
 	}
@@ -91,47 +91,48 @@ func TestGetPhaseForEpoch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			phase := GetPhaseForEpoch(phases, tt.epoch)
+			phase := schedule.PhaseAt(tt.epoch)
 			if phase.StartEpoch != tt.expectedStart {
-				t.Errorf("GetPhaseForEpoch(%d) = phase starting at %d, want %d",
+				t.Errorf("PhaseAt(%d) = phase starting at %d, want %d",
 					tt.epoch, phase.StartEpoch, tt.expectedStart)
 			}
 		})
 	}
 }
 
-func TestNextTargetEpoch(t *testing.T) {
-	phases := []CommitPhase{
+func TestCommitSchedule_LatestTarget(t *testing.T) {
+	schedule := CommitSchedule{
 		{StartEpoch: 100, Interval: 10},
 	}
 
 	tests := []struct {
-		name           string
-		finalizedEpoch uint64
-		expected       uint64
+		name     string
+		epoch    uint64
+		expected uint64
 	}{
-		{"before start", 50, 100},
+		{"before start", 50, 0},
 		{"at start", 100, 100},
-		{"just after start", 101, 110},
-		{"after first target finalized", 111, 120},
-		{"mid interval", 115, 120},
-		{"at second target", 120, 120},
-		{"after second target", 121, 130},
+		{"just after start", 101, 100},
+		{"mid interval", 105, 100},
+		{"at second target", 110, 110},
+		{"after second target", 115, 110},
+		{"at third target", 120, 120},
+		{"after third target", 125, 120},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NextTargetEpoch(phases, tt.finalizedEpoch)
+			got := schedule.LatestTarget(tt.epoch)
 			if got != tt.expected {
-				t.Errorf("NextTargetEpoch(%d) = %d, want %d",
-					tt.finalizedEpoch, got, tt.expected)
+				t.Errorf("LatestTarget(%d) = %d, want %d",
+					tt.epoch, got, tt.expected)
 			}
 		})
 	}
 }
 
-func TestNextTargetEpoch_PhaseTransition(t *testing.T) {
-	phases := []CommitPhase{
+func TestCommitSchedule_LatestTarget_PhaseTransition(t *testing.T) {
+	schedule := CommitSchedule{
 		{StartEpoch: 100, Interval: 10},
 		{StartEpoch: 150, Interval: 5},
 	}
@@ -139,32 +140,34 @@ func TestNextTargetEpoch_PhaseTransition(t *testing.T) {
 	// Phase 1: start=100, interval=10 -> targets: 100, 110, 120, 130, 140
 	// Phase 2: start=150, interval=5  -> targets: 150, 155, 160, 165, ...
 	tests := []struct {
-		name           string
-		finalizedEpoch uint64
-		expected       uint64
+		name     string
+		epoch    uint64
+		expected uint64
 	}{
-		{"well before transition", 115, 120},
-		{"approaching transition", 135, 140},
-		{"at transition boundary", 145, 150},       // Jump to new phase
-		{"just after transition start", 151, 155},  // In new phase, next target is 155
-		{"at first new phase target", 155, 155},    // Target 155, waiting for finalization
-		{"after first new phase target", 156, 160}, // Can commit 155, next is 160
-		{"in new phase rhythm", 161, 165},
+		{"in phase 1", 115, 110},
+		{"at phase 1 last target", 140, 140},
+		{"between phases", 145, 140},
+		{"at phase 2 start", 150, 150},
+		{"in phase 2", 153, 150},
+		{"at phase 2 second target", 155, 155},
+		{"after phase 2 second target", 158, 155},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NextTargetEpoch(phases, tt.finalizedEpoch)
+			got := schedule.LatestTarget(tt.epoch)
 			if got != tt.expected {
-				t.Errorf("NextTargetEpoch(%d) = %d, want %d",
-					tt.finalizedEpoch, got, tt.expected)
+				t.Errorf("LatestTarget(%d) = %d, want %d",
+					tt.epoch, got, tt.expected)
 			}
 		})
 	}
 }
 
-func TestRoundInPhase(t *testing.T) {
-	phase := CommitPhase{StartEpoch: 100, Interval: 10}
+func TestCommitSchedule_RoundAt(t *testing.T) {
+	schedule := CommitSchedule{
+		{StartEpoch: 100, Interval: 10},
+	}
 
 	tests := []struct {
 		name        string
@@ -180,9 +183,36 @@ func TestRoundInPhase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := RoundInPhase(phase, tt.targetEpoch)
+			got := schedule.RoundAt(tt.targetEpoch)
 			if got != tt.expected {
-				t.Errorf("RoundInPhase(%d) = %d, want %d", tt.targetEpoch, got, tt.expected)
+				t.Errorf("RoundAt(%d) = %d, want %d", tt.targetEpoch, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCommitSchedule_RoundAt_PhaseTransition(t *testing.T) {
+	schedule := CommitSchedule{
+		{StartEpoch: 100, Interval: 10},
+		{StartEpoch: 150, Interval: 5},
+	}
+
+	tests := []struct {
+		name        string
+		targetEpoch uint64
+		expected    uint64
+	}{
+		{"phase 1 round 0", 100, 0},
+		{"phase 1 round 4", 140, 4},
+		{"phase 2 round 0", 150, 0},
+		{"phase 2 round 2", 160, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := schedule.RoundAt(tt.targetEpoch)
+			if got != tt.expected {
+				t.Errorf("RoundAt(%d) = %d, want %d", tt.targetEpoch, got, tt.expected)
 			}
 		})
 	}

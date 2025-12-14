@@ -14,28 +14,21 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const (
-	maxBackoffDelay   = 30 * time.Second
-	defaultBatchSize  = 200
-	defaultMaxRetries = 3
-	defaultRetryDelay = 5 * time.Second
-)
+const defaultBatchSize = 200
 
 // ExecutionClient wraps an Ethereum execution client for fetching logs and blocks.
 type ExecutionClient struct {
-	client     *ethclient.Client
-	rpcClient  *rpc.Client
-	batchSize  uint64
-	maxRetries int
-	retryDelay time.Duration
+	client      *ethclient.Client
+	rpcClient   *rpc.Client
+	batchSize   uint64
+	retryConfig RetryConfig
 }
 
 // ExecutionClientConfig holds configuration for the execution client.
 type ExecutionClientConfig struct {
-	URL        string
-	BatchSize  uint64        // Number of blocks to fetch per batch
-	MaxRetries int           // Max retry attempts for failed RPC calls
-	RetryDelay time.Duration // Delay between retries
+	URL         string
+	BatchSize   uint64
+	RetryConfig *RetryConfig // nil uses DefaultRetryConfig()
 }
 
 // NewExecutionClient creates a new execution client.
@@ -50,19 +43,17 @@ func NewExecutionClient(cfg ExecutionClientConfig) (*ExecutionClient, error) {
 	if cfg.BatchSize == 0 {
 		cfg.BatchSize = defaultBatchSize
 	}
-	if cfg.MaxRetries == 0 {
-		cfg.MaxRetries = defaultMaxRetries
-	}
-	if cfg.RetryDelay == 0 {
-		cfg.RetryDelay = defaultRetryDelay
+
+	retryConfig := DefaultRetryConfig()
+	if cfg.RetryConfig != nil {
+		retryConfig = *cfg.RetryConfig
 	}
 
 	return &ExecutionClient{
-		client:     client,
-		rpcClient:  rpcClient,
-		batchSize:  cfg.BatchSize,
-		maxRetries: cfg.MaxRetries,
-		retryDelay: cfg.RetryDelay,
+		client:      client,
+		rpcClient:   rpcClient,
+		batchSize:   cfg.BatchSize,
+		retryConfig: retryConfig,
 	}, nil
 }
 
@@ -71,32 +62,10 @@ func (c *ExecutionClient) Close() {
 	c.client.Close()
 }
 
-// withRetry executes fn with exponential backoff retry.
-func (c *ExecutionClient) withRetry(ctx context.Context, fn func() error) error {
-	var err error
-	for attempt := 0; attempt < c.maxRetries; attempt++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		if attempt < c.maxRetries-1 {
-			delay := c.retryDelay * time.Duration(1<<attempt)
-			if delay > maxBackoffDelay {
-				delay = maxBackoffDelay
-			}
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	return fmt.Errorf("after %d attempts: %w", c.maxRetries, err)
-}
-
 // GetFinalizedBlock returns the latest finalized block number.
 func (c *ExecutionClient) GetFinalizedBlock(ctx context.Context) (uint64, error) {
 	var result *types.Header
-	err := c.withRetry(ctx, func() error {
+	err := WithRetry(ctx, c.retryConfig, func() error {
 		var err error
 		result, err = c.client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
 		return err
@@ -110,7 +79,7 @@ func (c *ExecutionClient) GetFinalizedBlock(ctx context.Context) (uint64, error)
 // GetHeadBlock returns the latest block number (head of chain).
 func (c *ExecutionClient) GetHeadBlock(ctx context.Context) (uint64, error) {
 	var result *types.Header
-	err := c.withRetry(ctx, func() error {
+	err := WithRetry(ctx, c.retryConfig, func() error {
 		var err error
 		result, err = c.client.HeaderByNumber(ctx, nil) // nil = latest
 		return err
@@ -124,7 +93,7 @@ func (c *ExecutionClient) GetHeadBlock(ctx context.Context) (uint64, error) {
 // GetBlockByNumber returns a block header by number.
 func (c *ExecutionClient) GetBlockByNumber(ctx context.Context, number uint64) (*types.Header, error) {
 	var result *types.Header
-	err := c.withRetry(ctx, func() error {
+	err := WithRetry(ctx, c.retryConfig, func() error {
 		var err error
 		result, err = c.client.HeaderByNumber(ctx, new(big.Int).SetUint64(number))
 		return err
@@ -262,7 +231,7 @@ func (c *ExecutionClient) getBlockTimestampsBatch(ctx context.Context, blockNumb
 	}
 
 	// Execute batch with retries
-	err := c.withRetry(ctx, func() error {
+	err := WithRetry(ctx, c.retryConfig, func() error {
 		return c.rpcClient.BatchCallContext(ctx, batch)
 	})
 	if err != nil {
@@ -297,7 +266,7 @@ func (c *ExecutionClient) fetchLogsBatch(
 	}
 
 	var logs []types.Log
-	err := c.withRetry(ctx, func() error {
+	err := WithRetry(ctx, c.retryConfig, func() error {
 		var err error
 		logs, err = c.client.FilterLogs(ctx, query)
 		return err
@@ -311,7 +280,7 @@ func (c *ExecutionClient) fetchLogsBatch(
 // GetChainID returns the chain ID of the connected network.
 func (c *ExecutionClient) GetChainID(ctx context.Context) (*big.Int, error) {
 	var chainID *big.Int
-	err := c.withRetry(ctx, func() error {
+	err := WithRetry(ctx, c.retryConfig, func() error {
 		var err error
 		chainID, err = c.client.ChainID(ctx)
 		return err

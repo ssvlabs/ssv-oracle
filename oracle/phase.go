@@ -11,70 +11,62 @@ type CommitPhase struct {
 	Interval   uint64 `yaml:"interval"`
 }
 
-// TargetEpoch returns the target epoch for a given round in this phase.
-func (p CommitPhase) TargetEpoch(round uint64) uint64 {
+// TargetAt returns the target epoch for a given round in this phase.
+func (p CommitPhase) TargetAt(round uint64) uint64 {
 	return p.StartEpoch + (round * p.Interval)
 }
 
-// GetPhaseForEpoch returns the active phase for a given epoch.
-func GetPhaseForEpoch(phases []CommitPhase, epoch uint64) CommitPhase {
-	for i := len(phases) - 1; i >= 0; i-- {
-		if epoch >= phases[i].StartEpoch {
-			return phases[i]
-		}
-	}
-	return phases[0]
-}
+// CommitSchedule represents the complete commit schedule across all phases.
+type CommitSchedule []CommitPhase
 
-// NextTargetEpoch calculates the next target epoch based on finalized epoch.
-func NextTargetEpoch(phases []CommitPhase, finalizedEpoch uint64) uint64 {
-	phase := GetPhaseForEpoch(phases, finalizedEpoch)
-
-	if finalizedEpoch < phase.StartEpoch {
-		return phase.StartEpoch
-	}
-
-	var nextTarget uint64
-	if finalizedEpoch == phase.StartEpoch {
-		nextTarget = phase.StartEpoch
-	} else {
-		maxFinalizedRound := (finalizedEpoch - phase.StartEpoch - 1) / phase.Interval
-		nextTarget = phase.TargetEpoch(maxFinalizedRound + 1)
-	}
-
-	for _, p := range phases {
-		if p.StartEpoch > phase.StartEpoch && p.StartEpoch <= nextTarget {
-			if p.StartEpoch > finalizedEpoch {
-				return p.StartEpoch
-			}
-		}
-	}
-
-	return nextTarget
-}
-
-// RoundInPhase returns the round number within a phase for a target epoch.
-func RoundInPhase(phase CommitPhase, targetEpoch uint64) uint64 {
-	if targetEpoch < phase.StartEpoch {
-		return 0
-	}
-	return (targetEpoch - phase.StartEpoch) / phase.Interval
-}
-
-// ValidatePhases validates commit phase configuration.
-func ValidatePhases(phases []CommitPhase) error {
-	if len(phases) == 0 {
+// Validate checks the schedule configuration.
+func (s CommitSchedule) Validate() error {
+	if len(s) == 0 {
 		return errors.New("commit_phases: at least one phase required")
 	}
 
-	for i, p := range phases {
+	for i, p := range s {
 		if p.Interval == 0 {
 			return fmt.Errorf("commit_phases[%d]: interval must be > 0", i)
 		}
-		if i > 0 && phases[i].StartEpoch <= phases[i-1].StartEpoch {
+		if i > 0 && s[i].StartEpoch <= s[i-1].StartEpoch {
 			return errors.New("commit_phases: phases must be sorted by start_epoch ascending")
 		}
 	}
 
 	return nil
+}
+
+// PhaseAt returns the active phase for a given epoch.
+func (s CommitSchedule) PhaseAt(epoch uint64) CommitPhase {
+	for i := len(s) - 1; i >= 0; i-- {
+		if epoch >= s[i].StartEpoch {
+			return s[i]
+		}
+	}
+	return s[0]
+}
+
+// LatestTarget returns the latest commit target at or before the given epoch.
+// Returns 0 if no target exists yet.
+func (s CommitSchedule) LatestTarget(epoch uint64) uint64 {
+	phase := s.PhaseAt(epoch)
+
+	// Before phase starts, no target exists yet
+	if epoch < phase.StartEpoch {
+		return 0
+	}
+
+	// Find the latest target at or before epoch
+	round := (epoch - phase.StartEpoch) / phase.Interval
+	return phase.TargetAt(round)
+}
+
+// RoundAt returns the round number for a target epoch.
+func (s CommitSchedule) RoundAt(targetEpoch uint64) uint64 {
+	phase := s.PhaseAt(targetEpoch)
+	if targetEpoch < phase.StartEpoch {
+		return 0
+	}
+	return (targetEpoch - phase.StartEpoch) / phase.Interval
 }

@@ -42,14 +42,23 @@ ssv-oracle/
 - Tracks validator and cluster state
 - Schema auto-applies on startup via `//go:embed schema.sql`
 - Uses WAL mode for better concurrency
+- Shared retry utility (`WithRetry`) with exponential backoff and jitter
+- Permanent errors (404) are not retried, transient errors (503, network) are retried
 
 ### Oracle Loop (oracle/)
-1. Sync events incrementally
-2. Calculate target epoch from commit phases
-3. Wait for epoch finalization via beacon API
-4. Fetch effective balances from beacon
-5. Build Merkle tree
-6. Commit root to SSV Network contract
+Event-driven main loop reacting to beacon chain finalization:
+1. Subscribe to finalized checkpoint SSE events (beacon node)
+2. On startup, calculate `lastCommitted = LatestTarget(checkpoint.Epoch - 1)` to skip already-committable targets
+3. On each checkpoint event, find `target = LatestTarget(checkpoint.Epoch - 1)`
+4. Skip if `target == 0` (before schedule) or `target <= lastCommitted`
+5. Sync SSV contract events to the checkpoint's reference block
+6. Fetch validator effective balances from beacon (finalized state)
+7. Build Merkle tree, commit root to contract
+
+**Critical: Beacon finalization semantics**
+- `checkpoint.Epoch` = finalized checkpoint (first block of that epoch proposed)
+- `checkpoint.Epoch - 1` = fully finalized epoch (all slots complete)
+- `LatestTarget(epoch)` = latest scheduled target at or before epoch
 
 ### Cluster Updater (updater/)
 Listens for RootCommitted events and updates cluster balances on-chain:
@@ -67,6 +76,20 @@ Listens for RootCommitted events and updates cluster balances on-chain:
 - Empty tree: `keccak256("")`
 - `BuildMerkleTreeWithProofs`: stores layers for proof generation
 - `GetProof`: returns sibling hashes from leaf to root
+
+### Commit Schedule (oracle/)
+```go
+type CommitSchedule []CommitPhase
+type CommitPhase struct {
+    StartEpoch uint64
+    Interval   uint64
+}
+```
+Methods:
+- `Validate()` - checks phases are non-empty, sorted, with valid intervals
+- `PhaseAt(epoch)` - returns active phase for given epoch
+- `LatestTarget(epoch)` - returns latest target at or before epoch (0 if none)
+- `RoundAt(targetEpoch)` - returns round number for a target epoch
 
 ### Cluster ID (pkg/ethsync)
 ```go
