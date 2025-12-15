@@ -100,7 +100,7 @@ func TestCommitSchedule_PhaseAt(t *testing.T) {
 	}
 }
 
-func TestCommitSchedule_LatestTarget(t *testing.T) {
+func TestCommitSchedule_CurrentTarget(t *testing.T) {
 	schedule := CommitSchedule{
 		{StartEpoch: 100, Interval: 10},
 	}
@@ -122,16 +122,16 @@ func TestCommitSchedule_LatestTarget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := schedule.LatestTarget(tt.epoch)
+			got := schedule.CurrentTarget(tt.epoch)
 			if got != tt.expected {
-				t.Errorf("LatestTarget(%d) = %d, want %d",
+				t.Errorf("CurrentTarget(%d) = %d, want %d",
 					tt.epoch, got, tt.expected)
 			}
 		})
 	}
 }
 
-func TestCommitSchedule_LatestTarget_PhaseTransition(t *testing.T) {
+func TestCommitSchedule_CurrentTarget_PhaseTransition(t *testing.T) {
 	schedule := CommitSchedule{
 		{StartEpoch: 100, Interval: 10},
 		{StartEpoch: 150, Interval: 5},
@@ -155,9 +155,9 @@ func TestCommitSchedule_LatestTarget_PhaseTransition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := schedule.LatestTarget(tt.epoch)
+			got := schedule.CurrentTarget(tt.epoch)
 			if got != tt.expected {
-				t.Errorf("LatestTarget(%d) = %d, want %d",
+				t.Errorf("CurrentTarget(%d) = %d, want %d",
 					tt.epoch, got, tt.expected)
 			}
 		})
@@ -226,6 +226,35 @@ func TestCommitSchedule_RoundAt_PhaseTransition(t *testing.T) {
 			got := schedule.RoundAt(tt.targetEpoch)
 			if got != tt.expected {
 				t.Errorf("RoundAt(%d) = %d, want %d", tt.targetEpoch, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCommitSchedule_NextTarget(t *testing.T) {
+	schedule := CommitSchedule{
+		{StartEpoch: 100, Interval: 10},
+	}
+
+	tests := []struct {
+		name     string
+		epoch    uint64
+		expected uint64
+	}{
+		{"before schedule", 50, 100},
+		{"at schedule start", 100, 110},
+		{"just after start", 101, 110},
+		{"at first target", 110, 120},
+		{"between targets", 115, 120},
+		{"at second target", 120, 130},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := schedule.NextTarget(tt.epoch)
+			if got != tt.expected {
+				t.Errorf("NextTarget(%d) = %d, want %d",
+					tt.epoch, got, tt.expected)
 			}
 		})
 	}

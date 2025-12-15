@@ -34,7 +34,7 @@ type Oracle struct {
 	beaconClient   *ethsync.BeaconClient
 	schedule       CommitSchedule
 
-	lastCommitted uint64
+	nextTarget uint64
 }
 
 type storage interface {
@@ -69,21 +69,11 @@ func (o *Oracle) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to get initial checkpoint: %w", err)
 	}
 	fullyFinalized := checkpoint.Epoch - 1
-	o.lastCommitted = o.schedule.LatestTarget(fullyFinalized)
+	o.nextTarget = o.schedule.NextTarget(fullyFinalized)
 
-	phase := o.schedule.PhaseAt(fullyFinalized)
-	var nextTarget uint64
-	if o.lastCommitted == 0 {
-		// Before schedule starts, wait for the first target
-		nextTarget = phase.StartEpoch
-	} else {
-		nextTarget = o.lastCommitted + phase.Interval
-	}
 	logger.Infow("Oracle started",
 		"fullyFinalized", fullyFinalized,
-		"phaseStartEpoch", phase.StartEpoch,
-		"interval", phase.Interval,
-		"waitingFor", nextTarget)
+		"waitingFor", o.nextTarget)
 
 	// Main loop: react to finalized checkpoint events
 	for {
@@ -99,24 +89,21 @@ func (o *Oracle) Run(ctx context.Context) error {
 
 			// checkpoint.Epoch - 1 is the fully finalized epoch
 			fullyFinalized := checkpoint.Epoch - 1
-			target := o.schedule.LatestTarget(fullyFinalized)
-			if target == 0 || target <= o.lastCommitted {
+			if fullyFinalized < o.nextTarget {
 				logger.Debugw("Skipping checkpoint",
 					"fullyFinalized", fullyFinalized,
-					"target", target,
-					"lastCommitted", o.lastCommitted)
+					"waitingFor", o.nextTarget)
 				continue
 			}
 
+			target := o.schedule.CurrentTarget(fullyFinalized)
 			if err := o.commit(ctx, checkpoint, target); err != nil {
 				logger.Errorw("Commit failed", "target", target, "error", err)
 				continue
 			}
 
-			o.lastCommitted = target
-
-			phase := o.schedule.PhaseAt(target)
-			logger.Infow("Waiting for finalization", "nextTarget", target+phase.Interval)
+			o.nextTarget = o.schedule.NextTarget(fullyFinalized)
+			logger.Infow("Waiting for finalization", "nextTarget", o.nextTarget)
 		}
 	}
 }

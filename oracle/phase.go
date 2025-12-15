@@ -47,9 +47,9 @@ func (s CommitSchedule) PhaseAt(epoch uint64) CommitPhase {
 	return s[0]
 }
 
-// LatestTarget returns the latest commit target at or before the given epoch.
+// CurrentTarget returns the current commit target at or before the given epoch.
 // Returns 0 if no target exists yet.
-func (s CommitSchedule) LatestTarget(epoch uint64) uint64 {
+func (s CommitSchedule) CurrentTarget(epoch uint64) uint64 {
 	phase := s.PhaseAt(epoch)
 
 	// Before phase starts, no target exists yet
@@ -60,6 +60,19 @@ func (s CommitSchedule) LatestTarget(epoch uint64) uint64 {
 	// Find the latest target at or before epoch
 	round := (epoch - phase.StartEpoch) / phase.Interval
 	return phase.TargetAt(round)
+}
+
+// NextTarget returns the next commit target after the given epoch.
+// If epoch is before the schedule starts, returns the first target.
+func (s CommitSchedule) NextTarget(epoch uint64) uint64 {
+	phase := s.PhaseAt(epoch)
+
+	if epoch < phase.StartEpoch {
+		return phase.StartEpoch
+	}
+
+	round := (epoch - phase.StartEpoch) / phase.Interval
+	return phase.TargetAt(round + 1)
 }
 
 // RoundAt returns the round number for a target epoch.
