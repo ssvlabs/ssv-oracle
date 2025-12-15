@@ -89,16 +89,29 @@ func (o *Oracle) Run(ctx context.Context) error {
 
 			// checkpoint.Epoch - 1 is the fully finalized epoch
 			fullyFinalized := checkpoint.Epoch - 1
+
+			// Not yet at target
 			if fullyFinalized < o.nextTarget {
-				logger.Debugw("Skipping checkpoint",
+				logger.Debugw("Waiting for target",
 					"fullyFinalized", fullyFinalized,
-					"waitingFor", o.nextTarget)
+					"nextTarget", o.nextTarget)
 				continue
 			}
 
-			target := o.schedule.CurrentTarget(fullyFinalized)
-			if err := o.commit(ctx, checkpoint, target); err != nil {
-				logger.Errorw("Commit failed", "target", target, "error", err)
+			// Target already passed - can happen if finalization was delayed
+			if fullyFinalized > o.nextTarget {
+				missed := o.nextTarget
+				o.nextTarget = o.schedule.NextTarget(fullyFinalized)
+				logger.Warnw("Missed commit target",
+					"missed", missed,
+					"fullyFinalized", fullyFinalized,
+					"nextTarget", o.nextTarget)
+				continue
+			}
+
+			// Exactly on target - commit
+			if err := o.commit(ctx, checkpoint, o.nextTarget); err != nil {
+				logger.Errorw("Commit failed", "target", o.nextTarget, "error", err)
 				continue
 			}
 

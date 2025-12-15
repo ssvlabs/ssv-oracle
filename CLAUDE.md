@@ -49,18 +49,20 @@ ssv-oracle/
 Event-driven main loop reacting to beacon chain finalization:
 1. Subscribe to finalized checkpoint SSE events (beacon node)
 2. On startup, calculate `nextTarget = NextTarget(fullyFinalized)` to determine what we're waiting for
-3. On each checkpoint event, skip if `fullyFinalized < nextTarget`
-4. Find `target = CurrentTarget(fullyFinalized)` for the commit
-5. Sync SSV contract events to the checkpoint's reference block
-6. Fetch validator effective balances from beacon (finalized state)
-7. Build Merkle tree, commit root to contract
-8. Update `nextTarget = NextTarget(fullyFinalized)`
+3. On each checkpoint event:
+   - If `fullyFinalized < nextTarget`: skip (not yet)
+   - If `fullyFinalized > nextTarget`: skip and update `nextTarget` (missed target)
+   - If `fullyFinalized == nextTarget`: commit
+4. Sync SSV contract events to the checkpoint's reference block
+5. Fetch validator effective balances from beacon (finalized state)
+6. Build Merkle tree, commit root to contract
+7. Update `nextTarget = NextTarget(fullyFinalized)`
 
 **Critical: Beacon finalization semantics**
 - `checkpoint.Epoch` = epoch boundary checkpoint (slot = epoch × SLOTS_PER_EPOCH)
 - `checkpoint.Epoch - 1` = fully finalized epoch (all slots complete)
-- `CurrentTarget(epoch)` = current scheduled target at or before epoch
 - `NextTarget(epoch)` = next scheduled target after epoch
+- Only commit when exactly on target (prevents stale data commits)
 
 ### Cluster Updater (updater/)
 Listens for RootCommitted events and updates cluster balances on-chain:
@@ -90,7 +92,6 @@ type CommitPhase struct {
 Methods:
 - `Validate()` - checks phases are non-empty, sorted, with valid intervals
 - `PhaseAt(epoch)` - returns active phase for given epoch
-- `CurrentTarget(epoch)` - returns current target at or before epoch (0 if none)
 - `NextTarget(epoch)` - returns next target after epoch
 - `RoundAt(targetEpoch)` - returns round number for a target epoch
 
