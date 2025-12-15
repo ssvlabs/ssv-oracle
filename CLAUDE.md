@@ -56,7 +56,7 @@ Event-driven main loop reacting to beacon chain finalization:
 7. Build Merkle tree, commit root to contract
 
 **Critical: Beacon finalization semantics**
-- `checkpoint.Epoch` = finalized checkpoint (first block of that epoch proposed)
+- `checkpoint.Epoch` = epoch boundary checkpoint (slot = epoch × SLOTS_PER_EPOCH)
 - `checkpoint.Epoch - 1` = fully finalized epoch (all slots complete)
 - `LatestTarget(epoch)` = latest scheduled target at or before epoch
 
@@ -130,12 +130,13 @@ eth_rpc: "http://localhost:8545"      # Execution layer RPC (HTTP)
 eth_ws_rpc: "ws://localhost:8546"     # Execution layer WebSocket (for updater)
 beacon_rpc: "http://localhost:5052"   # Beacon node RPC
 ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
-ssv_views_contract: "0x..."           # SSV Network Views contract (for getBalance)
+ssv_views_contract: "0x..."           # Required for --updater (SSV Network Views contract)
 db_path: "./data/oracle.db"           # SQLite database path
 ```
 
 - Chain ID is auto-detected from RPC
 - `eth_ws_rpc` is required when running with `--updater` (event subscriptions need WebSocket)
+- `ssv_views_contract` is required when running with `--updater` (for getBalance view call)
 
 ### Wallet Configuration
 

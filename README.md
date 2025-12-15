@@ -8,7 +8,8 @@ Off-chain oracle client that publishes Merkle roots of SSV cluster effective bal
 - **Epoch-aligned timing** - Waits for epoch finalization before committing roots
 - **OpenZeppelin-compatible Merkle trees** - Deterministic root computation with standardized sibling ordering
 - **Beacon chain integration** - Fetches validator effective balances directly from consensus layer
-- **Unified contract** - Uses SSV Network contract with integrated oracle functionality
+- **Unified contract** - Uses the SSV Network contract itself (no separate oracle contract),
+  with oracle functionality integrated directly
 - **Single binary deployment** - SQLite database requires no external services
 
 ## Quick Start
@@ -31,7 +32,7 @@ cp config.yaml.example config.yaml
 # - eth_ws_rpc: Execution layer WebSocket (required for --updater)
 # - beacon_rpc: Beacon node API
 # - ssv_contract: SSV Network contract address (includes oracle functionality)
-# - ssv_views_contract: SSV Network Views contract address (for getBalance)
+# - ssv_views_contract: SSV Network Views contract (required for --updater)
 
 # Load environment variables
 source .env
@@ -74,7 +75,7 @@ beacon_rpc: "http://localhost:5052"
 
 # Contract
 ssv_contract: "0x..."
-ssv_views_contract: "0x..."  # SSV Network Views contract (for getBalance)
+ssv_views_contract: "0x..."  # Required for --updater (SSV Network Views contract)
 
 # Syncing
 sync_from_block: 17507487  # SSV contract deployment block (mainnet example)
@@ -147,8 +148,9 @@ The oracle is event-driven, reacting to beacon chain finalization:
 
 Understanding Ethereum's finalization is critical for this codebase:
 
-- **Finalized checkpoint epoch** = the first proposed block of that epoch
-- **Fully finalized epoch** = `checkpoint.Epoch - 1` (all slots complete)
+- **Finalized checkpoint epoch** = the epoch boundary checkpoint
+  (slot = epoch × SLOTS_PER_EPOCH, even if the slot was missed)
+- **Fully finalized epoch** = `checkpoint.Epoch - 1` (all slots in that epoch are finalized)
 
 When the beacon node reports `checkpoint.Epoch = 100`, it means epoch 99 is fully finalized. The oracle uses `checkpoint.Epoch - 1` to determine which target epochs can be committed.
 
@@ -168,7 +170,9 @@ The updater runs alongside the oracle (enabled with `--updater` flag) and update
 
 **Gas optimization:** The updater checks each cluster's current on-chain balance before submitting. Clusters with unchanged balances are skipped, saving gas.
 
-**Fail-fast behavior:** If either the oracle or updater encounters a fatal error, both stop. This ensures consistency - other oracles in the network can process commits if one instance fails.
+**Fail-fast behavior:** If either the oracle or updater encounters a fatal error, both stop
+to avoid partial updates and inconsistent Merkle state. Other oracle instances in the network
+can safely continue processing commits.
 
 ## Merkle Tree Specification
 

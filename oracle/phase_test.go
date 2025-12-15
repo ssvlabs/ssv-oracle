@@ -178,7 +178,6 @@ func TestCommitSchedule_RoundAt(t *testing.T) {
 		{"first round", 110, 1},
 		{"second round", 120, 2},
 		{"fifth round", 150, 5},
-		{"before phase start", 50, 0},
 	}
 
 	for _, tt := range tests {
@@ -189,6 +188,20 @@ func TestCommitSchedule_RoundAt(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCommitSchedule_RoundAt_PanicsBeforeStart(t *testing.T) {
+	schedule := CommitSchedule{
+		{StartEpoch: 100, Interval: 10},
+	}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("RoundAt should panic for epoch before schedule start")
+		}
+	}()
+
+	schedule.RoundAt(50) // Should panic
 }
 
 func TestCommitSchedule_RoundAt_PhaseTransition(t *testing.T) {

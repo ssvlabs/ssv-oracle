@@ -94,7 +94,10 @@ func (u *Updater) subscribeAndProcess(ctx context.Context) (time.Duration, error
 			logger.Info("Updater stopping")
 			return 0, ctx.Err()
 
-		case err := <-errChan:
+		case err, ok := <-errChan:
+			if !ok {
+				return retryDelay, fmt.Errorf("error channel closed")
+			}
 			return retryDelay, fmt.Errorf("subscription error: %w", err)
 
 		case event, ok := <-events:
@@ -160,7 +163,11 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 		if err := u.syncer.SyncClustersToHead(ctx); err != nil {
 			log.Errorw("Failed to sync clusters to head", "error", err)
 		} else {
-			stats, _ = u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+			var stillStale bool
+			stats, stillStale = u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+			if stillStale {
+				log.Warn("Cluster data still stale after sync - on-chain state may have changed")
+			}
 		}
 	}
 
@@ -193,6 +200,9 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 	hadStaleData := false
 
 	for _, leaf := range tree.Leaves {
+		if ctx.Err() != nil {
+			break
+		}
 		ok, err := u.processCluster(ctx, blockNum, leaf, tree)
 		if err != nil {
 			if isStaleClusterError(err) {
@@ -237,6 +247,16 @@ func (u *Updater) logStats(log logger.Logger, stats processStats) {
 	log.Infow("Commit complete", fields...)
 }
 
+func toContractCluster(c *ethsync.ClusterRow) contract.Cluster {
+	return contract.Cluster{
+		ValidatorCount:  c.ValidatorCount,
+		NetworkFeeIndex: c.NetworkFeeIndex,
+		Index:           c.Index,
+		Active:          c.IsActive,
+		Balance:         c.Balance,
+	}
+}
+
 func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) (bool, error) {
 	clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
@@ -255,14 +275,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 	}
 
 	owner := common.BytesToAddress(cluster.OwnerAddress)
-	contractCluster := contract.Cluster{
-		ValidatorCount:  cluster.ValidatorCount,
-		NetworkFeeIndex: cluster.NetworkFeeIndex,
-		Index:           cluster.Index,
-		Active:          cluster.IsActive,
-		Balance:         cluster.Balance,
-	}
-	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, owner, cluster.OperatorIDs, contractCluster)
+	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, owner, cluster.OperatorIDs, toContractCluster(cluster))
 	if err != nil {
 		return false, fmt.Errorf("failed to check current balance: %w", err)
 	}
@@ -294,21 +307,12 @@ func (u *Updater) submitUpdate(
 	leaf merkle.Leaf,
 	proof [][32]byte,
 ) (*types.Receipt, error) {
-	owner := common.BytesToAddress(cluster.OwnerAddress)
-	contractCluster := contract.Cluster{
-		ValidatorCount:  cluster.ValidatorCount,
-		NetworkFeeIndex: cluster.NetworkFeeIndex,
-		Index:           cluster.Index,
-		Active:          cluster.IsActive,
-		Balance:         cluster.Balance,
-	}
-
 	return u.contractClient.UpdateClusterBalance(
 		ctx,
 		blockNum,
-		owner,
+		common.BytesToAddress(cluster.OwnerAddress),
 		cluster.OperatorIDs,
-		contractCluster,
+		toContractCluster(cluster),
 		new(big.Int).SetUint64(leaf.EffectiveBalance),
 		proof,
 	)

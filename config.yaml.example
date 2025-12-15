@@ -14,7 +14,7 @@ beacon_rpc: "http://127.0.0.1:5052"    # Consensus layer
 # ============================================================================
 
 ssv_contract: "0x..."                   # SSV Network contract address
-ssv_views_contract: "0x..."             # SSV Network Views contract (for getBalance)
+ssv_views_contract: "0x..."             # Required for --updater (SSV Network Views contract)
 
 # ============================================================================
 # Database (SQLite)
@@ -27,7 +27,7 @@ db_path: "./data/oracle.db"            # SQLite database file
 # ============================================================================
 
 sync_from_block: 0                     # Block when SSV contract was deployed
-sync_batch_size: 1000                  # Blocks per batch
+sync_batch_size: 200                   # Blocks per batch (default: 200)
 
 # ============================================================================
 # Wallet

@@ -62,7 +62,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 	}
 	logger.Info("Subscribed to finalized checkpoint events")
 
-	// The finalized checkpoint epoch means the first block of that epoch was proposed,
+	// The finalized checkpoint epoch is the epoch boundary (slot = epoch × SLOTS_PER_EPOCH),
 	// so the previous epoch (Epoch - 1) is fully finalized.
 	checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
 	if err != nil {
@@ -71,12 +71,19 @@ func (o *Oracle) Run(ctx context.Context) error {
 	fullyFinalized := checkpoint.Epoch - 1
 	o.lastCommitted = o.schedule.LatestTarget(fullyFinalized)
 
-	phase := o.schedule.PhaseAt(o.lastCommitted)
-	nextTarget := o.lastCommitted + phase.Interval
+	phase := o.schedule.PhaseAt(fullyFinalized)
+	var nextTarget uint64
+	if o.lastCommitted == 0 {
+		// Before schedule starts, wait for the first target
+		nextTarget = phase.StartEpoch
+	} else {
+		nextTarget = o.lastCommitted + phase.Interval
+	}
 	logger.Infow("Oracle started",
-		"skipping", o.lastCommitted,
-		"waitingFor", nextTarget,
-		"fullyFinalized", fullyFinalized)
+		"fullyFinalized", fullyFinalized,
+		"phaseStartEpoch", phase.StartEpoch,
+		"interval", phase.Interval,
+		"waitingFor", nextTarget)
 
 	// Main loop: react to finalized checkpoint events
 	for {

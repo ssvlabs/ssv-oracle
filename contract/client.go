@@ -34,22 +34,25 @@ type Client struct {
 	chainID              *big.Int
 }
 
+// Config holds configuration for creating a Client.
+type Config struct {
+	RPCURL               string
+	WSRPCURL             string
+	ContractAddress      string
+	ViewsContractAddress string
+	Signer               wallet.Signer
+	TxPolicy             *txmanager.TxPolicy
+}
+
 // NewClient creates a contract client with auto-detected chain ID.
-// wsRPCURL is optional; if provided, enables event subscriptions.
-func NewClient(ctx context.Context, rpcURL, wsRPCURL, contractAddress, viewsContractAddress string, signer wallet.Signer, txPolicy *txmanager.TxPolicy) (*Client, error) {
-	if signer == nil {
+func NewClient(ctx context.Context, cfg *Config) (*Client, error) {
+	if cfg.Signer == nil {
 		return nil, fmt.Errorf("signer cannot be nil")
-	}
-	if !common.IsHexAddress(contractAddress) {
-		return nil, fmt.Errorf("invalid contract address: %s", contractAddress)
-	}
-	if !common.IsHexAddress(viewsContractAddress) {
-		return nil, fmt.Errorf("invalid views contract address: %s", viewsContractAddress)
 	}
 
 	txmanager.SetErrorSelectors(ErrorSelectors)
 
-	ethClient, err := ethclient.Dial(rpcURL)
+	ethClient, err := ethclient.Dial(cfg.RPCURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ethereum node: %w", err)
 	}
@@ -60,7 +63,7 @@ func NewClient(ctx context.Context, rpcURL, wsRPCURL, contractAddress, viewsCont
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	txMgr, err := txmanager.New(ethClient, signer, chainID, txPolicy)
+	txMgr, err := txmanager.New(ethClient, cfg.Signer, chainID, cfg.TxPolicy)
 	if err != nil {
 		ethClient.Close()
 		return nil, fmt.Errorf("failed to create tx manager: %w", err)
@@ -68,20 +71,20 @@ func NewClient(ctx context.Context, rpcURL, wsRPCURL, contractAddress, viewsCont
 
 	client := &Client{
 		ethClient:            ethClient,
-		contractAddress:      common.HexToAddress(contractAddress),
-		viewsContractAddress: common.HexToAddress(viewsContractAddress),
+		contractAddress:      common.HexToAddress(cfg.ContractAddress),
+		viewsContractAddress: common.HexToAddress(cfg.ViewsContractAddress),
 		txManager:            txMgr,
 		chainID:              chainID,
 	}
 
-	if wsRPCURL != "" {
-		wsClient, err := ethclient.Dial(wsRPCURL)
+	if cfg.WSRPCURL != "" {
+		wsClient, err := ethclient.Dial(cfg.WSRPCURL)
 		if err != nil {
 			ethClient.Close()
 			return nil, fmt.Errorf("failed to connect to WebSocket endpoint: %w", err)
 		}
 		client.wsClient = wsClient
-		logger.Infow("WebSocket client connected", "url", wsRPCURL)
+		logger.Infow("WebSocket client connected", "url", cfg.WSRPCURL)
 	}
 
 	return client, nil

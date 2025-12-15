@@ -63,10 +63,11 @@ func (s CommitSchedule) LatestTarget(epoch uint64) uint64 {
 }
 
 // RoundAt returns the round number for a target epoch.
+// Panics if targetEpoch is before schedule start (programming error).
 func (s CommitSchedule) RoundAt(targetEpoch uint64) uint64 {
 	phase := s.PhaseAt(targetEpoch)
 	if targetEpoch < phase.StartEpoch {
-		return 0
+		panic(fmt.Sprintf("RoundAt: epoch %d is before schedule start %d", targetEpoch, phase.StartEpoch))
 	}
 	return (targetEpoch - phase.StartEpoch) / phase.Interval
 }

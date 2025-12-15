@@ -85,10 +85,21 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid tx policy: %w", err)
 	}
+
 	maxFee, err := policy.ParseMaxFeePerGas()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse max_fee_per_gas: %w", err)
 	}
+
+	logger.Infow("Transaction policy",
+		"gasBufferPercent", policy.GasBufferPercent,
+		"maxFeePerGas", policy.MaxFeePerGas,
+		"pendingTimeoutBlocks", policy.PendingTimeoutBlocks,
+		"gasBumpPercent", policy.GasBumpPercent,
+		"maxRetries", policy.MaxRetries,
+		"retryDelay", policy.RetryDelay,
+	)
+
 	return &TxManager{
 		client:       client,
 		signer:       signer,
