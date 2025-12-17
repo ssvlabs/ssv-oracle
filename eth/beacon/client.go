@@ -11,6 +11,7 @@ import (
 	"github.com/attestantio/go-eth2-client/api"
 	apiv1 "github.com/attestantio/go-eth2-client/api/v1"
 	"github.com/attestantio/go-eth2-client/http"
+	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
@@ -31,6 +32,9 @@ var ErrBeaconSyncing = errors.New("beacon node is syncing")
 // wrapBeaconError provides context-specific error messages for beacon API failures.
 // Returns permanent errors for 404 (not found) to prevent retrying.
 func wrapBeaconError(err error, operation string) error {
+	if err == nil {
+		return nil
+	}
 	var apiErr *api.Error
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
@@ -247,7 +251,7 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 		FinalizedCheckpointHandler: func(_ context.Context, event *apiv1.FinalizedCheckpointEvent) {
 			checkpoint, err := c.handleFinalizedEvent(ctx, event)
 			if err != nil {
-				logger.Warnw("Failed to process finalized checkpoint event",
+				logger.Errorw("Failed to process finalized checkpoint event",
 					"epoch", event.Epoch,
 					"error", err)
 				return
@@ -279,11 +283,16 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 }
 
 func (c *Client) handleFinalizedEvent(ctx context.Context, event *apiv1.FinalizedCheckpointEvent) (*FinalizedCheckpoint, error) {
-	blockResp, err := c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
-		Block: event.Block.String(),
+	var blockResp *api.Response[*spec.VersionedSignedBeaconBlock]
+	err := eth.WithRetry(ctx, c.retryConfig, func() error {
+		var err error
+		blockResp, err = c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
+			Block: event.Block.String(),
+		})
+		return wrapBeaconError(err, "get finalized block")
 	})
 	if err != nil {
-		return nil, wrapBeaconError(err, "get finalized block")
+		return nil, err
 	}
 
 	blockNum, err := blockResp.Data.ExecutionBlockNumber()
