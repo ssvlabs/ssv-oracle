@@ -99,38 +99,40 @@ func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient
 }
 
 func (c *BeaconClient) fetchSpec(ctx context.Context) error {
-	genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
-	if err != nil {
-		return wrapBeaconError(err, "get genesis")
-	}
+	return WithRetry(ctx, c.retryConfig, func() error {
+		genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
+		if err != nil {
+			return wrapBeaconError(err, "get genesis")
+		}
 
-	specResp, err := c.client.Spec(ctx, &api.SpecOpts{})
-	if err != nil {
-		return wrapBeaconError(err, "get spec")
-	}
+		specResp, err := c.client.Spec(ctx, &api.SpecOpts{})
+		if err != nil {
+			return wrapBeaconError(err, "get spec")
+		}
 
-	slotsPerEpoch, ok := specResp.Data["SLOTS_PER_EPOCH"].(uint64)
-	if !ok {
-		return fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec")
-	}
+		slotsPerEpoch, ok := specResp.Data["SLOTS_PER_EPOCH"].(uint64)
+		if !ok {
+			return Permanent(fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec"))
+		}
 
-	secondsPerSlot, ok := specResp.Data["SECONDS_PER_SLOT"].(time.Duration)
-	if !ok {
-		return fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec")
-	}
+		secondsPerSlot, ok := specResp.Data["SECONDS_PER_SLOT"].(time.Duration)
+		if !ok {
+			return Permanent(fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec"))
+		}
 
-	c.Spec = &Spec{
-		GenesisTime:   genesisResp.Data.GenesisTime,
-		SlotsPerEpoch: slotsPerEpoch,
-		SlotDuration:  secondsPerSlot,
-	}
+		c.Spec = &Spec{
+			GenesisTime:   genesisResp.Data.GenesisTime,
+			SlotsPerEpoch: slotsPerEpoch,
+			SlotDuration:  secondsPerSlot,
+		}
 
-	logger.Infow("Beacon spec loaded",
-		"genesis", c.Spec.GenesisTime.Format(time.RFC3339),
-		"slotsPerEpoch", c.Spec.SlotsPerEpoch,
-		"slotDuration", c.Spec.SlotDuration)
+		logger.Infow("Beacon spec loaded",
+			"genesis", c.Spec.GenesisTime.Format(time.RFC3339),
+			"slotsPerEpoch", c.Spec.SlotsPerEpoch,
+			"slotDuration", c.Spec.SlotDuration)
 
-	return nil
+		return nil
+	})
 }
 
 // CurrentEpoch returns the current epoch based on wall clock time.

@@ -14,21 +14,21 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const defaultBatchSize = 200
+const defaultFetchLogsBatchSize = 200
 
 // ExecutionClient wraps an Ethereum execution client for fetching logs and blocks.
 type ExecutionClient struct {
-	client      *ethclient.Client
-	rpcClient   *rpc.Client
-	batchSize   uint64
-	retryConfig RetryConfig
+	client             *ethclient.Client
+	rpcClient          *rpc.Client
+	fetchLogsBatchSize uint64
+	retryConfig        RetryConfig
 }
 
 // ExecutionClientConfig holds configuration for the execution client.
 type ExecutionClientConfig struct {
-	URL         string
-	BatchSize   uint64
-	RetryConfig *RetryConfig // nil uses DefaultRetryConfig()
+	URL                string
+	FetchLogsBatchSize uint64
+	RetryConfig        *RetryConfig // nil uses DefaultRetryConfig()
 }
 
 // NewExecutionClient creates a new execution client.
@@ -40,8 +40,8 @@ func NewExecutionClient(cfg ExecutionClientConfig) (*ExecutionClient, error) {
 
 	client := ethclient.NewClient(rpcClient)
 
-	if cfg.BatchSize == 0 {
-		cfg.BatchSize = defaultBatchSize
+	if cfg.FetchLogsBatchSize == 0 {
+		cfg.FetchLogsBatchSize = defaultFetchLogsBatchSize
 	}
 
 	retryConfig := DefaultRetryConfig()
@@ -50,10 +50,10 @@ func NewExecutionClient(cfg ExecutionClientConfig) (*ExecutionClient, error) {
 	}
 
 	return &ExecutionClient{
-		client:      client,
-		rpcClient:   rpcClient,
-		batchSize:   cfg.BatchSize,
-		retryConfig: retryConfig,
+		client:             client,
+		rpcClient:          rpcClient,
+		fetchLogsBatchSize: cfg.FetchLogsBatchSize,
+		retryConfig:        retryConfig,
 	}, nil
 }
 
@@ -125,7 +125,7 @@ func (c *ExecutionClient) FetchLogs(
 
 	for currentBlock <= toBlock {
 		// Calculate batch end (use smaller batches for faster progress)
-		batchEnd := currentBlock + c.batchSize - 1
+		batchEnd := currentBlock + c.fetchLogsBatchSize - 1
 		if batchEnd > toBlock {
 			batchEnd = toBlock
 		}

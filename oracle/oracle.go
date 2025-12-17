@@ -15,6 +15,8 @@ import (
 	"ssv-oracle/txmanager"
 )
 
+// balanceFloorGwei is 32 ETH in Gwei. Per spec, if a validator's effective balance
+// is below 32 ETH, it is rounded up to 32 ETH for cluster sum calculations.
 const balanceFloorGwei = 32_000_000_000
 
 // Config holds Oracle configuration.

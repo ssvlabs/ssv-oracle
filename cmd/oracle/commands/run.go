@@ -87,8 +87,8 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 
 	execClient, err := ethsync.NewExecutionClient(ethsync.ExecutionClientConfig{
-		URL:       cfg.EthRPC,
-		BatchSize: cfg.SyncBatchSize,
+		URL:                cfg.EthRPC,
+		FetchLogsBatchSize: cfg.SyncBatchSize,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create execution client: %w", err)

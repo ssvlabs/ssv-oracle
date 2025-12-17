@@ -64,7 +64,6 @@ func (m *mockStorage) UpdateCommitStatus(ctx context.Context, roundID uint64, st
 }
 
 func TestNew(t *testing.T) {
-	storage := newMockStorage()
 	schedule := CommitSchedule{{StartEpoch: 0, Interval: 225}}
 
 	cfg := &Config{
@@ -82,9 +81,6 @@ func TestNew(t *testing.T) {
 	if len(o.schedule) != 1 {
 		t.Errorf("Expected 1 phase, got %d", len(o.schedule))
 	}
-
-	// Use storage variable to avoid unused warning
-	_ = storage
 }
 
 func TestNew_EmptyConfig(t *testing.T) {
