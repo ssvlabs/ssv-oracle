@@ -291,9 +291,12 @@ func (s *Storage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch 
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (round_id) DO NOTHING
 	`
-	_, err = s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
+	result, err := s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
 	if err != nil {
 		return fmt.Errorf("failed to insert oracle commit: %w", err)
+	}
+	if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
+		logger.Warnw("Duplicate round_id, commit ignored", "roundID", roundID)
 	}
 	return nil
 }
