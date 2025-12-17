@@ -225,11 +225,17 @@ sqlite3 data/oracle.db ".backup data/oracle.db.backup"
 ssv-oracle/
 ├── cmd/oracle/         CLI application (Cobra)
 ├── contract/           Ethereum client & contract ABI
+├── eth/                Ethereum-related packages
+│   ├── beacon/         Beacon chain client (finality, validators)
+│   ├── execution/      Execution layer client (logs, blocks)
+│   └── syncer/         Event syncing & parsing
+├── logger/             Zap-based structured logging
 ├── merkle/             Merkle tree construction & encoding
 ├── oracle/             Oracle cycle logic
+├── storage/            SQLite storage layer
+├── txmanager/          Transaction lifecycle (gas, retries)
 ├── updater/            Cluster balance updater
 ├── wallet/             Transaction signing (env, keystore)
-├── pkg/ethsync/        Event syncing, beacon client, storage
 └── data/               SQLite database files (gitignored)
 ```
 

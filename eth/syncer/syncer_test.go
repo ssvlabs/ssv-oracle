@@ -1,4 +1,4 @@
-package ethsync
+package syncer
 
 import (
 	"bytes"
@@ -8,17 +8,17 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func TestNewEventSyncer(t *testing.T) {
-	cfg := EventSyncerConfig{
+func TestNew(t *testing.T) {
+	cfg := Config{
 		ExecutionClient: nil, // Would be real client
 		Storage:         nil, // Would be real storage
 		SSVContract:     common.HexToAddress("0x1234"),
 	}
 
-	syncer := NewEventSyncer(cfg)
+	eventSyncer := New(cfg)
 
-	if syncer == nil {
-		t.Fatal("NewEventSyncer returned nil")
+	if eventSyncer == nil {
+		t.Fatal("New returned nil")
 	}
 }
 

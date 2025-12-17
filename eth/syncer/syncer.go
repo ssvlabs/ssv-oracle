@@ -1,4 +1,4 @@
-package ethsync
+package syncer
 
 import (
 	"context"
@@ -8,38 +8,40 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/schollz/progressbar/v3"
 
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/eth/execution"
+	"ssv-oracle/logger"
+	"ssv-oracle/storage"
 )
 
-// storage defines the interface the syncer needs for persistence.
-type storage interface {
+// Storage defines the interface the syncer needs for persistence.
+type Storage interface {
 	GetLastSyncedBlock(ctx context.Context) (uint64, error)
 	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
-	BeginTx(ctx context.Context) (Tx, error)
-	UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow) error
+	BeginTx(ctx context.Context) (storage.Tx, error)
+	UpdateClusterIfExists(ctx context.Context, cluster *storage.ClusterRow) error
 }
 
 // EventSyncer continuously syncs SSV contract events to the database.
 type EventSyncer struct {
-	client      *ExecutionClient
-	storage     storage
+	client      *execution.Client
+	storage     Storage
 	parser      *EventParser
 	ssvContract common.Address
 }
 
-// EventSyncerConfig holds configuration for the event syncer.
-type EventSyncerConfig struct {
-	ExecutionClient *ExecutionClient
-	Storage         *Storage
+// Config holds configuration for the event syncer.
+type Config struct {
+	ExecutionClient *execution.Client
+	Storage         Storage
 	SSVContract     common.Address
 }
 
-// NewEventSyncer creates a new event syncer.
-func NewEventSyncer(cfg EventSyncerConfig) *EventSyncer {
+// New creates a new event syncer.
+func New(cfg Config) *EventSyncer {
 	return &EventSyncer{
 		client:      cfg.ExecutionClient,
 		storage:     cfg.Storage,
-		parser:      NewEventParser(),
+		parser:      NewParser(),
 		ssvContract: cfg.SSVContract,
 	}
 }
@@ -100,7 +102,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	)
 
 	knownEvents := 0
-	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, targetBlock, func(batchEnd uint64, logs []BlockLogs) error {
+	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, targetBlock, func(batchEnd uint64, logs []execution.BlockLogs) error {
 		for _, blockLogs := range logs {
 			count, err := s.processBlockLogs(ctx, blockLogs)
 			if err != nil {
@@ -143,7 +145,7 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 
 // processBlockLogs processes all logs from a block in a single transaction.
 // Returns the count of known (successfully parsed) events.
-func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs) (int, error) {
+func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
 	tx, err := s.storage.BeginTx(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin tx: %w", err)
@@ -182,7 +184,7 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs BlockLogs)
 
 // processLog processes a single log entry.
 // Returns (known, error) where known indicates if the event was a recognized type.
-func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blockLogs BlockLogs) (bool, error) {
+func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs) (bool, error) {
 	eventType, eventData, err := s.parser.ParseLog(log)
 	if err != nil {
 		return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
@@ -198,7 +200,7 @@ func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blo
 		return false, fmt.Errorf("failed to encode event: %w", err)
 	}
 
-	contractEvent := &ContractEvent{
+	contractEvent := &storage.ContractEvent{
 		EventType:        eventType,
 		BlockNumber:      blockLogs.BlockNumber,
 		BlockHash:        log.BlockHash.Bytes(),
@@ -222,14 +224,14 @@ func (s *EventSyncer) processLog(ctx context.Context, tx Tx, log *types.Log, blo
 }
 
 // storeRawEvent stores a raw event when parsing fails.
-func (s *EventSyncer) storeRawEvent(ctx context.Context, tx Tx, log *types.Log, blockLogs BlockLogs, parseErr error) error {
+func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs, parseErr error) error {
 	rawLog, err := EncodeLogToJSON(log)
 	if err != nil {
 		return fmt.Errorf("failed to encode raw log: %w", err)
 	}
 
 	errMsg := parseErr.Error()
-	contractEvent := &ContractEvent{
+	contractEvent := &storage.ContractEvent{
 		EventType:        "Unknown",
 		BlockNumber:      blockLogs.BlockNumber,
 		BlockHash:        log.BlockHash.Bytes(),
@@ -245,7 +247,7 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx Tx, log *types.Log, 
 	return tx.InsertEvent(ctx, contractEvent)
 }
 
-func (s *EventSyncer) applyEvent(ctx context.Context, tx Tx, eventType string, eventData any) error {
+func (s *EventSyncer) applyEvent(ctx context.Context, tx storage.Tx, eventType string, eventData any) error {
 	clusterID := computeClusterIDFromEvent(eventData)
 
 	switch eventType {
@@ -270,8 +272,8 @@ func (s *EventSyncer) applyEvent(ctx context.Context, tx Tx, eventType string, e
 	}
 }
 
-func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx Tx, event *ValidatorAddedEvent, clusterID []byte) error {
-	cluster := &ClusterRow{
+func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx storage.Tx, event *ValidatorAddedEvent, clusterID []byte) error {
+	cluster := &storage.ClusterRow{
 		ClusterID:       clusterID,
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
@@ -289,7 +291,7 @@ func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx Tx, event *Va
 }
 
 // handleValidatorRemoved deletes the validator and removes the cluster if empty.
-func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx Tx, event *ValidatorRemovedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx storage.Tx, event *ValidatorRemovedEvent, clusterID []byte) error {
 	if err := tx.DeleteValidator(ctx, clusterID, event.PublicKey); err != nil {
 		return err
 	}
@@ -299,7 +301,7 @@ func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx Tx, event *
 		return tx.DeleteCluster(ctx, clusterID)
 	}
 
-	cluster := &ClusterRow{
+	cluster := &storage.ClusterRow{
 		ClusterID:       clusterID,
 		OwnerAddress:    event.Owner.Bytes(),
 		OperatorIDs:     event.OperatorIDs,
@@ -312,32 +314,32 @@ func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx Tx, event *
 	return tx.UpsertCluster(ctx, cluster)
 }
 
-func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx Tx, event *ClusterLiquidatedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx storage.Tx, event *ClusterLiquidatedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterReactivated(ctx context.Context, tx Tx, event *ClusterReactivatedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterReactivated(ctx context.Context, tx storage.Tx, event *ClusterReactivatedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterWithdrawn(ctx context.Context, tx Tx, event *ClusterWithdrawnEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterWithdrawn(ctx context.Context, tx storage.Tx, event *ClusterWithdrawnEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx Tx, event *ClusterDepositedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx storage.Tx, event *ClusterDepositedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterMigratedToETH(ctx context.Context, tx Tx, event *ClusterMigratedToETHEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterMigratedToETH(ctx context.Context, tx storage.Tx, event *ClusterMigratedToETHEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx Tx, event *ClusterBalanceUpdatedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx storage.Tx, event *ClusterBalanceUpdatedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx Tx, owner common.Address, operatorIDs []uint64, clusterID []byte, cluster *Cluster) error {
-	row := &ClusterRow{
+func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx storage.Tx, owner common.Address, operatorIDs []uint64, clusterID []byte, cluster *Cluster) error {
+	row := &storage.ClusterRow{
 		ClusterID:       clusterID,
 		OwnerAddress:    owner.Bytes(),
 		OperatorIDs:     operatorIDs,
@@ -349,49 +351,6 @@ func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx Tx, owner c
 	}
 	return tx.UpsertCluster(ctx, row)
 }
-
-type clusterEvent interface {
-	clusterKey() (common.Address, []uint64)
-	cluster() *Cluster
-}
-
-func (e *ValidatorAddedEvent) clusterKey() (common.Address, []uint64) { return e.Owner, e.OperatorIDs }
-func (e *ValidatorAddedEvent) cluster() *Cluster                      { return &e.Cluster }
-
-func (e *ValidatorRemovedEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ValidatorRemovedEvent) cluster() *Cluster { return &e.Cluster }
-
-func (e *ClusterLiquidatedEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ClusterLiquidatedEvent) cluster() *Cluster { return &e.Cluster }
-
-func (e *ClusterReactivatedEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ClusterReactivatedEvent) cluster() *Cluster { return &e.Cluster }
-
-func (e *ClusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ClusterWithdrawnEvent) cluster() *Cluster { return &e.Cluster }
-
-func (e *ClusterDepositedEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ClusterDepositedEvent) cluster() *Cluster { return &e.Cluster }
-
-func (e *ClusterMigratedToETHEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ClusterMigratedToETHEvent) cluster() *Cluster { return &e.Cluster }
-
-func (e *ClusterBalanceUpdatedEvent) clusterKey() (common.Address, []uint64) {
-	return e.Owner, e.OperatorIDs
-}
-func (e *ClusterBalanceUpdatedEvent) cluster() *Cluster { return &e.Cluster }
 
 // computeClusterIDFromEvent extracts cluster ID from event data, or nil if unknown type.
 func computeClusterIDFromEvent(eventData any) []byte {
@@ -426,7 +385,7 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 		"headBlock", headBlock)
 
 	return s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock,
-		func(batchEnd uint64, logs []BlockLogs) error {
+		func(batchEnd uint64, logs []execution.BlockLogs) error {
 			for _, blockLogs := range logs {
 				if err := s.applyClusterUpdates(ctx, blockLogs); err != nil {
 					return err
@@ -438,7 +397,7 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 
 // applyClusterUpdates processes events and updates only the clusters table.
 // Does not insert events, validators, or update sync progress.
-func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs BlockLogs) error {
+func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) error {
 	for _, log := range blockLogs.Logs {
 		_, eventData, err := s.parser.ParseLog(&log)
 		if err != nil {
@@ -454,7 +413,7 @@ func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs BlockLo
 		clusterID := ComputeClusterID(owner, operatorIDs)
 		cluster := e.cluster()
 
-		row := &ClusterRow{
+		row := &storage.ClusterRow{
 			ClusterID:       clusterID[:],
 			NetworkFeeIndex: cluster.NetworkFeeIndex,
 			Index:           cluster.Index,

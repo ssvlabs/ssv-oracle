@@ -1,4 +1,4 @@
-package ethsync
+package storage
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	_ "modernc.org/sqlite" // register sqlite driver
 
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/logger"
 )
 
 // Tx defines the interface for database transactions.
@@ -109,8 +109,8 @@ type Storage struct {
 	db *sql.DB
 }
 
-// NewStorage creates a new SQLite storage and applies the schema.
-func NewStorage(dbPath string) (*Storage, error) {
+// New creates a new SQLite storage and applies the schema.
+func New(dbPath string) (*Storage, error) {
 	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create db directory: %w", err)

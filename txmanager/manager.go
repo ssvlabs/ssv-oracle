@@ -16,7 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/logger"
 	"ssv-oracle/wallet"
 )
 

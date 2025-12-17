@@ -12,9 +12,12 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"ssv-oracle/contract"
+	"ssv-oracle/eth/beacon"
+	"ssv-oracle/eth/execution"
+	"ssv-oracle/eth/syncer"
+	"ssv-oracle/logger"
 	"ssv-oracle/oracle"
-	"ssv-oracle/pkg/ethsync"
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/storage"
 	"ssv-oracle/updater"
 	"ssv-oracle/wallet"
 )
@@ -73,20 +76,20 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 	logger.Infow("SSV Oracle starting", startupFields...)
 
-	storage, err := ethsync.NewStorage(cfg.DBPath)
+	store, err := storage.New(cfg.DBPath)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}
-	defer func() { _ = storage.Close() }()
+	defer func() { _ = store.Close() }()
 
 	if freshStart {
 		logger.Info("Fresh start: clearing database")
-		if err := storage.ClearAllState(ctx); err != nil {
+		if err := store.ClearAllState(ctx); err != nil {
 			return fmt.Errorf("failed to clear database: %w", err)
 		}
 	}
 
-	execClient, err := ethsync.NewExecutionClient(ethsync.ExecutionClientConfig{
+	execClient, err := execution.New(execution.ClientConfig{
 		URL:                cfg.EthRPC,
 		FetchLogsBatchSize: cfg.SyncBatchSize,
 	})
@@ -95,20 +98,20 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 	defer execClient.Close()
 
-	if err := validateChainID(ctx, storage, execClient); err != nil {
+	if err := validateChainID(ctx, store, execClient); err != nil {
 		return err
 	}
 
-	beaconClient, err := ethsync.NewBeaconClient(ctx, ethsync.BeaconClientConfig{
+	beaconClient, err := beacon.New(ctx, beacon.ClientConfig{
 		URL: cfg.BeaconRPC,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create beacon client: %w", err)
 	}
 
-	syncer := ethsync.NewEventSyncer(ethsync.EventSyncerConfig{
+	eventSyncer := syncer.New(syncer.Config{
 		ExecutionClient: execClient,
-		Storage:         storage,
+		Storage:         store,
 		SSVContract:     common.HexToAddress(cfg.SSVContract),
 	})
 
@@ -125,23 +128,23 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 	defer ethClient.Close()
 
-	return runServices(ctx, cfg, storage, ethClient, syncer, beaconClient)
+	return runServices(ctx, cfg, store, ethClient, eventSyncer, beaconClient)
 }
 
-func validateChainID(ctx context.Context, storage *ethsync.Storage, execClient *ethsync.ExecutionClient) error {
+func validateChainID(ctx context.Context, store *storage.Storage, execClient *execution.Client) error {
 	chainID, err := execClient.GetChainID(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get chain ID: %w", err)
 	}
 	logger.Infow("Connected to chain", "chainID", chainID)
 
-	dbChainID, err := storage.GetChainID(ctx)
+	dbChainID, err := store.GetChainID(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get chain ID from database: %w", err)
 	}
 
 	if dbChainID == nil {
-		if err := storage.SetChainID(ctx, chainID.Uint64()); err != nil {
+		if err := store.SetChainID(ctx, chainID.Uint64()); err != nil {
 			return fmt.Errorf("failed to store chain ID: %w", err)
 		}
 		logger.Infow("Stored chain ID", "chainID", chainID)
@@ -158,20 +161,20 @@ func validateChainID(ctx context.Context, storage *ethsync.Storage, execClient *
 func runServices(
 	ctx context.Context,
 	cfg *Config,
-	storage *ethsync.Storage,
+	store *storage.Storage,
 	ethClient *contract.Client,
-	syncer *ethsync.EventSyncer,
-	beaconClient *ethsync.BeaconClient,
+	eventSyncer *syncer.EventSyncer,
+	beaconClient *beacon.Client,
 ) error {
 	logger.Info("Syncing SSV contract events")
-	if err := syncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
+	if err := eventSyncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
 		return fmt.Errorf("initial sync failed: %w", err)
 	}
 
 	oracleInstance := oracle.New(&oracle.Config{
-		Storage:        storage,
+		Storage:        store,
 		ContractClient: ethClient,
-		Syncer:         syncer,
+		Syncer:         eventSyncer,
 		BeaconClient:   beaconClient,
 		Schedule:       cfg.Schedule,
 	})
@@ -184,9 +187,9 @@ func runServices(
 
 	if withUpdater {
 		updaterInstance := updater.New(&updater.Config{
-			Storage:        storage,
+			Storage:        store,
 			ContractClient: ethClient,
-			Syncer:         syncer,
+			Syncer:         eventSyncer,
 		})
 		g.Go(func() error {
 			return updaterInstance.Run(gCtx)

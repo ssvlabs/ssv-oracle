@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"ssv-oracle/cmd/oracle/commands"
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/logger"
 )
 
 // Build-time variables set via ldflags.

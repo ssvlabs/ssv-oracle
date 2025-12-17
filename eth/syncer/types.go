@@ -1,9 +1,8 @@
-package ethsync
+package syncer
 
 import (
 	"math/big"
 	"sort"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -11,7 +10,6 @@ import (
 )
 
 // Event type constants for SSV contract events.
-
 const (
 	EventValidatorAdded        = "ValidatorAdded"
 	EventValidatorRemoved      = "ValidatorRemoved"
@@ -136,28 +134,46 @@ func ComputeClusterID(owner common.Address, operatorIDs []uint64) [32]byte {
 	return result
 }
 
-// Spec holds beacon chain specification parameters.
-type Spec struct {
-	GenesisTime   time.Time
-	SlotsPerEpoch uint64
-	SlotDuration  time.Duration
+// clusterEvent is implemented by all events that affect cluster state.
+type clusterEvent interface {
+	clusterKey() (common.Address, []uint64)
+	cluster() *Cluster
 }
 
-// CurrentSlot returns the current slot based on wall clock time.
-func (s *Spec) CurrentSlot() uint64 {
-	elapsed := time.Since(s.GenesisTime)
-	if elapsed < 0 {
-		return 0
-	}
-	return uint64(elapsed / s.SlotDuration)
-}
+func (e *ValidatorAddedEvent) clusterKey() (common.Address, []uint64) { return e.Owner, e.OperatorIDs }
+func (e *ValidatorAddedEvent) cluster() *Cluster                      { return &e.Cluster }
 
-// CurrentEpoch returns the current epoch based on wall clock time.
-func (s *Spec) CurrentEpoch() uint64 {
-	return s.CurrentSlot() / s.SlotsPerEpoch
+func (e *ValidatorRemovedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
 }
+func (e *ValidatorRemovedEvent) cluster() *Cluster { return &e.Cluster }
 
-// SlotInEpoch returns the slot position within the current epoch (1 to SlotsPerEpoch).
-func (s *Spec) SlotInEpoch() uint64 {
-	return s.CurrentSlot()%s.SlotsPerEpoch + 1
+func (e *ClusterLiquidatedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
 }
+func (e *ClusterLiquidatedEvent) cluster() *Cluster { return &e.Cluster }
+
+func (e *ClusterReactivatedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterReactivatedEvent) cluster() *Cluster { return &e.Cluster }
+
+func (e *ClusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterWithdrawnEvent) cluster() *Cluster { return &e.Cluster }
+
+func (e *ClusterDepositedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterDepositedEvent) cluster() *Cluster { return &e.Cluster }
+
+func (e *ClusterMigratedToETHEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterMigratedToETHEvent) cluster() *Cluster { return &e.Cluster }
+
+func (e *ClusterBalanceUpdatedEvent) clusterKey() (common.Address, []uint64) {
+	return e.Owner, e.OperatorIDs
+}
+func (e *ClusterBalanceUpdatedEvent) cluster() *Cluster { return &e.Cluster }

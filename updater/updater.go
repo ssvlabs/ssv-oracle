@@ -12,36 +12,32 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 
 	"ssv-oracle/contract"
+	"ssv-oracle/eth/syncer"
+	"ssv-oracle/logger"
 	"ssv-oracle/merkle"
-	"ssv-oracle/pkg/ethsync"
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/storage"
 	"ssv-oracle/txmanager"
 )
 
 const retryDelay = 5 * time.Second
 
-// Syncer defines the interface for head sync operations.
-type Syncer interface {
-	SyncClustersToHead(ctx context.Context) error
-}
-
 // Config holds Updater configuration.
 type Config struct {
-	Storage        *ethsync.Storage
+	Storage        *storage.Storage
 	ContractClient *contract.Client
-	Syncer         Syncer
+	Syncer         *syncer.EventSyncer
 }
 
 // Updater listens for RootCommitted events and updates cluster balances on-chain.
 type Updater struct {
-	storage        storage
+	storage        updaterStorage
 	contractClient *contract.Client
-	syncer         Syncer
+	syncer         *syncer.EventSyncer
 }
 
-type storage interface {
-	GetCluster(ctx context.Context, clusterID []byte) (*ethsync.ClusterRow, error)
-	GetCommitByBlock(ctx context.Context, blockNum uint64) (*ethsync.OracleCommit, error)
+type updaterStorage interface {
+	GetCluster(ctx context.Context, clusterID []byte) (*storage.ClusterRow, error)
+	GetCommitByBlock(ctx context.Context, blockNum uint64) (*storage.OracleCommit, error)
 }
 
 type processStats struct {
@@ -134,7 +130,7 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 	}
 }
 
-func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommit) error {
+func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommit) error {
 	log := logger.With("blockNum", commit.ReferenceBlock, "targetEpoch", commit.TargetEpoch)
 	log.Infow("Processing root",
 		"committedRoot", fmt.Sprintf("0x%x", commit.MerkleRoot))
@@ -176,7 +172,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *ethsync.OracleCommi
 	return nil
 }
 
-func (u *Updater) buildMerkleTree(balances []ethsync.ClusterBalance) *merkle.MerkleTree {
+func (u *Updater) buildMerkleTree(balances []storage.ClusterBalance) *merkle.MerkleTree {
 	clusterMap := make(map[[32]byte]uint64)
 	for _, bal := range balances {
 		var clusterID [32]byte
@@ -247,7 +243,7 @@ func (u *Updater) logStats(log logger.Logger, stats processStats) {
 	log.Infow("Commit complete", fields...)
 }
 
-func toContractCluster(c *ethsync.ClusterRow) contract.Cluster {
+func toContractCluster(c *storage.ClusterRow) contract.Cluster {
 	return contract.Cluster{
 		ValidatorCount:  c.ValidatorCount,
 		NetworkFeeIndex: c.NetworkFeeIndex,
@@ -303,7 +299,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 func (u *Updater) submitUpdate(
 	ctx context.Context,
 	blockNum uint64,
-	cluster *ethsync.ClusterRow,
+	cluster *storage.ClusterRow,
 	leaf merkle.Leaf,
 	proof [][32]byte,
 ) (*types.Receipt, error) {

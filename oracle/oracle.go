@@ -9,9 +9,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 
 	"ssv-oracle/contract"
+	"ssv-oracle/eth/beacon"
+	"ssv-oracle/eth/syncer"
+	"ssv-oracle/logger"
 	"ssv-oracle/merkle"
-	"ssv-oracle/pkg/ethsync"
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/storage"
 	"ssv-oracle/txmanager"
 )
 
@@ -21,28 +23,28 @@ const balanceFloorGwei = 32_000_000_000
 
 // Config holds Oracle configuration.
 type Config struct {
-	Storage        *ethsync.Storage
+	Storage        *storage.Storage
 	ContractClient *contract.Client
-	Syncer         *ethsync.EventSyncer
-	BeaconClient   *ethsync.BeaconClient
+	Syncer         *syncer.EventSyncer
+	BeaconClient   *beacon.Client
 	Schedule       CommitSchedule
 }
 
 // Oracle commits merkle roots of cluster effective balances to the SSV contract.
 type Oracle struct {
-	storage        storage
+	storage        oracleStorage
 	contractClient *contract.Client
-	syncer         *ethsync.EventSyncer
-	beaconClient   *ethsync.BeaconClient
+	syncer         *syncer.EventSyncer
+	beaconClient   *beacon.Client
 	schedule       CommitSchedule
 
 	nextTarget uint64
 }
 
-type storage interface {
-	GetActiveValidators(ctx context.Context) ([]ethsync.ActiveValidator, error)
-	InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ethsync.ClusterBalance) error
-	UpdateCommitStatus(ctx context.Context, roundID uint64, status ethsync.CommitStatus, txHash []byte) error
+type oracleStorage interface {
+	GetActiveValidators(ctx context.Context) ([]storage.ActiveValidator, error)
+	InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []storage.ClusterBalance) error
+	UpdateCommitStatus(ctx context.Context, roundID uint64, status storage.CommitStatus, txHash []byte) error
 }
 
 // New creates a new Oracle instance.
@@ -124,7 +126,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 }
 
 // commit performs a single commit for the given target epoch.
-func (o *Oracle) commit(ctx context.Context, checkpoint *ethsync.FinalizedCheckpoint, target uint64) error {
+func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpoint, target uint64) error {
 	round := o.schedule.RoundAt(target)
 	log := logger.With("target", target, "round", round)
 
@@ -155,7 +157,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *ethsync.FinalizedCheckp
 		return o.handleCommitError(ctx, log, round, target, receipt, err)
 	}
 
-	if err := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusConfirmed, receipt.TxHash.Bytes()); err != nil {
+	if err := o.storage.UpdateCommitStatus(ctx, round, storage.CommitStatusConfirmed, receipt.TxHash.Bytes()); err != nil {
 		log.Warnw("Failed to update commit status", "error", err)
 	}
 
@@ -163,7 +165,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *ethsync.FinalizedCheckp
 	return nil
 }
 
-func (o *Oracle) buildMerkleRoot(balances []ethsync.ClusterBalance) [32]byte {
+func (o *Oracle) buildMerkleRoot(balances []storage.ClusterBalance) [32]byte {
 	clusterMap := make(map[[32]byte]uint64)
 	for _, bal := range balances {
 		var clusterID [32]byte
@@ -173,7 +175,7 @@ func (o *Oracle) buildMerkleRoot(balances []ethsync.ClusterBalance) [32]byte {
 	return merkle.BuildMerkleTree(clusterMap)
 }
 
-func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]ethsync.ClusterBalance, error) {
+func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBalance, error) {
 	validators, err := o.storage.GetActiveValidators(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get active validators: %w", err)
@@ -204,7 +206,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]ethsync.ClusterBal
 	return result, nil
 }
 
-func (o *Oracle) deduplicatePubkeys(validators []ethsync.ActiveValidator) [][]byte {
+func (o *Oracle) deduplicatePubkeys(validators []storage.ActiveValidator) [][]byte {
 	seen := make(map[phase0.BLSPubKey]struct{})
 	var pubkeys [][]byte
 	for _, v := range validators {
@@ -218,7 +220,7 @@ func (o *Oracle) deduplicatePubkeys(validators []ethsync.ActiveValidator) [][]by
 	return pubkeys
 }
 
-func (o *Oracle) aggregateByCluster(validators []ethsync.ActiveValidator, balanceMap map[phase0.BLSPubKey]uint64) ([]ethsync.ClusterBalance, int) {
+func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanceMap map[phase0.BLSPubKey]uint64) ([]storage.ClusterBalance, int) {
 	clusterTotals := make(map[[32]byte]uint64)
 	var notOnBeacon int
 
@@ -239,9 +241,9 @@ func (o *Oracle) aggregateByCluster(validators []ethsync.ActiveValidator, balanc
 		clusterTotals[clusterID] += balance
 	}
 
-	var result []ethsync.ClusterBalance
+	var result []storage.ClusterBalance
 	for clusterID, total := range clusterTotals {
-		result = append(result, ethsync.ClusterBalance{
+		result = append(result, storage.ClusterBalance{
 			ClusterID:        clusterID[:],
 			EffectiveBalance: total,
 		})
@@ -261,7 +263,7 @@ func (o *Oracle) handleCommitError(
 	if receipt != nil {
 		txHash = receipt.TxHash.Bytes()
 	}
-	if statusErr := o.storage.UpdateCommitStatus(ctx, round, ethsync.CommitStatusFailed, txHash); statusErr != nil {
+	if statusErr := o.storage.UpdateCommitStatus(ctx, round, storage.CommitStatusFailed, txHash); statusErr != nil {
 		log.Warnw("Failed to update commit status", "error", statusErr)
 	}
 

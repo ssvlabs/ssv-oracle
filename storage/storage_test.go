@@ -1,4 +1,4 @@
-package ethsync
+package storage
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func setupTestStorage(t *testing.T) *Storage {
 		_ = os.Remove(tmpFile.Name() + "-shm")
 	})
 
-	storage, err := NewStorage(tmpFile.Name())
+	storage, err := New(tmpFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}

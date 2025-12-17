@@ -7,40 +7,33 @@ import (
 	"testing"
 
 	"ssv-oracle/merkle"
-	"ssv-oracle/pkg/ethsync"
+	"ssv-oracle/storage"
 )
 
-// mockStorage implements the storage interface for testing.
+// mockStorage implements the updaterStorage interface for testing.
 type mockStorage struct {
-	clusters map[string]*ethsync.ClusterRow
-	commits  map[uint64]*ethsync.OracleCommit
+	clusters map[string]*storage.ClusterRow
+	commits  map[uint64]*storage.OracleCommit
 }
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
-		clusters: make(map[string]*ethsync.ClusterRow),
-		commits:  make(map[uint64]*ethsync.OracleCommit),
+		clusters: make(map[string]*storage.ClusterRow),
+		commits:  make(map[uint64]*storage.OracleCommit),
 	}
 }
 
-func (m *mockStorage) GetCluster(ctx context.Context, clusterID []byte) (*ethsync.ClusterRow, error) {
+func (m *mockStorage) GetCluster(ctx context.Context, clusterID []byte) (*storage.ClusterRow, error) {
 	return m.clusters[string(clusterID)], nil
 }
 
-func (m *mockStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*ethsync.OracleCommit, error) {
+func (m *mockStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*storage.OracleCommit, error) {
 	return m.commits[blockNum], nil
-}
-
-// mockSyncer implements the Syncer interface for testing.
-type mockSyncer struct{}
-
-func (m *mockSyncer) SyncClustersToHead(ctx context.Context) error {
-	return nil
 }
 
 func TestNew(t *testing.T) {
 	cfg := &Config{
-		Storage:        nil, // Would be *ethsync.Storage
+		Storage:        nil, // Would be *storage.Storage
 		ContractClient: nil, // Would be *contract.Client
 	}
 
@@ -51,13 +44,13 @@ func TestNew(t *testing.T) {
 }
 
 func TestProcessCommit_EmptyClusters(t *testing.T) {
-	storage := newMockStorage()
-	u := &Updater{storage: storage, syncer: &mockSyncer{}}
+	store := newMockStorage()
+	u := &Updater{storage: store}
 
 	// Build empty tree to get the correct root
 	emptyRoot := merkle.BuildMerkleTree(nil)
 
-	commit := &ethsync.OracleCommit{
+	commit := &storage.OracleCommit{
 		RoundID:         1,
 		TargetEpoch:     100,
 		MerkleRoot:      emptyRoot[:],
@@ -72,16 +65,16 @@ func TestProcessCommit_EmptyClusters(t *testing.T) {
 }
 
 func TestProcessCommit_RootMismatch(t *testing.T) {
-	storage := newMockStorage()
-	u := &Updater{storage: storage, syncer: &mockSyncer{}}
+	store := newMockStorage()
+	u := &Updater{storage: store}
 
 	// Create a cluster balance but with wrong root
 	clusterID := [32]byte{0x01}
-	clusterBalances := []ethsync.ClusterBalance{
+	clusterBalances := []storage.ClusterBalance{
 		{ClusterID: clusterID[:], EffectiveBalance: 32000000000},
 	}
 
-	commit := &ethsync.OracleCommit{
+	commit := &storage.OracleCommit{
 		RoundID:         1,
 		TargetEpoch:     100,
 		MerkleRoot:      make([]byte, 32), // Wrong root (all zeros)
@@ -99,11 +92,11 @@ func TestProcessCommit_RootMismatch(t *testing.T) {
 }
 
 func TestProcessCommit_ValidRootNoContractClient(t *testing.T) {
-	storage := newMockStorage()
+	store := newMockStorage()
 
-	// Create a cluster in storage
+	// Create a cluster in store
 	clusterID := [32]byte{0x01}
-	storage.clusters[string(clusterID[:])] = &ethsync.ClusterRow{
+	store.clusters[string(clusterID[:])] = &storage.ClusterRow{
 		ClusterID:      clusterID[:],
 		OwnerAddress:   make([]byte, 20),
 		OperatorIDs:    []uint64{1, 2, 3, 4},
@@ -118,11 +111,11 @@ func TestProcessCommit_ValidRootNoContractClient(t *testing.T) {
 	}
 	tree := merkle.BuildMerkleTreeWithProofs(clusterMap)
 
-	clusterBalances := []ethsync.ClusterBalance{
+	clusterBalances := []storage.ClusterBalance{
 		{ClusterID: clusterID[:], EffectiveBalance: 32000000000},
 	}
 
-	commit := &ethsync.OracleCommit{
+	commit := &storage.OracleCommit{
 		RoundID:         1,
 		TargetEpoch:     100,
 		MerkleRoot:      tree.Root[:],
@@ -132,7 +125,7 @@ func TestProcessCommit_ValidRootNoContractClient(t *testing.T) {
 
 	// Without contract client, processCluster will panic
 	// This test verifies root validation passes before that point
-	u := &Updater{storage: storage, contractClient: nil, syncer: &mockSyncer{}}
+	u := &Updater{storage: store, contractClient: nil}
 
 	// We expect a panic since contractClient is nil
 	// This is a limitation - full testing requires mock contract client

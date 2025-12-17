@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/logger"
 )
 
 const eventRootCommitted = "RootCommitted"

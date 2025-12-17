@@ -1,4 +1,4 @@
-package ethsync
+package syncer
 
 import (
 	"encoding/json"
@@ -17,8 +17,8 @@ type EventParser struct {
 	abi abi.ABI
 }
 
-// NewEventParser creates a new event parser.
-func NewEventParser() *EventParser {
+// NewParser creates a new event parser.
+func NewParser() *EventParser {
 	return &EventParser{abi: contract.SSVNetworkABI}
 }
 

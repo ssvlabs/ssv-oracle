@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/logger"
 	"ssv-oracle/txmanager"
 	"ssv-oracle/wallet"
 )

@@ -1,4 +1,4 @@
-package ethsync
+package eth
 
 import (
 	"context"

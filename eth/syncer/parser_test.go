@@ -1,4 +1,4 @@
-package ethsync
+package syncer
 
 import (
 	"encoding/json"
@@ -8,15 +8,15 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-func TestNewEventParser(t *testing.T) {
-	parser := NewEventParser()
+func TestNewParser(t *testing.T) {
+	parser := NewParser()
 	if parser == nil {
-		t.Fatal("NewEventParser() returned nil")
+		t.Fatal("NewParser() returned nil")
 	}
 }
 
 func TestParseLog_EmptyTopics(t *testing.T) {
-	parser := NewEventParser()
+	parser := NewParser()
 
 	log := &types.Log{
 		Topics: []common.Hash{},
@@ -29,7 +29,7 @@ func TestParseLog_EmptyTopics(t *testing.T) {
 }
 
 func TestParseLog_UnknownSignature(t *testing.T) {
-	parser := NewEventParser()
+	parser := NewParser()
 
 	log := &types.Log{
 		Topics: []common.Hash{
@@ -44,7 +44,7 @@ func TestParseLog_UnknownSignature(t *testing.T) {
 }
 
 func TestParseLog_MissingOwnerTopic(t *testing.T) {
-	parser := NewEventParser()
+	parser := NewParser()
 
 	// ValidatorAdded signature but no owner topic
 	log := &types.Log{
@@ -187,7 +187,7 @@ func TestEventSignatures(t *testing.T) {
 func TestEventSignatures_MatchABI(t *testing.T) {
 	// Verify our hardcoded event signatures match the ABI
 	// This catches ABI changes that would break event parsing
-	parser := NewEventParser()
+	parser := NewParser()
 
 	tests := []struct {
 		name     string

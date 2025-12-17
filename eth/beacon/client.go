@@ -1,4 +1,4 @@
-package ethsync
+package beacon
 
 import (
 	"context"
@@ -15,7 +15,8 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
 
-	"ssv-oracle/pkg/logger"
+	"ssv-oracle/eth"
+	"ssv-oracle/logger"
 )
 
 const (
@@ -34,7 +35,7 @@ func wrapBeaconError(err error, operation string) error {
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
 		case 404:
-			return Permanent(fmt.Errorf("%s: not found", operation))
+			return eth.Permanent(fmt.Errorf("%s: not found", operation))
 		case 503:
 			return fmt.Errorf("%s: %w", operation, ErrBeaconSyncing)
 		}
@@ -42,8 +43,8 @@ func wrapBeaconError(err error, operation string) error {
 	return fmt.Errorf("%s: %w", operation, err)
 }
 
-// BeaconAPI defines the beacon node capabilities required by the oracle.
-type BeaconAPI interface {
+// API defines the beacon node capabilities required by the oracle.
+type API interface {
 	eth2client.GenesisProvider
 	eth2client.SpecProvider
 	eth2client.FinalityProvider
@@ -52,22 +53,22 @@ type BeaconAPI interface {
 	eth2client.EventsProvider
 }
 
-// BeaconClient wraps a beacon node client for fetching chain data.
-type BeaconClient struct {
-	client      BeaconAPI
+// Client wraps a beacon node client for fetching chain data.
+type Client struct {
+	client      API
 	Spec        *Spec
-	retryConfig RetryConfig
+	retryConfig eth.RetryConfig
 }
 
-// BeaconClientConfig holds configuration for the beacon client.
-type BeaconClientConfig struct {
+// ClientConfig holds configuration for the beacon client.
+type ClientConfig struct {
 	URL         string
 	Timeout     time.Duration
-	RetryConfig *RetryConfig // nil uses DefaultRetryConfig()
+	RetryConfig *eth.RetryConfig // nil uses DefaultRetryConfig()
 }
 
-// NewBeaconClient creates a new beacon client and fetches the chain spec.
-func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient, error) {
+// New creates a new beacon client and fetches the chain spec.
+func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = defaultBeaconTimeout
 	}
@@ -81,13 +82,13 @@ func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient
 		return nil, fmt.Errorf("beacon node %s: %w", cfg.URL, err)
 	}
 
-	retryConfig := DefaultRetryConfig()
+	retryConfig := eth.DefaultRetryConfig()
 	if cfg.RetryConfig != nil {
 		retryConfig = *cfg.RetryConfig
 	}
 
-	bc := &BeaconClient{
-		client:      client.(BeaconAPI),
+	bc := &Client{
+		client:      client.(API),
 		retryConfig: retryConfig,
 	}
 
@@ -98,8 +99,8 @@ func NewBeaconClient(ctx context.Context, cfg BeaconClientConfig) (*BeaconClient
 	return bc, nil
 }
 
-func (c *BeaconClient) fetchSpec(ctx context.Context) error {
-	return WithRetry(ctx, c.retryConfig, func() error {
+func (c *Client) fetchSpec(ctx context.Context) error {
+	return eth.WithRetry(ctx, c.retryConfig, func() error {
 		genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
 		if err != nil {
 			return wrapBeaconError(err, "get genesis")
@@ -112,12 +113,12 @@ func (c *BeaconClient) fetchSpec(ctx context.Context) error {
 
 		slotsPerEpoch, ok := specResp.Data["SLOTS_PER_EPOCH"].(uint64)
 		if !ok {
-			return Permanent(fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec"))
+			return eth.Permanent(fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec"))
 		}
 
 		secondsPerSlot, ok := specResp.Data["SECONDS_PER_SLOT"].(time.Duration)
 		if !ok {
-			return Permanent(fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec"))
+			return eth.Permanent(fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec"))
 		}
 
 		c.Spec = &Spec{
@@ -136,7 +137,7 @@ func (c *BeaconClient) fetchSpec(ctx context.Context) error {
 }
 
 // CurrentEpoch returns the current epoch based on wall clock time.
-func (c *BeaconClient) CurrentEpoch() uint64 {
+func (c *Client) CurrentEpoch() uint64 {
 	return c.Spec.CurrentEpoch()
 }
 
@@ -147,9 +148,9 @@ type FinalizedCheckpoint struct {
 }
 
 // GetFinalizedCheckpoint returns the latest finalized checkpoint.
-func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoint, error) {
+func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoint, error) {
 	var checkpoint *FinalizedCheckpoint
-	err := WithRetry(ctx, c.retryConfig, func() error {
+	err := eth.WithRetry(ctx, c.retryConfig, func() error {
 		finalityResp, err := c.client.Finality(ctx, &api.FinalityOpts{
 			State: "head",
 		})
@@ -182,7 +183,7 @@ func (c *BeaconClient) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCh
 }
 
 // GetFinalizedValidatorBalances returns effective balances in Gwei for the given validators.
-func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
+func (c *Client) GetFinalizedValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
 		return make(map[phase0.BLSPubKey]uint64), nil
 	}
@@ -209,7 +210,7 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 
 	for _, batch := range batches {
 		g.Go(func() error {
-			return WithRetry(ctx, c.retryConfig, func() error {
+			return eth.WithRetry(ctx, c.retryConfig, func() error {
 				resp, err := c.client.Validators(ctx, &api.ValidatorsOpts{
 					State:   "finalized",
 					PubKeys: batch,
@@ -238,7 +239,7 @@ func (c *BeaconClient) GetFinalizedValidatorBalances(ctx context.Context, pubkey
 // SubscribeFinalizedCheckpoints starts an SSE subscription for finalized checkpoints.
 // Returns a channel that receives checkpoints. Close the context to stop the subscription.
 // Note: go-eth2-client handles SSE reconnection internally with exponential backoff.
-func (c *BeaconClient) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *FinalizedCheckpoint, error) {
+func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *FinalizedCheckpoint, error) {
 	ch := make(chan *FinalizedCheckpoint, 1)
 
 	err := c.client.Events(ctx, &api.EventsOpts{
@@ -277,7 +278,7 @@ func (c *BeaconClient) SubscribeFinalizedCheckpoints(ctx context.Context) (<-cha
 	return ch, nil
 }
 
-func (c *BeaconClient) handleFinalizedEvent(ctx context.Context, event *apiv1.FinalizedCheckpointEvent) (*FinalizedCheckpoint, error) {
+func (c *Client) handleFinalizedEvent(ctx context.Context, event *apiv1.FinalizedCheckpointEvent) (*FinalizedCheckpoint, error) {
 	blockResp, err := c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
 		Block: event.Block.String(),
 	})

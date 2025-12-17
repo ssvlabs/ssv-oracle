@@ -26,24 +26,50 @@ make clean      # Remove build artifacts and database
 ssv-oracle/
 ├── cmd/oracle/         # CLI entry point (cobra)
 ├── contract/           # Ethereum client & contract interaction
+├── eth/                # Ethereum-related packages
+│   ├── beacon/         # Beacon chain client (finality, validators)
+│   ├── execution/      # Execution layer client (logs, blocks)
+│   └── syncer/         # Event syncing & parsing
+├── logger/             # Zap-based structured logging
 ├── merkle/             # Merkle tree (Bitcoin/OpenZeppelin standard)
 ├── oracle/             # Main oracle loop
+├── storage/            # SQLite storage layer
+├── txmanager/          # Transaction lifecycle (gas, retries, cancellation)
 ├── updater/            # Cluster balance updater
 ├── wallet/             # Transaction signing (env, keystore)
-├── txmanager/          # Transaction lifecycle (gas, retries, cancellation)
-├── pkg/ethsync/        # Event syncing & storage (SQLite)
 └── data/               # SQLite database files (gitignored)
 ```
 
 ## Key Components
 
-### Event Syncing (pkg/ethsync)
-- Syncs SSV contract events to SQLite
-- Tracks validator and cluster state
+### Ethereum Layer (eth/)
+Three sub-packages organized by responsibility:
+
+**eth/beacon/** - Beacon chain client:
+- Finalized checkpoint subscription (SSE)
+- Validator effective balance queries
+- Chain spec (genesis, slots per epoch)
+
+**eth/execution/** - Execution layer client:
+- Log fetching with batching
+- Block timestamp queries
+- Chain ID and finalized block
+
+**eth/syncer/** - Event synchronization:
+- Parses SSV contract events
+- Applies state changes to storage
+- Handles validator added/removed, cluster liquidated/reactivated, etc.
+
+**eth/retry.go** - Shared retry utilities:
+- Exponential backoff with jitter
+- Permanent errors (404) are not retried
+- Transient errors (503, network) are retried
+
+### Storage (storage/)
+- SQLite-based persistent storage
 - Schema auto-applies on startup via `//go:embed schema.sql`
 - Uses WAL mode for better concurrency
-- Shared retry utility (`WithRetry`) with exponential backoff and jitter
-- Permanent errors (404) are not retried, transient errors (503, network) are retried
+- Tracks clusters, validators, sync progress, and oracle commits
 
 ### Oracle Loop (oracle/)
 Event-driven main loop reacting to beacon chain finalization:
@@ -95,7 +121,7 @@ Methods:
 - `NextTarget(epoch)` - returns next target after epoch
 - `RoundAt(targetEpoch)` - returns round number for a target epoch
 
-### Cluster ID (pkg/ethsync)
+### Cluster ID (eth/syncer)
 ```go
 keccak256(abi.encodePacked(owner, uint256(op1), uint256(op2), ...))
 ```

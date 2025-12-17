@@ -6,42 +6,42 @@ import (
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 
-	"ssv-oracle/pkg/ethsync"
+	"ssv-oracle/storage"
 )
 
-// mockStorage implements the storage interface for testing.
+// mockStorage implements the oracleStorage interface for testing.
 type mockStorage struct {
-	validators      []ethsync.ActiveValidator
-	commits         map[uint64]*ethsync.OracleCommit
+	validators      []storage.ActiveValidator
+	commits         map[uint64]*storage.OracleCommit
 	insertErr       error
 	updateErr       error
-	insertedCommits []ethsync.OracleCommit
+	insertedCommits []storage.OracleCommit
 	updatedStatuses []commitStatusUpdate
 }
 
 type commitStatusUpdate struct {
 	roundID uint64
-	status  ethsync.CommitStatus
+	status  storage.CommitStatus
 	txHash  []byte
 }
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
-		commits:         make(map[uint64]*ethsync.OracleCommit),
-		insertedCommits: []ethsync.OracleCommit{},
+		commits:         make(map[uint64]*storage.OracleCommit),
+		insertedCommits: []storage.OracleCommit{},
 		updatedStatuses: []commitStatusUpdate{},
 	}
 }
 
-func (m *mockStorage) GetActiveValidators(ctx context.Context) ([]ethsync.ActiveValidator, error) {
+func (m *mockStorage) GetActiveValidators(ctx context.Context) ([]storage.ActiveValidator, error) {
 	return m.validators, nil
 }
 
-func (m *mockStorage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ethsync.ClusterBalance) error {
+func (m *mockStorage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []storage.ClusterBalance) error {
 	if m.insertErr != nil {
 		return m.insertErr
 	}
-	m.insertedCommits = append(m.insertedCommits, ethsync.OracleCommit{
+	m.insertedCommits = append(m.insertedCommits, storage.OracleCommit{
 		RoundID:         roundID,
 		TargetEpoch:     targetEpoch,
 		MerkleRoot:      merkleRoot,
@@ -51,7 +51,7 @@ func (m *mockStorage) InsertPendingCommit(ctx context.Context, roundID, targetEp
 	return nil
 }
 
-func (m *mockStorage) UpdateCommitStatus(ctx context.Context, roundID uint64, status ethsync.CommitStatus, txHash []byte) error {
+func (m *mockStorage) UpdateCommitStatus(ctx context.Context, roundID uint64, status storage.CommitStatus, txHash []byte) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
@@ -99,15 +99,15 @@ func TestNew_EmptyConfig(t *testing.T) {
 }
 
 func TestOracleStorageInterface(t *testing.T) {
-	// Verify mockStorage implements the storage interface
-	var _ storage = (*mockStorage)(nil)
+	// Verify mockStorage implements the oracleStorage interface
+	var _ oracleStorage = (*mockStorage)(nil)
 }
 
 func TestClusterBalanceAggregation(t *testing.T) {
 	// Test the logic for aggregating balances by cluster
 	// This mirrors what fetchClusterBalances does internally
 
-	validators := []ethsync.ActiveValidator{
+	validators := []storage.ActiveValidator{
 		{ClusterID: []byte{0x01}, ValidatorPubkey: make([]byte, 48)},
 		{ClusterID: []byte{0x01}, ValidatorPubkey: make([]byte, 48)}, // Same cluster
 		{ClusterID: []byte{0x02}, ValidatorPubkey: make([]byte, 48)},
@@ -138,7 +138,7 @@ func TestPubkeyDeduplication(t *testing.T) {
 	// Test that duplicate pubkeys are handled correctly
 	// This mirrors the deduplication logic in fetchClusterBalances
 
-	validators := []ethsync.ActiveValidator{
+	validators := []storage.ActiveValidator{
 		{ClusterID: []byte{0x01}, ValidatorPubkey: []byte{0xAA}},
 		{ClusterID: []byte{0x01}, ValidatorPubkey: []byte{0xAA}}, // Duplicate pubkey
 		{ClusterID: []byte{0x01}, ValidatorPubkey: []byte{0xBB}}, // Different pubkey
@@ -162,10 +162,10 @@ func TestPubkeyDeduplication(t *testing.T) {
 
 func TestEmptyValidators(t *testing.T) {
 	// When there are no validators, cluster balances should be empty
-	storage := newMockStorage()
-	storage.validators = []ethsync.ActiveValidator{}
+	store := newMockStorage()
+	store.validators = []storage.ActiveValidator{}
 
-	validators, err := storage.GetActiveValidators(context.Background())
+	validators, err := store.GetActiveValidators(context.Background())
 	if err != nil {
 		t.Fatalf("GetActiveValidators failed: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestAggregateByCluster_BalanceFloor(t *testing.T) {
 	clusterID := make([]byte, 32)
 	clusterID[0] = 0xAA
 
-	validators := []ethsync.ActiveValidator{
+	validators := []storage.ActiveValidator{
 		{ClusterID: clusterID, ValidatorPubkey: pk1},
 		{ClusterID: clusterID, ValidatorPubkey: pk2},
 		{ClusterID: clusterID, ValidatorPubkey: pk3},
@@ -274,7 +274,7 @@ func TestAggregateByCluster_AllBelowThreshold(t *testing.T) {
 	clusterID := make([]byte, 32)
 	clusterID[0] = 0xBB
 
-	validators := []ethsync.ActiveValidator{
+	validators := []storage.ActiveValidator{
 		{ClusterID: clusterID, ValidatorPubkey: pk1},
 		{ClusterID: clusterID, ValidatorPubkey: pk2},
 	}
@@ -311,7 +311,7 @@ func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
 	clusterID := make([]byte, 32)
 	clusterID[0] = 0xCC
 
-	validators := []ethsync.ActiveValidator{
+	validators := []storage.ActiveValidator{
 		{ClusterID: clusterID, ValidatorPubkey: pk1},
 	}
 
