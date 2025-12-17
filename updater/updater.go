@@ -58,28 +58,27 @@ func New(cfg *Config) *Updater {
 // Run starts the updater main loop, listening for RootCommitted events.
 func (u *Updater) Run(ctx context.Context) error {
 	for {
-		delay, err := u.subscribeAndProcess(ctx)
+		err := u.subscribeAndProcess(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			logger.Errorw("Subscription failed, reconnecting", "error", err, "retryDelay", delay)
+			logger.Errorw("Subscription failed, reconnecting", "error", err)
 		}
 
 		select {
-		case <-time.After(delay):
+		case <-time.After(retryDelay):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
 
-// subscribeAndProcess subscribes to events and processes them.
-// Returns the delay to use before retrying.
-func (u *Updater) subscribeAndProcess(ctx context.Context) (time.Duration, error) {
+// subscribeAndProcess subscribes to events and processes them until error or context cancellation.
+func (u *Updater) subscribeAndProcess(ctx context.Context) error {
 	events, errChan, err := u.contractClient.SubscribeRootCommitted(ctx, nil)
 	if err != nil {
-		return retryDelay, fmt.Errorf("failed to subscribe: %w", err)
+		return fmt.Errorf("failed to subscribe: %w", err)
 	}
 
 	logger.Info("Subscribed to RootCommitted events")
@@ -88,17 +87,25 @@ func (u *Updater) subscribeAndProcess(ctx context.Context) (time.Duration, error
 		select {
 		case <-ctx.Done():
 			logger.Info("Updater stopping")
-			return 0, ctx.Err()
+			return ctx.Err()
 
 		case err, ok := <-errChan:
 			if !ok {
-				return retryDelay, fmt.Errorf("error channel closed")
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return fmt.Errorf("error channel closed unexpectedly")
 			}
-			return retryDelay, fmt.Errorf("subscription error: %w", err)
+			if err != nil {
+				return fmt.Errorf("subscription error: %w", err)
+			}
 
 		case event, ok := <-events:
 			if !ok {
-				return retryDelay, fmt.Errorf("event channel closed")
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return fmt.Errorf("event channel closed unexpectedly")
 			}
 			u.handleEvent(ctx, event)
 		}

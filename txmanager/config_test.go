@@ -125,6 +125,64 @@ func TestTxPolicy_Validate(t *testing.T) {
 	}
 }
 
+func TestDefaultTxPolicy(t *testing.T) {
+	policy := DefaultTxPolicy()
+	if err := policy.Validate(); err != nil {
+		t.Errorf("DefaultTxPolicy() should be valid, got error: %v", err)
+	}
+
+	if policy.GasBufferPercent != DefaultGasBufferPercent {
+		t.Errorf("GasBufferPercent = %d, want %d", policy.GasBufferPercent, DefaultGasBufferPercent)
+	}
+	if policy.MaxFeePerGas != DefaultMaxFeePerGas {
+		t.Errorf("MaxFeePerGas = %s, want %s", policy.MaxFeePerGas, DefaultMaxFeePerGas)
+	}
+	if policy.PendingTimeoutBlocks != DefaultPendingTimeoutBlocks {
+		t.Errorf("PendingTimeoutBlocks = %d, want %d", policy.PendingTimeoutBlocks, DefaultPendingTimeoutBlocks)
+	}
+	if policy.GasBumpPercent != DefaultGasBumpPercent {
+		t.Errorf("GasBumpPercent = %d, want %d", policy.GasBumpPercent, DefaultGasBumpPercent)
+	}
+	if policy.MaxRetries != DefaultMaxRetries {
+		t.Errorf("MaxRetries = %d, want %d", policy.MaxRetries, DefaultMaxRetries)
+	}
+	if policy.RetryDelay != DefaultRetryDelay {
+		t.Errorf("RetryDelay = %v, want %v", policy.RetryDelay, DefaultRetryDelay)
+	}
+}
+
+func TestTxPolicy_ApplyDefaults(t *testing.T) {
+	// Empty policy should get all defaults
+	policy := &TxPolicy{}
+	policy.ApplyDefaults()
+
+	if err := policy.Validate(); err != nil {
+		t.Errorf("ApplyDefaults() should make policy valid, got error: %v", err)
+	}
+
+	// Explicit values should not be overwritten
+	policy2 := &TxPolicy{
+		GasBufferPercent: 50,
+		MaxFeePerGas:     "200 gwei",
+		MaxRetries:       5,
+	}
+	policy2.ApplyDefaults()
+
+	if policy2.GasBufferPercent != 50 {
+		t.Errorf("GasBufferPercent should remain 50, got %d", policy2.GasBufferPercent)
+	}
+	if policy2.MaxFeePerGas != "200 gwei" {
+		t.Errorf("MaxFeePerGas should remain '200 gwei', got %s", policy2.MaxFeePerGas)
+	}
+	if policy2.MaxRetries != 5 {
+		t.Errorf("MaxRetries should remain 5, got %d", policy2.MaxRetries)
+	}
+	// Other fields should get defaults
+	if policy2.PendingTimeoutBlocks != DefaultPendingTimeoutBlocks {
+		t.Errorf("PendingTimeoutBlocks should be default, got %d", policy2.PendingTimeoutBlocks)
+	}
+}
+
 func TestTxPolicy_ParseMaxFeePerGas(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -138,11 +196,14 @@ func TestTxPolicy_ParseMaxFeePerGas(t *testing.T) {
 		{"0.5 gwei", "0.5 gwei", 500_000_000, false, false},
 		{"1 wei", "1 wei", 1, false, false},
 		{"plain number as wei", "1000000000", 1_000_000_000, false, false},
-		{"empty string returns nil", "", 0, false, true},
+		{"empty string errors", "", 0, true, false},
 		{"invalid format", "invalid", 0, true, false},
 		{"unknown unit", "100 foo", 0, true, false},
 		{"1 ether", "1 ether", 1_000_000_000_000_000_000, false, false},
 		{"1 eth", "1 eth", 1_000_000_000_000_000_000, false, false},
+		{"case insensitive GWEI", "100 GWEI", 100_000_000_000, false, false},
+		{"case insensitive Gwei", "50 Gwei", 50_000_000_000, false, false},
+		{"case insensitive WEI", "1000 WEI", 1000, false, false},
 	}
 
 	for _, tt := range tests {

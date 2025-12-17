@@ -9,10 +9,11 @@ import (
 
 func validConfig() *Config {
 	return &Config{
-		EthRPC:      "http://localhost:8545",
-		BeaconRPC:   "http://localhost:5052",
-		SSVContract: "0x1234567890123456789012345678901234567890",
-		Schedule:    oracle.CommitSchedule{{StartEpoch: 0, Interval: 225}},
+		EthRPC:                 "http://localhost:8545",
+		BeaconRPC:              "http://localhost:5052",
+		SSVContract:            "0x1234567890123456789012345678901234567890",
+		SSVContractDeployBlock: 17507487,
+		Schedule:               oracle.CommitSchedule{{StartEpoch: 0, Interval: 225}},
 	}
 }
 
@@ -47,6 +48,11 @@ func TestConfig_Validate(t *testing.T) {
 			name:    "invalid ssv_contract address",
 			modify:  func(c *Config) { c.SSVContract = "not-an-address" },
 			wantErr: "invalid ssv_contract address",
+		},
+		{
+			name:    "missing ssv_contract_deploy_block",
+			modify:  func(c *Config) { c.SSVContractDeployBlock = 0 },
+			wantErr: "ssv_contract_deploy_block is required",
 		},
 		{
 			name:    "empty schedule",

@@ -167,7 +167,7 @@ func runServices(
 	beaconClient *beacon.Client,
 ) error {
 	logger.Info("Syncing SSV contract events")
-	if err := eventSyncer.SyncToFinalized(ctx, cfg.SyncFromBlock); err != nil {
+	if err := eventSyncer.SyncToFinalized(ctx, cfg.SSVContractDeployBlock); err != nil {
 		return fmt.Errorf("initial sync failed: %w", err)
 	}
 

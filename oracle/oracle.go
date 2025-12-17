@@ -88,6 +88,9 @@ func (o *Oracle) Run(ctx context.Context) error {
 
 		case checkpoint, ok := <-finalizedCh:
 			if !ok {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return fmt.Errorf("finalized checkpoint subscription closed")
 			}
 

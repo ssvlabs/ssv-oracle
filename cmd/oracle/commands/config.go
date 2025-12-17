@@ -24,8 +24,8 @@ type Config struct {
 	SSVContract      string `yaml:"ssv_contract"`
 	SSVViewsContract string `yaml:"ssv_views_contract"` // Required only with --updater
 
-	SyncFromBlock uint64 `yaml:"sync_from_block"`
-	SyncBatchSize uint64 `yaml:"sync_batch_size"`
+	SSVContractDeployBlock uint64 `yaml:"ssv_contract_deploy_block"`
+	SyncBatchSize          uint64 `yaml:"sync_batch_size"`
 
 	DBPath string `yaml:"db_path"`
 
@@ -47,6 +47,9 @@ func (c *Config) Validate(withUpdater bool) error {
 	}
 	if !common.IsHexAddress(c.SSVContract) {
 		return fmt.Errorf("invalid ssv_contract address: %s", c.SSVContract)
+	}
+	if c.SSVContractDeployBlock == 0 {
+		return errors.New("ssv_contract_deploy_block is required")
 	}
 	if err := c.Schedule.Validate(); err != nil {
 		return fmt.Errorf("invalid commit_phases: %w", err)

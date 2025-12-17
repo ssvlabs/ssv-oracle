@@ -82,6 +82,7 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 	if policy == nil {
 		return nil, fmt.Errorf("tx policy is required")
 	}
+	policy.ApplyDefaults()
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid tx policy: %w", err)
 	}
@@ -171,40 +172,44 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	currentTip := gasTipCap
 	currentFeeCap := gasFeeCap
 
-	for attempt := 1; attempt <= m.policy.MaxRetries; attempt++ {
+	// MaxRetries is the number of retries after initial attempt, so MaxRetries=3 means 4 total attempts
+	for attempt := 0; attempt <= m.policy.MaxRetries; attempt++ {
 		signedTx, err := m.buildAndSignTx(opts, nonce, gasLimit, currentTip, currentFeeCap, value)
 		if err != nil {
 			return nil, err
 		}
+		lastTx = signedTx
 
 		if err := m.client.SendTransaction(ctx, signedTx); err != nil {
 			if isTxAlreadyKnown(err) {
 				logger.Infow("Tx already in mempool",
 					"hash", signedTx.Hash().Hex(),
 					"nonce", nonce)
-				lastTx = signedTx
 				goto waitForReceipt
 			}
 			if isNonceTooLow(err) {
-				return nil, fmt.Errorf("%w: %v", ErrNonceTooLow, err)
+				return nil, fmt.Errorf("%w: %w", ErrNonceTooLow, err)
 			}
 			if attempt < m.policy.MaxRetries {
 				logger.Warnw("Tx submission failed, retrying",
-					"attempt", attempt,
+					"attempt", attempt+1,
 					"error", err)
-				time.Sleep(m.policy.RetryDelay)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(m.policy.RetryDelay):
+				}
 				continue
 			}
 			return nil, fmt.Errorf("failed to send tx: %w", err)
 		}
 
-		lastTx = signedTx
 		logger.Infow("Tx submitted",
 			"hash", signedTx.Hash().Hex(),
 			"nonce", nonce,
 			"gasTipCap", currentTip,
 			"gasFeeCap", currentFeeCap,
-			"attempt", attempt)
+			"attempt", attempt+1)
 
 	waitForReceipt:
 		receipt, err := m.waitForReceipt(ctx, signedTx)
@@ -212,7 +217,14 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			return m.handleReceipt(ctx, opts, signedTx, receipt)
 		}
 
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		if attempt >= m.policy.MaxRetries {
+			logger.Warnw("Tx receipt wait failed on final attempt",
+				"hash", signedTx.Hash().Hex(),
+				"error", err)
 			break
 		}
 
@@ -222,13 +234,15 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 				"nonce", nonce,
 				"maxFeePerGas", m.maxFeePerGas,
 				"currentFeeCap", currentFeeCap)
-			_ = m.cancelTx(ctx, nonce, currentFeeCap)
+			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
+				logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
+			}
 			return nil, ErrMaxGasReached
 		}
 
 		logger.Warnw("Tx pending timeout, bumping gas",
 			"hash", signedTx.Hash().Hex(),
-			"attempt", attempt,
+			"attempt", attempt+1,
 			"oldFeeCap", currentFeeCap,
 			"newFeeCap", newFeeCap)
 
@@ -236,11 +250,11 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		currentFeeCap = newFeeCap
 	}
 
-	if lastTx != nil {
-		logger.Warnw("Max retries exhausted, cancelling",
-			"hash", lastTx.Hash().Hex(),
-			"nonce", nonce)
-		_ = m.cancelTx(ctx, nonce, currentFeeCap)
+	logger.Warnw("Max retries exhausted, cancelling",
+		"hash", lastTx.Hash().Hex(),
+		"nonce", nonce)
+	if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
+		logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
 	}
 
 	return nil, ErrMaxRetriesExhausted
@@ -277,7 +291,7 @@ func (m *TxManager) bumpGas(currentTip, currentFeeCap *big.Int) (*big.Int, *big.
 	newFeeCap := new(big.Int).Mul(currentFeeCap, bumpFactor)
 	newFeeCap.Div(newFeeCap, hundred)
 
-	if m.maxFeePerGas != nil && newFeeCap.Cmp(m.maxFeePerGas) > 0 {
+	if newFeeCap.Cmp(m.maxFeePerGas) > 0 {
 		return nil, nil, true
 	}
 
@@ -292,7 +306,8 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 	gasFeeCap := new(big.Int).Mul(prevGasFeeCap, bumpFactor)
 	gasFeeCap.Div(gasFeeCap, big.NewInt(100))
 
-	if m.maxFeePerGas != nil && gasFeeCap.Cmp(m.maxFeePerGas) < 0 {
+	// Cap at maxFeePerGas to respect configured limit.
+	if gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
 		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
 	}
 
@@ -410,7 +425,7 @@ func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, err
 	gasFeeCap := new(big.Int).Mul(header.BaseFee, big.NewInt(2))
 	gasFeeCap.Add(gasFeeCap, gasTipCap)
 
-	if m.maxFeePerGas != nil && gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
+	if gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
 		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
 		if gasTipCap.Cmp(gasFeeCap) > 0 {
 			gasTipCap = new(big.Int).Set(gasFeeCap)

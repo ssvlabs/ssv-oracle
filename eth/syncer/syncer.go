@@ -46,30 +46,21 @@ func New(cfg Config) *EventSyncer {
 	}
 }
 
-// SyncToFinalized syncs from last synced block to current finalized block.
-func (s *EventSyncer) SyncToFinalized(ctx context.Context, fromBlock uint64) error {
+// SyncToFinalized syncs SSV contract events up to the current finalized block.
+func (s *EventSyncer) SyncToFinalized(ctx context.Context, deployBlock uint64) error {
 	lastSynced, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get last synced block: %w", err)
 	}
 
 	if lastSynced == 0 {
-		if fromBlock == 0 {
-			return fmt.Errorf("sync_from_block must be set to the SSV contract deployment block")
-		}
-
-		logger.Infow("First run: setting initial sync position", "block", fromBlock-1)
-		err = s.storage.UpdateLastSyncedBlock(ctx, fromBlock-1)
+		logger.Infow("First run: setting initial sync position", "block", deployBlock-1)
+		err = s.storage.UpdateLastSyncedBlock(ctx, deployBlock-1)
 		if err != nil {
 			return fmt.Errorf("failed to set initial sync block: %w", err)
 		}
 	}
 
-	return s.syncOnce(ctx)
-}
-
-// SyncIncremental performs one incremental sync (used in oracle cycle).
-func (s *EventSyncer) SyncIncremental(ctx context.Context) error {
 	return s.syncOnce(ctx)
 }
 

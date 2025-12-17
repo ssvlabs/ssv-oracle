@@ -30,8 +30,8 @@ func Permanent(err error) error {
 	return &ErrPermanent{Err: err}
 }
 
-// IsPermanent returns true if the error should not be retried.
-func IsPermanent(err error) bool {
+// isPermanent returns true if the error should not be retried.
+func isPermanent(err error) bool {
 	var permErr *ErrPermanent
 	return errors.As(err, &permErr)
 }
@@ -54,21 +54,23 @@ func DefaultRetryConfig() RetryConfig {
 
 // WithRetry executes fn with exponential backoff and jitter.
 // Returns nil on success, or the last error after all attempts exhausted.
+// MaxRetries specifies the number of retries after the initial attempt,
+// so MaxRetries=3 means 4 total attempts.
 // Errors wrapped with Permanent() are not retried.
 func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
-	if cfg.MaxRetries <= 0 {
+	if cfg.MaxRetries < 0 {
 		return fn()
 	}
 
 	var err error
-	for attempt := 0; attempt < cfg.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
 		if err = fn(); err == nil {
 			return nil
 		}
-		if IsPermanent(err) {
+		if isPermanent(err) {
 			return err
 		}
-		if attempt < cfg.MaxRetries-1 {
+		if attempt < cfg.MaxRetries {
 			delay := cfg.BaseDelay * time.Duration(1<<attempt)
 			if delay > cfg.MaxDelay {
 				delay = cfg.MaxDelay
@@ -86,5 +88,5 @@ func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 			}
 		}
 	}
-	return fmt.Errorf("after %d attempts: %w", cfg.MaxRetries, err)
+	return fmt.Errorf("after %d attempts: %w", cfg.MaxRetries+1, err)
 }

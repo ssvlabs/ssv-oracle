@@ -78,7 +78,7 @@ ssv_contract: "0x..."
 ssv_views_contract: "0x..."  # Required for --updater (SSV Network Views contract)
 
 # Syncing
-sync_from_block: 17507487  # SSV contract deployment block (mainnet example)
+ssv_contract_deploy_block: 17507487  # Mainnet example
 sync_batch_size: 200
 
 # Database (SQLite)

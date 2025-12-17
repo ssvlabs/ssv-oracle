@@ -3,7 +3,18 @@ package txmanager
 import (
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
+)
+
+// Default values for TxPolicy fields.
+const (
+	DefaultGasBufferPercent     = 20
+	DefaultMaxFeePerGas         = "100 gwei"
+	DefaultPendingTimeoutBlocks = 10
+	DefaultGasBumpPercent       = 10
+	DefaultMaxRetries           = 3
+	DefaultRetryDelay           = 5 * time.Second
 )
 
 // TxPolicy configures transaction submission behavior.
@@ -16,12 +27,42 @@ type TxPolicy struct {
 	RetryDelay           time.Duration `yaml:"retry_delay"`
 }
 
+// DefaultTxPolicy returns a TxPolicy with sensible defaults.
+func DefaultTxPolicy() TxPolicy {
+	return TxPolicy{
+		GasBufferPercent:     DefaultGasBufferPercent,
+		MaxFeePerGas:         DefaultMaxFeePerGas,
+		PendingTimeoutBlocks: DefaultPendingTimeoutBlocks,
+		GasBumpPercent:       DefaultGasBumpPercent,
+		MaxRetries:           DefaultMaxRetries,
+		RetryDelay:           DefaultRetryDelay,
+	}
+}
+
+// ApplyDefaults fills in zero values with sensible defaults.
+func (p *TxPolicy) ApplyDefaults() {
+	if p.GasBufferPercent == 0 {
+		p.GasBufferPercent = DefaultGasBufferPercent
+	}
+	if p.MaxFeePerGas == "" {
+		p.MaxFeePerGas = DefaultMaxFeePerGas
+	}
+	if p.PendingTimeoutBlocks == 0 {
+		p.PendingTimeoutBlocks = DefaultPendingTimeoutBlocks
+	}
+	if p.GasBumpPercent == 0 {
+		p.GasBumpPercent = DefaultGasBumpPercent
+	}
+	if p.MaxRetries == 0 {
+		p.MaxRetries = DefaultMaxRetries
+	}
+	if p.RetryDelay == 0 {
+		p.RetryDelay = DefaultRetryDelay
+	}
+}
+
 // ParseMaxFeePerGas parses MaxFeePerGas string (e.g., "100 gwei") into wei.
 func (p *TxPolicy) ParseMaxFeePerGas() (*big.Int, error) {
-	if p.MaxFeePerGas == "" {
-		return nil, nil // No cap
-	}
-
 	var value float64
 	var unit string
 	_, err := fmt.Sscanf(p.MaxFeePerGas, "%f %s", &value, &unit)
@@ -35,7 +76,7 @@ func (p *TxPolicy) ParseMaxFeePerGas() (*big.Int, error) {
 	}
 
 	var multiplier *big.Int
-	switch unit {
+	switch strings.ToLower(unit) {
 	case "wei":
 		multiplier = big.NewInt(1)
 	case "gwei":
@@ -54,13 +95,9 @@ func (p *TxPolicy) ParseMaxFeePerGas() (*big.Int, error) {
 	return result, nil
 }
 
-// Validate checks that all required fields are set and within valid ranges.
+// Validate checks that all fields are within valid ranges.
+// Call ApplyDefaults() before Validate() if you want defaults applied.
 func (p *TxPolicy) Validate() error {
-	// Check required fields are set (no defaults - must be explicit in config)
-	if p.GasBufferPercent == 0 && p.MaxFeePerGas == "" && p.PendingTimeoutBlocks == 0 {
-		return fmt.Errorf("tx_policy section is required in config")
-	}
-
 	if p.GasBufferPercent < 0 || p.GasBufferPercent > 100 {
 		return fmt.Errorf("gas_buffer_percent must be 0-100, got %d", p.GasBufferPercent)
 	}
@@ -80,8 +117,14 @@ func (p *TxPolicy) Validate() error {
 		return fmt.Errorf("max_fee_per_gas is required")
 	}
 
-	if _, err := p.ParseMaxFeePerGas(); err != nil {
+	fee, err := p.ParseMaxFeePerGas()
+	if err != nil {
 		return err
+	}
+
+	minFee := big.NewInt(1e9) // 1 gwei
+	if fee.Cmp(minFee) < 0 {
+		return fmt.Errorf("max_fee_per_gas must be at least 1 gwei, got %s", p.MaxFeePerGas)
 	}
 
 	return nil

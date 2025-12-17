@@ -26,7 +26,7 @@ db_path: "./data/oracle.db"            # SQLite database file
 # Event Syncing
 # ============================================================================
 
-sync_from_block: 0                     # Block when SSV contract was deployed
+ssv_contract_deploy_block: 0           # Block when SSV contract was deployed
 sync_batch_size: 200                   # Blocks per batch (default: 200)
 
 # ============================================================================
