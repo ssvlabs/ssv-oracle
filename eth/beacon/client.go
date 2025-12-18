@@ -147,8 +147,9 @@ func (c *Client) CurrentEpoch() uint64 {
 
 // FinalizedCheckpoint contains the finalized epoch and corresponding execution block.
 type FinalizedCheckpoint struct {
-	Epoch    uint64
-	BlockNum uint64 // execution layer
+	Epoch     uint64
+	BlockNum  uint64
+	StateRoot phase0.Root
 }
 
 // GetFinalizedCheckpoint returns the latest finalized checkpoint.
@@ -177,17 +178,23 @@ func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoi
 			return fmt.Errorf("get execution block number: %w", err)
 		}
 
+		stateRoot, err := blockResp.Data.StateRoot()
+		if err != nil {
+			return fmt.Errorf("get state root: %w", err)
+		}
+
 		checkpoint = &FinalizedCheckpoint{
-			Epoch:    epoch,
-			BlockNum: blockNum,
+			Epoch:     epoch,
+			BlockNum:  blockNum,
+			StateRoot: stateRoot,
 		}
 		return nil
 	})
 	return checkpoint, err
 }
 
-// GetFinalizedValidatorBalances returns effective balances in Gwei for the given validators.
-func (c *Client) GetFinalizedValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
+// GetValidatorBalances returns effective balances in Gwei for the given validators.
+func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
 		return make(map[phase0.BLSPubKey]uint64), nil
 	}
@@ -216,7 +223,7 @@ func (c *Client) GetFinalizedValidatorBalances(ctx context.Context, pubkeys [][]
 		g.Go(func() error {
 			return eth.WithRetry(ctx, c.retryConfig, func() error {
 				resp, err := c.client.Validators(ctx, &api.ValidatorsOpts{
-					State:   "finalized",
+					State:   stateRoot,
 					PubKeys: batch,
 				})
 				if err != nil {
@@ -300,8 +307,14 @@ func (c *Client) handleFinalizedEvent(ctx context.Context, event *apiv1.Finalize
 		return nil, fmt.Errorf("get execution block number: %w", err)
 	}
 
+	stateRoot, err := blockResp.Data.StateRoot()
+	if err != nil {
+		return nil, fmt.Errorf("get state root: %w", err)
+	}
+
 	return &FinalizedCheckpoint{
-		Epoch:    uint64(event.Epoch),
-		BlockNum: blockNum,
+		Epoch:     uint64(event.Epoch),
+		BlockNum:  blockNum,
+		StateRoot: stateRoot,
 	}, nil
 }

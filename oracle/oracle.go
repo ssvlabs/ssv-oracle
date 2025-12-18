@@ -75,9 +75,12 @@ func (o *Oracle) Run(ctx context.Context) error {
 	fullyFinalized := checkpoint.Epoch - 1
 	o.nextTarget = o.schedule.NextTarget(fullyFinalized)
 
+	phase := o.schedule.PhaseAt(fullyFinalized)
 	logger.Infow("Oracle started",
 		"fullyFinalized", fullyFinalized,
-		"waitingFor", o.nextTarget)
+		"waitingFor", o.nextTarget,
+		"phaseStart", phase.StartEpoch,
+		"interval", phase.Interval)
 
 	// Main loop: react to finalized checkpoint events
 	for {
@@ -141,7 +144,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("sync to block %d: %w", checkpoint.BlockNum, err)
 	}
 
-	clusterBalances, err := o.fetchClusterBalances(ctx)
+	clusterBalances, err := o.fetchClusterBalances(ctx, checkpoint.StateRoot.String())
 	if err != nil {
 		return fmt.Errorf("fetch balances: %w", err)
 	}
@@ -178,7 +181,7 @@ func (o *Oracle) buildMerkleRoot(balances []storage.ClusterBalance) [32]byte {
 	return merkle.BuildMerkleTree(clusterMap)
 }
 
-func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBalance, error) {
+func (o *Oracle) fetchClusterBalances(ctx context.Context, stateRoot string) ([]storage.ClusterBalance, error) {
 	validators, err := o.storage.GetActiveValidators(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get active validators: %w", err)
@@ -192,7 +195,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBal
 	pubkeys := o.deduplicatePubkeys(validators)
 
 	start := time.Now()
-	balanceMap, err := o.beaconClient.GetFinalizedValidatorBalances(ctx, pubkeys)
+	balanceMap, err := o.beaconClient.GetValidatorBalances(ctx, stateRoot, pubkeys)
 	if err != nil {
 		return nil, fmt.Errorf("fetch validator balances: %w", err)
 	}
