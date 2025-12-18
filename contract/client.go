@@ -50,8 +50,6 @@ func NewClient(ctx context.Context, cfg *Config) (*Client, error) {
 		return nil, fmt.Errorf("signer cannot be nil")
 	}
 
-	txmanager.SetErrorSelectors(ErrorSelectors)
-
 	ethClient, err := ethclient.Dial(cfg.RPCURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Ethereum node: %w", err)
@@ -68,6 +66,7 @@ func NewClient(ctx context.Context, cfg *Config) (*Client, error) {
 		ethClient.Close()
 		return nil, fmt.Errorf("failed to create tx manager: %w", err)
 	}
+	txMgr.SetErrorSelectors(ErrorSelectors)
 
 	client := &Client{
 		ethClient:            ethClient,
@@ -126,6 +125,9 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 		Data: data,
 	}, nil)
 	if err != nil {
+		if txmanager.IsContractRevert(err) {
+			return 0, &txmanager.RevertError{Reason: err.Error(), Simulated: true}
+		}
 		return 0, fmt.Errorf("failed to call getBalance: %w", err)
 	}
 

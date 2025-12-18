@@ -192,10 +192,11 @@ func (u *Updater) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Mer
 // isStaleClusterError checks for IncorrectClusterState revert from the contract,
 // which indicates local cluster data doesn't match on-chain state.
 func isStaleClusterError(err error) bool {
-	if err == nil {
+	revertErr, ok := txmanager.IsRevertError(err)
+	if !ok {
 		return false
 	}
-	return strings.Contains(err.Error(), "IncorrectClusterState")
+	return strings.Contains(revertErr.Reason, "IncorrectClusterState")
 }
 
 func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) (processStats, bool) {

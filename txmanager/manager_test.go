@@ -6,6 +6,13 @@ import (
 	"testing"
 )
 
+// testTxManager creates a minimal TxManager for testing methods that don't need network calls.
+func testTxManager() *TxManager {
+	return &TxManager{
+		errorSelectors: make(map[string]string),
+	}
+}
+
 func TestRevertError_Error(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -79,9 +86,9 @@ func TestIsRevertError(t *testing.T) {
 	})
 }
 
-func TestDecodeErrorSelector(t *testing.T) {
-	// Set up error selectors for testing
-	SetErrorSelectors(map[string]string{
+func TestTxManager_DecodeErrorSelector(t *testing.T) {
+	m := testTxManager()
+	m.SetErrorSelectors(map[string]string{
 		"aabbccdd": "KnownError()",
 		"12345678": "AnotherError(uint256)",
 	})
@@ -103,7 +110,7 @@ func TestDecodeErrorSelector(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := decodeErrorSelector(tt.input)
+			got := m.decodeErrorSelector(tt.input)
 			if got != tt.expected {
 				t.Errorf("decodeErrorSelector(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
@@ -111,9 +118,9 @@ func TestDecodeErrorSelector(t *testing.T) {
 	}
 }
 
-func TestExtractRevertReason(t *testing.T) {
-	// Set up error selectors for testing
-	SetErrorSelectors(map[string]string{
+func TestTxManager_ExtractRevertReason(t *testing.T) {
+	m := testTxManager()
+	m.SetErrorSelectors(map[string]string{
 		"12345678": "CustomError()",
 	})
 
@@ -152,7 +159,7 @@ func TestExtractRevertReason(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := fmt.Errorf("%s", tt.errMsg)
-			got := extractRevertReason(err)
+			got := m.extractRevertReason(err)
 			if got != tt.expected {
 				t.Errorf("extractRevertReason() = %q, want %q", got, tt.expected)
 			}
@@ -160,40 +167,226 @@ func TestExtractRevertReason(t *testing.T) {
 	}
 }
 
-func TestSetErrorSelectors(t *testing.T) {
-	// Clear any existing selectors
-	SetErrorSelectors(nil)
+func TestTxManager_SetErrorSelectors(t *testing.T) {
+	m := testTxManager()
 
 	// Verify empty map behavior
-	got := decodeErrorSelector("0xaabbccdd")
+	got := m.decodeErrorSelector("0xaabbccdd")
 	if got != "0xaabbccdd" {
-		t.Errorf("Expected unchanged selector with nil map, got %q", got)
+		t.Errorf("Expected unchanged selector with empty map, got %q", got)
 	}
 
 	// Set new selectors
-	SetErrorSelectors(map[string]string{
+	m.SetErrorSelectors(map[string]string{
 		"aabbccdd": "TestError()",
 	})
 
-	got = decodeErrorSelector("0xaabbccdd")
+	got = m.decodeErrorSelector("0xaabbccdd")
 	if got != "TestError()" {
 		t.Errorf("Expected 'TestError()', got %q", got)
 	}
 
 	// Override with new map
-	SetErrorSelectors(map[string]string{
+	m.SetErrorSelectors(map[string]string{
 		"11223344": "OtherError()",
 	})
 
 	// Old selector should not work
-	got = decodeErrorSelector("0xaabbccdd")
+	got = m.decodeErrorSelector("0xaabbccdd")
 	if got != "0xaabbccdd" {
 		t.Errorf("Expected old selector to not be found, got %q", got)
 	}
 
 	// New selector should work
-	got = decodeErrorSelector("0x11223344")
+	got = m.decodeErrorSelector("0x11223344")
 	if got != "OtherError()" {
 		t.Errorf("Expected 'OtherError()', got %q", got)
+	}
+}
+
+func TestClassifyError(t *testing.T) {
+	tests := []struct {
+		name          string
+		err           error
+		wantReason    FailureReason
+		wantRetryable bool
+	}{
+		{
+			name:          "nil error",
+			err:           nil,
+			wantReason:    "",
+			wantRetryable: false,
+		},
+		{
+			name:          "revert error",
+			err:           &RevertError{Reason: "test"},
+			wantReason:    FailureRevert,
+			wantRetryable: false,
+		},
+		{
+			name:          "wrapped revert error",
+			err:           fmt.Errorf("outer: %w", &RevertError{Reason: "inner"}),
+			wantReason:    FailureRevert,
+			wantRetryable: false,
+		},
+		{
+			name:          "nonce too low",
+			err:           ErrNonceTooLow,
+			wantReason:    FailureNonce,
+			wantRetryable: false,
+		},
+		{
+			name:          "wrapped nonce too low",
+			err:           fmt.Errorf("tx failed: %w", ErrNonceTooLow),
+			wantReason:    FailureNonce,
+			wantRetryable: false,
+		},
+		{
+			name:          "insufficient funds sentinel",
+			err:           ErrInsufficientFunds,
+			wantReason:    FailureInsufficientFunds,
+			wantRetryable: false,
+		},
+		{
+			name:          "wrapped insufficient funds",
+			err:           fmt.Errorf("send failed: %w", ErrInsufficientFunds),
+			wantReason:    FailureInsufficientFunds,
+			wantRetryable: false,
+		},
+		{
+			name:          "max gas reached",
+			err:           ErrMaxGasReached,
+			wantReason:    FailureGas,
+			wantRetryable: true,
+		},
+		{
+			name:          "max retries exhausted",
+			err:           ErrMaxRetriesExhausted,
+			wantReason:    FailureTimeout,
+			wantRetryable: true,
+		},
+		{
+			name:          "network error",
+			err:           fmt.Errorf("connection refused"),
+			wantReason:    FailureTransient,
+			wantRetryable: true,
+		},
+		{
+			name:          "unknown error",
+			err:           fmt.Errorf("something unexpected"),
+			wantReason:    FailureTransient,
+			wantRetryable: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, retryable := ClassifyError(tt.err)
+			if reason != tt.wantReason {
+				t.Errorf("ClassifyError() reason = %q, want %q", reason, tt.wantReason)
+			}
+			if retryable != tt.wantRetryable {
+				t.Errorf("ClassifyError() retryable = %v, want %v", retryable, tt.wantRetryable)
+			}
+		})
+	}
+}
+
+func TestIsInsufficientFunds(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"insufficient funds", fmt.Errorf("insufficient funds for gas"), true},
+		{"insufficient balance", fmt.Errorf("insufficient balance"), true},
+		{"uppercase", fmt.Errorf("INSUFFICIENT FUNDS"), true},
+		{"mixed case", fmt.Errorf("Insufficient Balance for transfer"), true},
+		{"unrelated error", fmt.Errorf("nonce too low"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isInsufficientFunds(tt.err)
+			if got != tt.expected {
+				t.Errorf("isInsufficientFunds() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsNonceTooLow(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"nonce too low", fmt.Errorf("nonce too low"), true},
+		{"uppercase", fmt.Errorf("NONCE TOO LOW"), true},
+		{"mixed case", fmt.Errorf("Nonce Too Low: expected 5 got 3"), true},
+		{"unrelated error", fmt.Errorf("insufficient funds"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isNonceTooLow(tt.err)
+			if got != tt.expected {
+				t.Errorf("isNonceTooLow() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsTxAlreadyKnown(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"already known", fmt.Errorf("already known"), true},
+		{"uppercase", fmt.Errorf("ALREADY KNOWN"), true},
+		{"in context", fmt.Errorf("tx already known in mempool"), true},
+		{"unrelated error", fmt.Errorf("nonce too low"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTxAlreadyKnown(tt.err)
+			if got != tt.expected {
+				t.Errorf("isTxAlreadyKnown() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsContractRevert(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"execution reverted", fmt.Errorf("execution reverted: reason"), true},
+		{"uppercase execution reverted", fmt.Errorf("EXECUTION REVERTED: reason"), true},
+		{"execution reverted no reason", fmt.Errorf("execution reverted:"), true},
+		{"network error", fmt.Errorf("connection refused"), false},
+		{"timeout error", fmt.Errorf("context deadline exceeded"), false},
+		{"rpc error", fmt.Errorf("rpc error: code = 503"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsContractRevert(tt.err)
+			if got != tt.expected {
+				t.Errorf("IsContractRevert() = %v, want %v", got, tt.expected)
+			}
+		})
 	}
 }

@@ -20,24 +20,37 @@ import (
 	"ssv-oracle/wallet"
 )
 
-// Sentinel errors.
 var (
 	ErrMaxGasReached       = errors.New("max gas price reached, tx cancelled")
 	ErrMaxRetriesExhausted = errors.New("max retries exhausted")
 	ErrNonceTooLow         = errors.New("nonce too low")
+	ErrInsufficientFunds   = errors.New("insufficient funds")
 )
 
-const receiptPollInterval = 4 * time.Second
+// RPC error detection patterns (case-insensitive).
+const (
+	errPatternNonceTooLow         = "nonce too low"
+	errPatternAlreadyKnown        = "already known"
+	errPatternInsufficientFunds   = "insufficient funds"
+	errPatternInsufficientBalance = "insufficient balance"
+	errPatternExecutionReverted   = "execution reverted:"
+)
+
+const (
+	receiptPollInterval = 4 * time.Second
+	percentBase         = 100
+)
 
 // FailureReason categorizes transaction failures.
 type FailureReason string
 
 const (
-	FailureRevert    FailureReason = "revert"
-	FailureNonce     FailureReason = "nonce"
-	FailureGas       FailureReason = "gas"
-	FailureTimeout   FailureReason = "timeout"
-	FailureTransient FailureReason = "transient"
+	FailureRevert            FailureReason = "revert"
+	FailureNonce             FailureReason = "nonce"
+	FailureGas               FailureReason = "gas"
+	FailureTimeout           FailureReason = "timeout"
+	FailureInsufficientFunds FailureReason = "insufficient_funds"
+	FailureTransient         FailureReason = "transient"
 )
 
 // RevertError represents a contract call or transaction that reverted.
@@ -67,15 +80,13 @@ type TxOpts struct {
 
 // TxManager handles transaction submission, gas bumping, and cancellation.
 type TxManager struct {
-	client       *ethclient.Client
-	signer       wallet.Signer
-	chainID      *big.Int
-	policy       *TxPolicy
-	maxFeePerGas *big.Int
+	client         *ethclient.Client
+	signer         wallet.Signer
+	chainID        *big.Int
+	policy         *TxPolicy
+	maxFeePerGas   *big.Int
+	errorSelectors map[string]string
 }
-
-// errorSelectors maps 4-byte selectors to custom error names for revert decoding.
-var errorSelectors map[string]string
 
 // New creates a TxManager.
 func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, policy *TxPolicy) (*TxManager, error) {
@@ -102,12 +113,18 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 	)
 
 	return &TxManager{
-		client:       client,
-		signer:       signer,
-		chainID:      chainID,
-		policy:       policy,
-		maxFeePerGas: maxFee,
+		client:         client,
+		signer:         signer,
+		chainID:        chainID,
+		policy:         policy,
+		maxFeePerGas:   maxFee,
+		errorSelectors: make(map[string]string),
 	}, nil
+}
+
+// SetErrorSelectors configures error selectors for decoding revert reasons.
+func (m *TxManager) SetErrorSelectors(selectors map[string]string) {
+	m.errorSelectors = selectors
 }
 
 // ClassifyError returns (reason, retryable) for a transaction error.
@@ -120,6 +137,9 @@ func ClassifyError(err error) (FailureReason, bool) {
 	}
 	if errors.Is(err, ErrNonceTooLow) {
 		return FailureNonce, false
+	}
+	if errors.Is(err, ErrInsufficientFunds) {
+		return FailureInsufficientFunds, false
 	}
 	if errors.Is(err, ErrMaxGasReached) {
 		return FailureGas, true
@@ -137,11 +157,6 @@ func IsRevertError(err error) (*RevertError, bool) {
 		return revertErr, true
 	}
 	return nil, false
-}
-
-// SetErrorSelectors configures error selectors for decoding revert reasons.
-func SetErrorSelectors(selectors map[string]string) {
-	errorSelectors = selectors
 }
 
 // SendTransaction submits a transaction with automatic retries and gas bumping.
@@ -189,6 +204,9 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			}
 			if isNonceTooLow(err) {
 				return nil, fmt.Errorf("%w: %w", ErrNonceTooLow, err)
+			}
+			if isInsufficientFunds(err) {
+				return nil, fmt.Errorf("%w: %w", ErrInsufficientFunds, err)
 			}
 			if attempt < m.policy.MaxRetries {
 				logger.Warnw("Tx submission failed, retrying",
@@ -282,14 +300,8 @@ func (m *TxManager) buildAndSignTx(opts *TxOpts, nonce, gasLimit uint64, gasTipC
 // bumpGas increases gas fees by the configured percentage.
 // Returns (newTip, newFeeCap, shouldCancel).
 func (m *TxManager) bumpGas(currentTip, currentFeeCap *big.Int) (*big.Int, *big.Int, bool) {
-	bumpFactor := big.NewInt(int64(100 + m.policy.GasBumpPercent))
-	hundred := big.NewInt(100)
-
-	newTip := new(big.Int).Mul(currentTip, bumpFactor)
-	newTip.Div(newTip, hundred)
-
-	newFeeCap := new(big.Int).Mul(currentFeeCap, bumpFactor)
-	newFeeCap.Div(newFeeCap, hundred)
+	newTip := m.applyBumpPercent(currentTip)
+	newFeeCap := m.applyBumpPercent(currentFeeCap)
 
 	if newFeeCap.Cmp(m.maxFeePerGas) > 0 {
 		return nil, nil, true
@@ -298,13 +310,18 @@ func (m *TxManager) bumpGas(currentTip, currentFeeCap *big.Int) (*big.Int, *big.
 	return newTip, newFeeCap, false
 }
 
+// applyBumpPercent increases a value by the configured gas bump percentage.
+func (m *TxManager) applyBumpPercent(value *big.Int) *big.Int {
+	bumpFactor := big.NewInt(int64(percentBase + m.policy.GasBumpPercent))
+	result := new(big.Int).Mul(value, bumpFactor)
+	return result.Div(result, big.NewInt(percentBase))
+}
+
 // cancelTx sends a zero-value self-transfer to free the nonce.
 func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *big.Int) error {
 	from := m.signer.Address()
 
-	bumpFactor := big.NewInt(int64(100 + m.policy.GasBumpPercent))
-	gasFeeCap := new(big.Int).Mul(prevGasFeeCap, bumpFactor)
-	gasFeeCap.Div(gasFeeCap, big.NewInt(100))
+	gasFeeCap := m.applyBumpPercent(prevGasFeeCap)
 
 	// Cap at maxFeePerGas to respect configured limit.
 	if gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
@@ -346,7 +363,8 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 	return nil
 }
 
-// estimateGas estimates gas for the transaction, returning a RevertError if simulation fails.
+// estimateGas estimates gas for the transaction.
+// Returns RevertError for contract reverts, regular error for network/RPC failures.
 func (m *TxManager) estimateGas(ctx context.Context, opts *TxOpts) (uint64, error) {
 	if opts.GasLimit != 0 {
 		return opts.GasLimit, nil
@@ -362,11 +380,14 @@ func (m *TxManager) estimateGas(ctx context.Context, opts *TxOpts) (uint64, erro
 
 	estimated, err := m.client.EstimateGas(ctx, callMsg)
 	if err != nil {
-		reason := extractRevertReason(err)
-		return 0, &RevertError{Reason: reason, Simulated: true}
+		if IsContractRevert(err) {
+			reason := m.extractRevertReason(err)
+			return 0, &RevertError{Reason: reason, Simulated: true}
+		}
+		return 0, fmt.Errorf("failed to estimate gas: %w", err)
 	}
 
-	gasLimit := estimated * uint64(100+m.policy.GasBufferPercent) / 100
+	gasLimit := estimated * uint64(percentBase+m.policy.GasBufferPercent) / percentBase
 	logger.Debugw("Gas estimated",
 		"estimated", estimated,
 		"withBuffer", gasLimit)
@@ -406,7 +427,7 @@ func (m *TxManager) replayForRevertReason(ctx context.Context, opts *TxOpts, blo
 	if err == nil {
 		return "unknown (call succeeded on replay)"
 	}
-	return extractRevertReason(err)
+	return m.extractRevertReason(err)
 }
 
 // suggestGasFees returns suggested tip and fee cap, capped at maxFeePerGas.
@@ -468,19 +489,8 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 	}
 }
 
-// decodeErrorSelector attempts to decode a hex selector to a known error name.
-func decodeErrorSelector(reason string) string {
-	if strings.HasPrefix(reason, "0x") && len(reason) >= 10 {
-		selector := reason[2:10]
-		if name, found := errorSelectors[selector]; found {
-			return name
-		}
-	}
-	return reason
-}
-
 // extractRevertReason extracts a human-readable reason from a revert error.
-func extractRevertReason(err error) string {
+func (m *TxManager) extractRevertReason(err error) string {
 	revertData, ok := ethclient.RevertErrorData(err)
 	if ok && len(revertData) > 0 {
 		if reason, unpackErr := abi.UnpackRevert(revertData); unpackErr == nil {
@@ -488,7 +498,7 @@ func extractRevertReason(err error) string {
 		}
 		if len(revertData) >= 4 {
 			selector := hex.EncodeToString(revertData[:4])
-			if name, found := errorSelectors[selector]; found {
+			if name, found := m.errorSelectors[selector]; found {
 				return name
 			}
 		}
@@ -497,12 +507,12 @@ func extractRevertReason(err error) string {
 
 	// Some RPC clients include reason in error string
 	errStr := err.Error()
-	if strings.Contains(errStr, "execution reverted:") {
-		parts := strings.SplitN(errStr, "execution reverted:", 2)
+	if strings.Contains(errStr, errPatternExecutionReverted) {
+		parts := strings.SplitN(errStr, errPatternExecutionReverted, 2)
 		if len(parts) == 2 {
 			reason := strings.TrimSpace(parts[1])
 			if reason != "" {
-				return decodeErrorSelector(reason)
+				return m.decodeErrorSelector(reason)
 			}
 		}
 	}
@@ -510,12 +520,46 @@ func extractRevertReason(err error) string {
 	return errStr
 }
 
+// decodeErrorSelector attempts to decode a hex selector to a known error name.
+func (m *TxManager) decodeErrorSelector(reason string) string {
+	if strings.HasPrefix(reason, "0x") && len(reason) >= 10 {
+		selector := reason[2:10]
+		if name, found := m.errorSelectors[selector]; found {
+			return name
+		}
+	}
+	return reason
+}
+
+// Error detection helpers.
+
+// IsContractRevert returns true if the error is a contract revert (not a network error).
+func IsContractRevert(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := ethclient.RevertErrorData(err); ok {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), errPatternExecutionReverted)
+}
+
 // isTxAlreadyKnown returns true if the error indicates the tx is already in mempool.
 func isTxAlreadyKnown(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "already known")
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), errPatternAlreadyKnown)
 }
 
 // isNonceTooLow returns true if the error indicates the nonce was already used.
 func isNonceTooLow(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "nonce too low")
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), errPatternNonceTooLow)
+}
+
+// isInsufficientFunds returns true if the error indicates the wallet lacks funds.
+func isInsufficientFunds(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, errPatternInsufficientFunds) ||
+		strings.Contains(s, errPatternInsufficientBalance)
 }
