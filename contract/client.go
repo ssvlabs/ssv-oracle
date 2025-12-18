@@ -126,7 +126,8 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 	}, nil)
 	if err != nil {
 		if txmanager.IsContractRevert(err) {
-			return 0, &txmanager.RevertError{Reason: err.Error(), Simulated: true}
+			reason := c.txManager.ExtractRevertReason(err)
+			return 0, &txmanager.RevertError{Reason: reason, Simulated: true}
 		}
 		return 0, fmt.Errorf("failed to call getBalance: %w", err)
 	}

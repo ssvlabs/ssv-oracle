@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -189,14 +188,11 @@ func (u *Updater) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Mer
 	return merkle.BuildMerkleTreeWithProofs(clusterMap)
 }
 
-// isStaleClusterError checks for IncorrectClusterState revert from the contract,
-// which indicates local cluster data doesn't match on-chain state.
+// isStaleClusterError checks if the error indicates local cluster data doesn't match on-chain state.
+// Any revert from cluster operations is treated as potentially stale since error decoding is unreliable.
 func isStaleClusterError(err error) bool {
-	revertErr, ok := txmanager.IsRevertError(err)
-	if !ok {
-		return false
-	}
-	return strings.Contains(revertErr.Reason, "IncorrectClusterState")
+	_, ok := txmanager.IsRevertError(err)
+	return ok
 }
 
 func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) (processStats, bool) {
@@ -212,7 +208,7 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 			if isStaleClusterError(err) {
 				hadStaleData = true
 				logger.Debugw("Cluster data stale",
-					"clusterID", fmt.Sprintf("%x", leaf.ClusterID))
+					"clusterID", fmt.Sprintf("%x", leaf.ClusterID), "error", err)
 				continue
 			}
 

@@ -381,7 +381,7 @@ func (m *TxManager) estimateGas(ctx context.Context, opts *TxOpts) (uint64, erro
 	estimated, err := m.client.EstimateGas(ctx, callMsg)
 	if err != nil {
 		if IsContractRevert(err) {
-			reason := m.extractRevertReason(err)
+			reason := m.ExtractRevertReason(err)
 			return 0, &RevertError{Reason: reason, Simulated: true}
 		}
 		return 0, fmt.Errorf("failed to estimate gas: %w", err)
@@ -427,7 +427,7 @@ func (m *TxManager) replayForRevertReason(ctx context.Context, opts *TxOpts, blo
 	if err == nil {
 		return "unknown (call succeeded on replay)"
 	}
-	return m.extractRevertReason(err)
+	return m.ExtractRevertReason(err)
 }
 
 // suggestGasFees returns suggested tip and fee cap, capped at maxFeePerGas.
@@ -489,8 +489,8 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 	}
 }
 
-// extractRevertReason extracts a human-readable reason from a revert error.
-func (m *TxManager) extractRevertReason(err error) string {
+// ExtractRevertReason extracts a human-readable revert reason from an error.
+func (m *TxManager) ExtractRevertReason(err error) string {
 	revertData, ok := ethclient.RevertErrorData(err)
 	if ok && len(revertData) > 0 {
 		if reason, unpackErr := abi.UnpackRevert(revertData); unpackErr == nil {

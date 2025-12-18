@@ -159,9 +159,9 @@ func TestTxManager_ExtractRevertReason(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := fmt.Errorf("%s", tt.errMsg)
-			got := m.extractRevertReason(err)
+			got := m.ExtractRevertReason(err)
 			if got != tt.expected {
-				t.Errorf("extractRevertReason() = %q, want %q", got, tt.expected)
+				t.Errorf("ExtractRevertReason() = %q, want %q", got, tt.expected)
 			}
 		})
 	}
