@@ -11,7 +11,7 @@ import (
 // Leaf represents a single leaf in the merkle tree.
 type Leaf struct {
 	ClusterID        [32]byte
-	EffectiveBalance uint64
+	EffectiveBalance uint32
 	Hash             [32]byte
 }
 
@@ -23,14 +23,14 @@ type MerkleTree struct {
 }
 
 // BuildMerkleTree constructs a Merkle tree and returns the root.
-func BuildMerkleTree(clusters map[[32]byte]uint64) [32]byte {
+func BuildMerkleTree(clusters map[[32]byte]uint32) [32]byte {
 	tree := BuildMerkleTreeWithProofs(clusters)
 	return tree.Root
 }
 
 // BuildMerkleTreeWithProofs constructs a Merkle tree preserving all layers.
 // Uses Bitcoin/OpenZeppelin standard: duplicate odd leaves, sort siblings before hashing.
-func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint64) *MerkleTree {
+func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint32) *MerkleTree {
 	if len(clusters) == 0 {
 		return &MerkleTree{
 			Root:   crypto.Keccak256Hash([]byte{}),
@@ -135,7 +135,7 @@ func buildNextLayer(current [][32]byte) [][32]byte {
 	return next
 }
 
-func encodeLeaves(clusters map[[32]byte]uint64) []Leaf {
+func encodeLeaves(clusters map[[32]byte]uint32) []Leaf {
 	leaves := make([]Leaf, 0, len(clusters))
 	for clusterID, balance := range clusters {
 		leaves = append(leaves, Leaf{

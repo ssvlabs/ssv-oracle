@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildMerkleTree_Empty(t *testing.T) {
-	clusters := map[[32]byte]uint64{}
+	clusters := map[[32]byte]uint32{}
 
 	root := BuildMerkleTree(clusters)
 
@@ -32,14 +32,14 @@ func TestBuildMerkleTree_Empty(t *testing.T) {
 
 func TestBuildMerkleTree_SingleCluster(t *testing.T) {
 	clusterID := [32]byte{0x12, 0x34}
-	clusters := map[[32]byte]uint64{
-		clusterID: 32000000000,
+	clusters := map[[32]byte]uint32{
+		clusterID: 32,
 	}
 
 	root := BuildMerkleTree(clusters)
 
 	// Single cluster: root is just the leaf hash (no parent computation needed)
-	leaf := EncodeMerkleLeaf(clusterID, 32000000000)
+	leaf := EncodeMerkleLeaf(clusterID, 32)
 
 	if root != leaf {
 		t.Errorf("Single cluster root should equal leaf hash")
@@ -54,9 +54,9 @@ func TestBuildMerkleTree_TwoClusters(t *testing.T) {
 	cluster1 := [32]byte{0x11, 0x11}
 	cluster2 := [32]byte{0x22, 0x22}
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
-		cluster2: 31000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
+		cluster2: 31,
 	}
 
 	root := BuildMerkleTree(clusters)
@@ -76,10 +76,10 @@ func TestBuildMerkleTree_ThreeClusters(t *testing.T) {
 	cluster2 := [32]byte{0x22}
 	cluster3 := [32]byte{0x33}
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
-		cluster2: 31000000000,
-		cluster3: 32000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
+		cluster2: 31,
+		cluster3: 32,
 	}
 
 	root := BuildMerkleTree(clusters)
@@ -98,9 +98,9 @@ func TestBuildMerkleTree_Sorting(t *testing.T) {
 	cluster1 := [32]byte{0xAA} // Higher
 	cluster2 := [32]byte{0x11} // Lower
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
-		cluster2: 32000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
+		cluster2: 32,
 	}
 
 	root := BuildMerkleTree(clusters)
@@ -122,16 +122,16 @@ func TestBuildMerkleTree_DifferentOrderSameRoot(t *testing.T) {
 	cluster3 := [32]byte{0x33}
 
 	// Create same clusters in different orders
-	clusters1 := map[[32]byte]uint64{
-		cluster1: 32000000000,
-		cluster2: 31000000000,
-		cluster3: 32000000000,
+	clusters1 := map[[32]byte]uint32{
+		cluster1: 32,
+		cluster2: 31,
+		cluster3: 32,
 	}
 
-	clusters2 := map[[32]byte]uint64{
-		cluster3: 32000000000,
-		cluster1: 32000000000,
-		cluster2: 31000000000,
+	clusters2 := map[[32]byte]uint32{
+		cluster3: 32,
+		cluster1: 32,
+		cluster2: 31,
 	}
 
 	root1 := BuildMerkleTree(clusters1)
@@ -150,12 +150,12 @@ func TestBuildMerkleTree_PowerOfTwo(t *testing.T) {
 
 	for _, numClusters := range testCases {
 		t.Run(fmt.Sprintf("%d clusters", numClusters), func(t *testing.T) {
-			clusters := make(map[[32]byte]uint64)
+			clusters := make(map[[32]byte]uint32)
 
 			for i := 0; i < numClusters; i++ {
 				var clusterID [32]byte
 				clusterID[0] = byte(i)
-				clusters[clusterID] = 32000000000
+				clusters[clusterID] = 32
 			}
 
 			root := BuildMerkleTree(clusters)
@@ -177,12 +177,12 @@ func TestBuildMerkleTree_NonPowerOfTwo(t *testing.T) {
 
 	for _, numClusters := range testCases {
 		t.Run(fmt.Sprintf("%d clusters", numClusters), func(t *testing.T) {
-			clusters := make(map[[32]byte]uint64)
+			clusters := make(map[[32]byte]uint32)
 
 			for i := 0; i < numClusters; i++ {
 				var clusterID [32]byte
 				clusterID[0] = byte(i)
-				clusters[clusterID] = 32000000000
+				clusters[clusterID] = 32
 			}
 
 			root := BuildMerkleTree(clusters)
@@ -203,10 +203,10 @@ func TestBuildMerkleTreeWithProofs_Structure(t *testing.T) {
 	cluster2 := [32]byte{0x22}
 	cluster3 := [32]byte{0x33}
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
-		cluster2: 31000000000,
-		cluster3: 32000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
+		cluster2: 31,
+		cluster3: 32,
 	}
 
 	tree := BuildMerkleTreeWithProofs(clusters)
@@ -257,10 +257,10 @@ func TestBuildMerkleTreeWithProofs_MatchesBuildMerkleTree(t *testing.T) {
 	cluster2 := [32]byte{0x22}
 	cluster3 := [32]byte{0x33}
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
-		cluster2: 31000000000,
-		cluster3: 32000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
+		cluster2: 31,
+		cluster3: 32,
 	}
 
 	// Both functions should produce the same root
@@ -279,10 +279,10 @@ func TestGetProof_VerifyProof(t *testing.T) {
 	cluster2 := [32]byte{0x22}
 	cluster3 := [32]byte{0x33}
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
-		cluster2: 31000000000,
-		cluster3: 32000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
+		cluster2: 31,
+		cluster3: 32,
 	}
 
 	tree := BuildMerkleTreeWithProofs(clusters)
@@ -310,8 +310,8 @@ func TestGetProof_VerifyProof(t *testing.T) {
 func TestGetProof_NotFound(t *testing.T) {
 	cluster1 := [32]byte{0x11}
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
 	}
 
 	tree := BuildMerkleTreeWithProofs(clusters)
@@ -327,8 +327,8 @@ func TestGetProof_NotFound(t *testing.T) {
 func TestGetProof_SingleCluster(t *testing.T) {
 	cluster1 := [32]byte{0x11}
 
-	clusters := map[[32]byte]uint64{
-		cluster1: 32000000000,
+	clusters := map[[32]byte]uint32{
+		cluster1: 32,
 	}
 
 	tree := BuildMerkleTreeWithProofs(clusters)
@@ -353,12 +353,12 @@ func TestGetProof_SingleCluster(t *testing.T) {
 
 func TestGetProof_LargeTree(t *testing.T) {
 	// Test with 100 clusters
-	clusters := make(map[[32]byte]uint64)
+	clusters := make(map[[32]byte]uint32)
 	for i := 0; i < 100; i++ {
 		var clusterID [32]byte
 		clusterID[0] = byte(i)
 		clusterID[1] = byte(i >> 8)
-		clusters[clusterID] = uint64(32000000000 + i*1000000000)
+		clusters[clusterID] = uint32(32 + i)
 	}
 
 	tree := BuildMerkleTreeWithProofs(clusters)

@@ -137,8 +137,7 @@ func TestClusterBalanceUpdatedEvent_ImplementsClusterEvent(t *testing.T) {
 		Owner:            owner,
 		OperatorIDs:      operatorIDs,
 		BlockNum:         12345,
-		EffectiveBalance: big.NewInt(32000000000),
-		VUnits:           1,
+		EffectiveBalance: 32,
 		Cluster:          Cluster{},
 	}
 

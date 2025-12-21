@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -40,9 +39,9 @@ type updaterStorage interface {
 }
 
 type processStats struct {
-	updated  int
-	skipped  int
-	failures map[txmanager.FailureReason]int
+	updated int
+	skipped int
+	failed  int
 }
 
 // New creates a new Updater instance.
@@ -158,17 +157,29 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 
 	log.Info("Root validated, processing clusters")
 
-	// View calls validate cluster state for free - only sync if needed
-	stats, hadStaleData := u.processAllClusters(ctx, commit.ReferenceBlock, tree)
-	if hadStaleData {
-		log.Info("Stale cluster data detected, syncing to head and retrying")
+	stats, staleLeaves := u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+
+	if len(staleLeaves) > 0 {
+		log.Infow("Syncing for stale clusters", "count", len(staleLeaves))
 		if err := u.syncer.SyncClustersToHead(ctx); err != nil {
-			log.Errorw("Failed to sync clusters to head", "error", err)
+			log.Errorw("Failed to sync", "error", err)
 		} else {
-			var stillStale bool
-			stats, stillStale = u.processAllClusters(ctx, commit.ReferenceBlock, tree)
-			if stillStale {
-				log.Warn("Cluster data still stale after sync - on-chain state may have changed")
+			for _, leaf := range staleLeaves {
+				if ctx.Err() != nil {
+					break
+				}
+				clusterID := fmt.Sprintf("%x", leaf.ClusterID)
+				ok, err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree)
+				if err != nil {
+					stats.failed++
+					log.Warnw("Cluster still failing", "clusterID", clusterID, "error", err)
+					continue
+				}
+				if ok {
+					stats.updated++
+				} else {
+					stats.skipped++
+				}
 			}
 		}
 	}
@@ -179,53 +190,44 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 }
 
 func (u *Updater) buildMerkleTree(balances []storage.ClusterBalance) *merkle.MerkleTree {
-	clusterMap := make(map[[32]byte]uint64)
+	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte
 		copy(clusterID[:], bal.ClusterID)
-		clusterMap[clusterID] = bal.EffectiveBalance
+		clusterMap[clusterID] = uint32(bal.EffectiveBalance)
 	}
 	return merkle.BuildMerkleTreeWithProofs(clusterMap)
 }
 
-// isStaleClusterError checks if the error indicates local cluster data doesn't match on-chain state.
-// Any revert from cluster operations is treated as potentially stale since error decoding is unreliable.
-func isStaleClusterError(err error) bool {
-	_, ok := txmanager.IsRevertError(err)
-	return ok
-}
-
-func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) (processStats, bool) {
-	stats := processStats{failures: make(map[txmanager.FailureReason]int)}
-	hadStaleData := false
+func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) (processStats, []merkle.Leaf) {
+	var stats processStats
+	var staleLeaves []merkle.Leaf
 
 	for _, leaf := range tree.Leaves {
 		if ctx.Err() != nil {
 			break
 		}
+
 		ok, err := u.processCluster(ctx, blockNum, leaf, tree)
 		if err != nil {
-			if isStaleClusterError(err) {
-				hadStaleData = true
-				logger.Debugw("Cluster data stale",
-					"clusterID", fmt.Sprintf("%x", leaf.ClusterID), "error", err)
+			clusterID := fmt.Sprintf("%x", leaf.ClusterID)
+
+			if revertErr, isRevert := txmanager.IsRevertError(err); isRevert {
+				if revertErr.Reason == "IncorrectClusterState" {
+					staleLeaves = append(staleLeaves, leaf)
+					logger.Debugw("Cluster stale", "clusterID", clusterID)
+				} else {
+					stats.skipped++
+					logger.Debugw("Cluster skipped", "clusterID", clusterID, "reason", revertErr.Reason)
+				}
 				continue
 			}
 
-			reason, retryable := txmanager.ClassifyError(err)
-			stats.failures[reason]++
-
-			logFunc := logger.Warnw
-			if !retryable {
-				logFunc = logger.Errorw
-			}
-			logFunc("Failed to process cluster",
-				"clusterID", fmt.Sprintf("%x", leaf.ClusterID),
-				"reason", reason,
-				"retryable", retryable,
-				"error", err)
+			stats.failed++
+			logger.Errorw("Cluster failed", "clusterID", clusterID, "error", err)
 			continue
 		}
+
 		if ok {
 			stats.updated++
 		} else {
@@ -233,18 +235,14 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 		}
 	}
 
-	return stats, hadStaleData
+	return stats, staleLeaves
 }
 
 func (u *Updater) logStats(log logger.Logger, stats processStats) {
-	fields := []any{
+	log.Infow("Commit complete",
 		"updated", stats.updated,
 		"skipped", stats.skipped,
-	}
-	for reason, count := range stats.failures {
-		fields = append(fields, string(reason), count)
-	}
-	log.Infow("Commit complete", fields...)
+		"failed", stats.failed)
 }
 
 func toContractCluster(c *storage.ClusterRow) contract.Cluster {
@@ -313,7 +311,7 @@ func (u *Updater) submitUpdate(
 		common.BytesToAddress(cluster.OwnerAddress),
 		cluster.OperatorIDs,
 		toContractCluster(cluster),
-		new(big.Int).SetUint64(leaf.EffectiveBalance),
+		leaf.EffectiveBalance,
 		proof,
 	)
 }

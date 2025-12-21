@@ -112,7 +112,7 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum, 
 
 // GetClusterEffectiveBalance returns the effective balance for a cluster by calling
 // the getBalance function on the SSVNetworkViews contract.
-func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster Cluster) (uint64, error) {
+func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster Cluster) (uint32, error) {
 	data, err := SSVNetworkViewsABI.Pack("getBalance", owner, operatorIDs, cluster)
 	if err != nil {
 		return 0, fmt.Errorf("failed to pack getBalance: %w", err)
@@ -130,16 +130,15 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 		return 0, fmt.Errorf("failed to call getBalance: %w", err)
 	}
 
-	// Unpack returns (balance, ebBalance)
 	var output struct {
-		Balance   *big.Int
-		EbBalance *big.Int
+		Balance          *big.Int
+		EffectiveBalance uint32
 	}
 	if err := SSVNetworkViewsABI.UnpackIntoInterface(&output, "getBalance", result); err != nil {
-		return 0, fmt.Errorf("failed to unpack getBalance result: %w", err)
+		return 0, fmt.Errorf("failed to unpack getBalance: %w", err)
 	}
 
-	return output.EbBalance.Uint64(), nil
+	return output.EffectiveBalance, nil
 }
 
 // UpdateClusterBalance updates a cluster's balance using a merkle proof.
@@ -150,7 +149,7 @@ func (c *Client) UpdateClusterBalance(
 	owner common.Address,
 	operatorIds []uint64,
 	cluster Cluster,
-	effectiveBalance *big.Int,
+	effectiveBalance uint32,
 	merkleProof [][32]byte,
 ) (*types.Receipt, error) {
 	data, err := SSVNetworkABI.Pack("updateClusterBalance", blockNum, owner, operatorIds, cluster, effectiveBalance, merkleProof)

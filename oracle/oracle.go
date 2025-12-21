@@ -17,9 +17,14 @@ import (
 	"ssv-oracle/txmanager"
 )
 
-// balanceFloorGwei is 32 ETH in Gwei. Per spec, if a validator's effective balance
-// is below 32 ETH, it is rounded up to 32 ETH for cluster sum calculations.
-const balanceFloorGwei = 32_000_000_000
+const (
+	// gweiPerETH is the number of gwei in one ETH.
+	gweiPerETH = 1_000_000_000
+
+	// balanceFloorGwei is 32 ETH in Gwei. Per spec, if a validator's effective balance
+	// is below 32 ETH, it is rounded up to 32 ETH for cluster sum calculations.
+	balanceFloorGwei = 32 * gweiPerETH
+)
 
 // Config holds Oracle configuration.
 type Config struct {
@@ -172,7 +177,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 }
 
 func (o *Oracle) buildMerkleRoot(balances []storage.ClusterBalance) [32]byte {
-	clusterMap := make(map[[32]byte]uint64)
+	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte
 		copy(clusterID[:], bal.ClusterID)
@@ -248,10 +253,10 @@ func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanc
 	}
 
 	var result []storage.ClusterBalance
-	for clusterID, total := range clusterTotals {
+	for clusterID, totalGwei := range clusterTotals {
 		result = append(result, storage.ClusterBalance{
 			ClusterID:        clusterID[:],
-			EffectiveBalance: total,
+			EffectiveBalance: uint32(totalGwei / gweiPerETH),
 		})
 	}
 

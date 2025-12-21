@@ -418,8 +418,8 @@ func TestStorage_OracleCommit(t *testing.T) {
 	referenceBlock := uint64(500000)
 
 	clusterBalances := []ClusterBalance{
-		{ClusterID: make([]byte, 32), EffectiveBalance: 32000000000},
-		{ClusterID: make([]byte, 32), EffectiveBalance: 64000000000},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64},
 	}
 	clusterBalances[0].ClusterID[0] = 0x01
 	clusterBalances[1].ClusterID[0] = 0x02

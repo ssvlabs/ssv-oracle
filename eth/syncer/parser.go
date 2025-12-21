@@ -223,10 +223,11 @@ func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigrate
 	event.Owner = common.BytesToAddress(log.Topics[1].Bytes())
 
 	var result struct {
-		OperatorIds  []uint64
-		ETHDeposited *big.Int
-		SSVRefunded  *big.Int
-		Cluster      Cluster
+		OperatorIds      []uint64
+		ETHDeposited     *big.Int
+		SSVRefunded      *big.Int
+		EffectiveBalance uint32
+		Cluster          Cluster
 	}
 
 	err := p.abi.UnpackIntoInterface(&result, EventClusterMigratedToETH, log.Data)
@@ -237,6 +238,7 @@ func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigrate
 	event.OperatorIDs = result.OperatorIds
 	event.ETHDeposited = result.ETHDeposited
 	event.SSVRefunded = result.SSVRefunded
+	event.EffectiveBalance = result.EffectiveBalance
 	event.Cluster = result.Cluster
 
 	return event, nil
@@ -253,8 +255,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 
 	var result struct {
 		OperatorIDs      []uint64
-		EffectiveBalance *big.Int
-		VUnits           uint64
+		EffectiveBalance uint32
 		Cluster          Cluster
 	}
 
@@ -265,7 +266,6 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 
 	event.OperatorIDs = result.OperatorIDs
 	event.EffectiveBalance = result.EffectiveBalance
-	event.VUnits = result.VUnits
 	event.Cluster = result.Cluster
 
 	return event, nil

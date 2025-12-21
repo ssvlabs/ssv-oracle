@@ -71,7 +71,7 @@ func TestProcessCommit_RootMismatch(t *testing.T) {
 	// Create a cluster balance but with wrong root
 	clusterID := [32]byte{0x01}
 	clusterBalances := []storage.ClusterBalance{
-		{ClusterID: clusterID[:], EffectiveBalance: 32000000000},
+		{ClusterID: clusterID[:], EffectiveBalance: 32},
 	}
 
 	commit := &storage.OracleCommit{
@@ -105,14 +105,13 @@ func TestProcessCommit_ValidRootNoContractClient(t *testing.T) {
 		Balance:        big.NewInt(1000),
 	}
 
-	// Build tree with same data
-	clusterMap := map[[32]byte]uint64{
-		clusterID: 32000000000,
+	clusterMap := map[[32]byte]uint32{
+		clusterID: 32,
 	}
 	tree := merkle.BuildMerkleTreeWithProofs(clusterMap)
 
 	clusterBalances := []storage.ClusterBalance{
-		{ClusterID: clusterID[:], EffectiveBalance: 32000000000},
+		{ClusterID: clusterID[:], EffectiveBalance: 32},
 	}
 
 	commit := &storage.OracleCommit{

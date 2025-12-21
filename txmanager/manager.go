@@ -41,18 +41,6 @@ const (
 	percentBase         = 100
 )
 
-// FailureReason categorizes transaction failures.
-type FailureReason string
-
-const (
-	FailureRevert            FailureReason = "revert"
-	FailureNonce             FailureReason = "nonce"
-	FailureGas               FailureReason = "gas"
-	FailureTimeout           FailureReason = "timeout"
-	FailureInsufficientFunds FailureReason = "insufficient_funds"
-	FailureTransient         FailureReason = "transient"
-)
-
 // RevertError represents a contract call or transaction that reverted.
 type RevertError struct {
 	Reason    string
@@ -125,29 +113,6 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 // SetErrorSelectors configures error selectors for decoding revert reasons.
 func (m *TxManager) SetErrorSelectors(selectors map[string]string) {
 	m.errorSelectors = selectors
-}
-
-// ClassifyError returns (reason, retryable) for a transaction error.
-func ClassifyError(err error) (FailureReason, bool) {
-	if err == nil {
-		return "", false
-	}
-	if _, ok := IsRevertError(err); ok {
-		return FailureRevert, false
-	}
-	if errors.Is(err, ErrNonceTooLow) {
-		return FailureNonce, false
-	}
-	if errors.Is(err, ErrInsufficientFunds) {
-		return FailureInsufficientFunds, false
-	}
-	if errors.Is(err, ErrMaxGasReached) {
-		return FailureGas, true
-	}
-	if errors.Is(err, ErrMaxRetriesExhausted) {
-		return FailureTimeout, true
-	}
-	return FailureTransient, true
 }
 
 // IsRevertError returns the RevertError if err wraps one.

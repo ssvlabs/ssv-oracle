@@ -71,7 +71,7 @@ type ActiveValidator struct {
 // ClusterBalance represents a cluster's aggregated effective balance.
 type ClusterBalance struct {
 	ClusterID        []byte
-	EffectiveBalance uint64
+	EffectiveBalance uint32
 }
 
 // CommitStatus represents the status of an oracle commit.
