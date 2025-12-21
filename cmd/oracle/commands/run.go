@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"os/signal"
 	"syscall"
 
@@ -98,7 +99,8 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 	defer execClient.Close()
 
-	if err := validateChainID(ctx, store, execClient); err != nil {
+	chainID, err := validateChainID(ctx, store, execClient)
+	if err != nil {
 		return err
 	}
 
@@ -115,11 +117,12 @@ func run(_ *cobra.Command, _ []string) error {
 		SSVContract:     common.HexToAddress(cfg.SSVContract),
 	})
 
-	ethClient, err := contract.NewClient(ctx, &contract.Config{
+	ethClient, err := contract.NewClient(&contract.Config{
 		RPCURL:               cfg.EthRPC,
 		WSRPCURL:             cfg.EthWSRPC,
 		ContractAddress:      cfg.SSVContract,
 		ViewsContractAddress: cfg.SSVViewsContract,
+		ChainID:              chainID,
 		Signer:               signer,
 		TxPolicy:             &cfg.TxPolicy,
 	})
@@ -128,34 +131,41 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 	defer ethClient.Close()
 
-	return runServices(ctx, cfg, store, ethClient, eventSyncer, beaconClient)
+	err = runServices(ctx, cfg, store, ethClient, eventSyncer, beaconClient)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		logger.Errorw("Shutdown complete", "error", err)
+		return err
+	}
+
+	logger.Info("Shutdown complete")
+	return nil
 }
 
-func validateChainID(ctx context.Context, store *storage.Storage, execClient *execution.Client) error {
+func validateChainID(ctx context.Context, store *storage.Storage, execClient *execution.Client) (*big.Int, error) {
 	chainID, err := execClient.GetChainID(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get chain ID: %w", err)
+		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 	logger.Infow("Connected to chain", "chainID", chainID)
 
 	dbChainID, err := store.GetChainID(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get chain ID from database: %w", err)
+		return nil, fmt.Errorf("failed to get chain ID from database: %w", err)
 	}
 
 	if dbChainID == nil {
 		if err := store.SetChainID(ctx, chainID.Uint64()); err != nil {
-			return fmt.Errorf("failed to store chain ID: %w", err)
+			return nil, fmt.Errorf("failed to store chain ID: %w", err)
 		}
 		logger.Infow("Stored chain ID", "chainID", chainID)
-		return nil
+		return chainID, nil
 	}
 
 	if *dbChainID != chainID.Uint64() {
-		return fmt.Errorf("chain ID mismatch: database=%d, RPC=%d (use --fresh)", *dbChainID, chainID)
+		return nil, fmt.Errorf("chain ID mismatch: database=%d, RPC=%d (use --fresh)", *dbChainID, chainID)
 	}
 
-	return nil
+	return chainID, nil
 }
 
 func runServices(
@@ -196,14 +206,5 @@ func runServices(
 		})
 	}
 
-	err := g.Wait()
-	if ctx.Err() != nil {
-		logger.Info("Received shutdown signal")
-	}
-	if err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-
-	logger.Info("Shutdown complete")
-	return nil
+	return g.Wait()
 }

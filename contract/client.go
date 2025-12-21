@@ -40,12 +40,16 @@ type Config struct {
 	WSRPCURL             string
 	ContractAddress      string
 	ViewsContractAddress string
+	ChainID              *big.Int
 	Signer               wallet.Signer
 	TxPolicy             *txmanager.TxPolicy
 }
 
-// NewClient creates a contract client with auto-detected chain ID.
-func NewClient(ctx context.Context, cfg *Config) (*Client, error) {
+// NewClient creates a contract client.
+func NewClient(cfg *Config) (*Client, error) {
+	if cfg.ChainID == nil {
+		return nil, fmt.Errorf("chain ID cannot be nil")
+	}
 	if cfg.Signer == nil {
 		return nil, fmt.Errorf("signer cannot be nil")
 	}
@@ -55,13 +59,7 @@ func NewClient(ctx context.Context, cfg *Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to connect to Ethereum node: %w", err)
 	}
 
-	chainID, err := ethClient.ChainID(ctx)
-	if err != nil {
-		ethClient.Close()
-		return nil, fmt.Errorf("failed to get chain ID: %w", err)
-	}
-
-	txMgr, err := txmanager.New(ethClient, cfg.Signer, chainID, cfg.TxPolicy)
+	txMgr, err := txmanager.New(ethClient, cfg.Signer, cfg.ChainID, cfg.TxPolicy)
 	if err != nil {
 		ethClient.Close()
 		return nil, fmt.Errorf("failed to create tx manager: %w", err)
@@ -73,7 +71,7 @@ func NewClient(ctx context.Context, cfg *Config) (*Client, error) {
 		contractAddress:      common.HexToAddress(cfg.ContractAddress),
 		viewsContractAddress: common.HexToAddress(cfg.ViewsContractAddress),
 		txManager:            txMgr,
-		chainID:              chainID,
+		chainID:              cfg.ChainID,
 	}
 
 	if cfg.WSRPCURL != "" {

@@ -1,7 +1,7 @@
 # Multi-stage build for minimal production image
 
 # Build stage
-FROM golang:1.25.5-alpine AS builder
+FROM golang:1.25.5-alpine@sha256:72567335df90b4ed71c01bf91fb5f8cc09fc4d5f6f21e183a085bafc7ae1bec8 AS builder
 
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
@@ -19,23 +19,25 @@ RUN BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ') && \
     -o ssv-oracle \
     ./cmd/oracle
 
-# Runtime stage
-FROM alpine:3.20
+# Create config directory
+RUN mkdir -p /config
+
+# Runtime stage - scratch for minimal attack surface
+FROM scratch
 
 LABEL org.opencontainers.image.title="SSV Oracle" \
       org.opencontainers.image.description="Oracle client for SSV Network cluster balance updates" \
       org.opencontainers.image.vendor="SSV Labs" \
       org.opencontainers.image.source="https://github.com/ssvlabs/ssv-oracle"
 
-RUN apk --no-cache add ca-certificates && \
-    addgroup -g 1000 oracle && \
-    adduser -D -u 1000 -G oracle oracle && \
-    mkdir /config && chown oracle:oracle /config
+# Copy CA certificates for HTTPS connections
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-COPY --from=builder /build/ssv-oracle /usr/local/bin/
+COPY --from=builder /build/ssv-oracle /usr/local/bin/ssv-oracle
+COPY --from=builder /config /config
 
-USER oracle
-WORKDIR /home/oracle
+# Run as non-root user (numeric UID/GID for scratch)
+USER 1000:1000
 
-ENTRYPOINT ["ssv-oracle"]
+ENTRYPOINT ["/usr/local/bin/ssv-oracle"]
 CMD ["run", "--config", "/config/config.yaml"]
