@@ -189,17 +189,17 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 	return nil
 }
 
-func (u *Updater) buildMerkleTree(balances []storage.ClusterBalance) *merkle.MerkleTree {
+func (u *Updater) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree {
 	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte
 		copy(clusterID[:], bal.ClusterID)
-		clusterMap[clusterID] = uint32(bal.EffectiveBalance)
+		clusterMap[clusterID] = bal.EffectiveBalance
 	}
-	return merkle.BuildMerkleTreeWithProofs(clusterMap)
+	return merkle.NewTree(clusterMap)
 }
 
-func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.MerkleTree) (processStats, []merkle.Leaf) {
+func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.Tree) (processStats, []merkle.Leaf) {
 	var stats processStats
 	var staleLeaves []merkle.Leaf
 
@@ -255,7 +255,7 @@ func toContractCluster(c *storage.ClusterRow) contract.Cluster {
 	}
 }
 
-func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.MerkleTree) (bool, error) {
+func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.Tree) (bool, error) {
 	clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
 	cluster, err := u.storage.GetCluster(ctx, leaf.ClusterID[:])

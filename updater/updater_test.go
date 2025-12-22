@@ -48,7 +48,7 @@ func TestProcessCommit_EmptyClusters(t *testing.T) {
 	u := &Updater{storage: store}
 
 	// Build empty tree to get the correct root
-	emptyRoot := merkle.BuildMerkleTree(nil)
+	emptyRoot := merkle.NewTree(nil).Root
 
 	commit := &storage.OracleCommit{
 		RoundID:         1,
@@ -108,7 +108,7 @@ func TestProcessCommit_ValidRootNoContractClient(t *testing.T) {
 	clusterMap := map[[32]byte]uint32{
 		clusterID: 32,
 	}
-	tree := merkle.BuildMerkleTreeWithProofs(clusterMap)
+	tree := merkle.NewTree(clusterMap)
 
 	clusterBalances := []storage.ClusterBalance{
 		{ClusterID: clusterID[:], EffectiveBalance: 32},

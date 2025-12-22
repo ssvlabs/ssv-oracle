@@ -14,9 +14,9 @@ func init() {
 	}
 }
 
-// EncodeLeafHash computes the double-hashed leaf for OpenZeppelin StandardMerkleTree.
+// HashLeaf computes the double-hashed leaf for OpenZeppelin StandardMerkleTree.
 // Returns keccak256(keccak256(abi.encode(clusterID, effectiveBalance))).
-func EncodeLeafHash(clusterID [32]byte, effectiveBalance uint32) [32]byte {
+func HashLeaf(clusterID [32]byte, effectiveBalance uint32) [32]byte {
 	data, err := leafABI.Pack(clusterID, effectiveBalance)
 	if err != nil {
 		panic(err)

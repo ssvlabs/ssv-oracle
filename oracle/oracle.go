@@ -154,7 +154,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("fetch balances: %w", err)
 	}
 
-	merkleRoot := o.buildMerkleRoot(clusterBalances)
+	merkleRoot := o.buildMerkleTree(clusterBalances).Root
 	log.Infow("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", merkleRoot),
 		"clusters", len(clusterBalances))
@@ -176,14 +176,14 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 	return nil
 }
 
-func (o *Oracle) buildMerkleRoot(balances []storage.ClusterBalance) [32]byte {
+func (o *Oracle) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree {
 	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte
 		copy(clusterID[:], bal.ClusterID)
 		clusterMap[clusterID] = bal.EffectiveBalance
 	}
-	return merkle.BuildMerkleTree(clusterMap)
+	return merkle.NewTree(clusterMap)
 }
 
 func (o *Oracle) fetchClusterBalances(ctx context.Context, stateRoot string) ([]storage.ClusterBalance, error) {

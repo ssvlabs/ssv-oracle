@@ -9,33 +9,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildMerkleTree_Empty(t *testing.T) {
-	root := BuildMerkleTree(nil)
+func TestNewTree_Empty(t *testing.T) {
+	tree := NewTree(nil)
 	expected, _ := hex.DecodeString("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
-	require.Equal(t, expected, root[:])
+	require.Equal(t, expected, tree.Root[:])
 }
 
-func TestBuildMerkleTree_SingleCluster(t *testing.T) {
+func TestNewTree_SingleCluster(t *testing.T) {
 	clusterID := [32]byte{0x12, 0x34}
 	clusters := map[[32]byte]uint32{clusterID: 32}
 
-	root := BuildMerkleTree(clusters)
-	require.Equal(t, EncodeLeafHash(clusterID, 32), root)
+	tree := NewTree(clusters)
+	require.Equal(t, HashLeaf(clusterID, 32), tree.Root)
 }
 
-func TestBuildMerkleTree_Deterministic(t *testing.T) {
+func TestNewTree_Deterministic(t *testing.T) {
 	clusters := map[[32]byte]uint32{
 		{0x11}: 32,
 		{0x22}: 31,
 		{0x33}: 32,
 	}
 
-	root1 := BuildMerkleTree(clusters)
-	root2 := BuildMerkleTree(clusters)
+	root1 := NewTree(clusters).Root
+	root2 := NewTree(clusters).Root
 	require.Equal(t, root1, root2)
 }
 
-func TestBuildMerkleTree_VariousSizes(t *testing.T) {
+func TestNewTree_VariousSizes(t *testing.T) {
 	for _, n := range []int{2, 3, 4, 5, 7, 8, 100} {
 		t.Run("", func(t *testing.T) {
 			clusters := make(map[[32]byte]uint32)
@@ -43,22 +43,22 @@ func TestBuildMerkleTree_VariousSizes(t *testing.T) {
 				clusters[[32]byte{byte(i)}] = 32
 			}
 
-			root1 := BuildMerkleTree(clusters)
-			root2 := BuildMerkleTree(clusters)
+			root1 := NewTree(clusters).Root
+			root2 := NewTree(clusters).Root
 			require.Equal(t, root1, root2)
 			require.NotEqual(t, root1, [32]byte{})
 		})
 	}
 }
 
-func TestBuildMerkleTreeWithProofs_LeavesSortedByHash(t *testing.T) {
+func TestNewTree_LeavesSortedByHash(t *testing.T) {
 	clusters := map[[32]byte]uint32{
 		{0x11}: 32,
 		{0x22}: 31,
 		{0x33}: 32,
 	}
 
-	tree := BuildMerkleTreeWithProofs(clusters)
+	tree := NewTree(clusters)
 	require.Len(t, tree.Leaves, 3)
 
 	for i := 1; i < len(tree.Leaves); i++ {
@@ -73,7 +73,7 @@ func TestGetProof_Verify(t *testing.T) {
 		{0x33}: 32,
 	}
 
-	tree := BuildMerkleTreeWithProofs(clusters)
+	tree := NewTree(clusters)
 
 	for _, leaf := range tree.Leaves {
 		proof, err := tree.GetProof(leaf.ClusterID)
@@ -86,7 +86,7 @@ func TestGetProof_Verify(t *testing.T) {
 
 func TestGetProof_SingleCluster(t *testing.T) {
 	clusters := map[[32]byte]uint32{{0x11}: 32}
-	tree := BuildMerkleTreeWithProofs(clusters)
+	tree := NewTree(clusters)
 
 	proof, err := tree.GetProof([32]byte{0x11})
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestGetProof_SingleCluster(t *testing.T) {
 }
 
 func TestGetProof_NotFound(t *testing.T) {
-	tree := BuildMerkleTreeWithProofs(map[[32]byte]uint32{{0x11}: 32})
+	tree := NewTree(map[[32]byte]uint32{{0x11}: 32})
 
 	_, err := tree.GetProof([32]byte{0xFF})
 	require.Error(t, err)
@@ -109,7 +109,7 @@ func TestGetProof_LargeTree(t *testing.T) {
 		clusters[[32]byte{byte(i), byte(i >> 8)}] = uint32(32 + i)
 	}
 
-	tree := BuildMerkleTreeWithProofs(clusters)
+	tree := NewTree(clusters)
 
 	for _, leaf := range tree.Leaves {
 		proof, err := tree.GetProof(leaf.ClusterID)

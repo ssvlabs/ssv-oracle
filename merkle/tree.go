@@ -15,24 +15,19 @@ type Leaf struct {
 	Hash             [32]byte
 }
 
-// MerkleTree holds the tree structure for root computation and proof generation.
-type MerkleTree struct {
+// Tree holds the structure for root computation and proof generation.
+type Tree struct {
 	Root   [32]byte
 	Leaves []Leaf
 	layers [][][32]byte
 }
 
-// BuildMerkleTree builds a tree and returns the root hash.
-func BuildMerkleTree(clusters map[[32]byte]uint32) [32]byte {
-	return BuildMerkleTreeWithProofs(clusters).Root
-}
-
-// BuildMerkleTreeWithProofs builds a tree that supports proof generation.
+// NewTree builds a merkle tree from cluster balances.
 // Implements OpenZeppelin StandardMerkleTree: double-hashed leaves, sorted by hash,
 // with sibling pairs sorted before hashing.
-func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint32) *MerkleTree {
+func NewTree(clusters map[[32]byte]uint32) *Tree {
 	if len(clusters) == 0 {
-		return &MerkleTree{Root: crypto.Keccak256Hash(nil)}
+		return &Tree{Root: crypto.Keccak256Hash(nil)}
 	}
 
 	leaves := makeLeaves(clusters)
@@ -41,11 +36,11 @@ func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint32) *MerkleTree {
 	})
 
 	if len(leaves) == 1 {
-		return &MerkleTree{Root: leaves[0].Hash, Leaves: leaves}
+		return &Tree{Root: leaves[0].Hash, Leaves: leaves}
 	}
 
 	layers := buildLayers(leaves)
-	return &MerkleTree{
+	return &Tree{
 		Root:   layers[len(layers)-1][0],
 		Leaves: leaves,
 		layers: layers,
@@ -53,7 +48,7 @@ func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint32) *MerkleTree {
 }
 
 // GetProof returns the merkle proof (sibling hashes from leaf to root).
-func (t *MerkleTree) GetProof(clusterID [32]byte) ([][32]byte, error) {
+func (t *Tree) GetProof(clusterID [32]byte) ([][32]byte, error) {
 	idx := t.findLeaf(clusterID)
 	if idx < 0 {
 		return nil, fmt.Errorf("cluster %x not found", clusterID)
@@ -70,7 +65,7 @@ func (t *MerkleTree) GetProof(clusterID [32]byte) ([][32]byte, error) {
 	return proof, nil
 }
 
-func (t *MerkleTree) findLeaf(clusterID [32]byte) int {
+func (t *Tree) findLeaf(clusterID [32]byte) int {
 	for i, leaf := range t.Leaves {
 		if leaf.ClusterID == clusterID {
 			return i
@@ -79,7 +74,7 @@ func (t *MerkleTree) findLeaf(clusterID [32]byte) int {
 	return -1
 }
 
-func (t *MerkleTree) sibling(layer, idx int) [32]byte {
+func (t *Tree) sibling(layer, idx int) [32]byte {
 	hashes := t.layers[layer]
 	if idx%2 == 0 {
 		if idx+1 < len(hashes) {
@@ -96,7 +91,7 @@ func makeLeaves(clusters map[[32]byte]uint32) []Leaf {
 		leaves = append(leaves, Leaf{
 			ClusterID:        id,
 			EffectiveBalance: balance,
-			Hash:             EncodeLeafHash(id, balance),
+			Hash:             HashLeaf(id, balance),
 		})
 	}
 	return leaves
