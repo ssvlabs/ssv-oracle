@@ -8,70 +8,69 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Leaf represents a single leaf in the merkle tree.
+// Leaf represents a merkle tree leaf with cluster data and its hash.
 type Leaf struct {
 	ClusterID        [32]byte
 	EffectiveBalance uint32
 	Hash             [32]byte
 }
 
-// MerkleTree holds the full tree structure for proof generation.
+// MerkleTree holds the tree structure for root computation and proof generation.
 type MerkleTree struct {
 	Root   [32]byte
 	Leaves []Leaf
-	Layers [][][32]byte
+	layers [][][32]byte
 }
 
-// BuildMerkleTree constructs a Merkle tree and returns the root.
+// BuildMerkleTree builds a tree and returns the root hash.
 func BuildMerkleTree(clusters map[[32]byte]uint32) [32]byte {
-	tree := BuildMerkleTreeWithProofs(clusters)
-	return tree.Root
+	return BuildMerkleTreeWithProofs(clusters).Root
 }
 
-// BuildMerkleTreeWithProofs constructs a Merkle tree preserving all layers.
-// Uses Bitcoin/OpenZeppelin standard: duplicate odd leaves, sort siblings before hashing.
+// BuildMerkleTreeWithProofs builds a tree that supports proof generation.
+// Implements OpenZeppelin StandardMerkleTree: double-hashed leaves, sorted by hash,
+// with sibling pairs sorted before hashing.
 func BuildMerkleTreeWithProofs(clusters map[[32]byte]uint32) *MerkleTree {
 	if len(clusters) == 0 {
-		return &MerkleTree{
-			Root:   crypto.Keccak256Hash([]byte{}),
-			Leaves: nil,
-			Layers: nil,
-		}
+		return &MerkleTree{Root: crypto.Keccak256Hash(nil)}
 	}
 
-	leaves := encodeLeaves(clusters)
-	sortLeavesByClusterID(leaves)
+	leaves := makeLeaves(clusters)
+	sort.Slice(leaves, func(i, j int) bool {
+		return bytes.Compare(leaves[i].Hash[:], leaves[j].Hash[:]) < 0
+	})
 
-	hashes := extractHashes(leaves)
-	layers := buildLayers(hashes)
+	if len(leaves) == 1 {
+		return &MerkleTree{Root: leaves[0].Hash, Leaves: leaves}
+	}
 
+	layers := buildLayers(leaves)
 	return &MerkleTree{
 		Root:   layers[len(layers)-1][0],
 		Leaves: leaves,
-		Layers: layers,
+		layers: layers,
 	}
 }
 
-// GetProof returns the merkle proof for a cluster (sibling hashes from leaf to root).
+// GetProof returns the merkle proof (sibling hashes from leaf to root).
 func (t *MerkleTree) GetProof(clusterID [32]byte) ([][32]byte, error) {
-	leafIndex := t.findLeafIndex(clusterID)
-	if leafIndex == -1 {
-		return nil, fmt.Errorf("cluster %x not found in tree", clusterID)
+	idx := t.findLeaf(clusterID)
+	if idx < 0 {
+		return nil, fmt.Errorf("cluster %x not found", clusterID)
+	}
+	if len(t.layers) == 0 {
+		return nil, nil
 	}
 
-	var proof [][32]byte
-	index := leafIndex
-
-	for layer := 0; layer < len(t.Layers)-1; layer++ {
-		sibling := t.getSibling(layer, index)
-		proof = append(proof, sibling)
-		index /= 2
+	proof := make([][32]byte, 0, len(t.layers)-1)
+	for layer := 0; layer < len(t.layers)-1; layer++ {
+		proof = append(proof, t.sibling(layer, idx))
+		idx /= 2
 	}
-
 	return proof, nil
 }
 
-func (t *MerkleTree) findLeafIndex(clusterID [32]byte) int {
+func (t *MerkleTree) findLeaf(clusterID [32]byte) int {
 	for i, leaf := range t.Leaves {
 		if leaf.ClusterID == clusterID {
 			return i
@@ -80,83 +79,61 @@ func (t *MerkleTree) findLeafIndex(clusterID [32]byte) int {
 	return -1
 }
 
-func (t *MerkleTree) getSibling(layer, index int) [32]byte {
-	levelHashes := t.Layers[layer]
-
-	var siblingIndex int
-	if index%2 == 0 {
-		siblingIndex = index + 1
-	} else {
-		siblingIndex = index - 1
-	}
-
-	if siblingIndex < len(levelHashes) {
-		return levelHashes[siblingIndex]
-	}
-	return levelHashes[index]
-}
-
-func buildLayers(hashes [][32]byte) [][][32]byte {
-	var layers [][][32]byte
-	layers = append(layers, hashes)
-
-	current := hashes
-	for len(current) > 1 {
-		next := buildNextLayer(current)
-		layers = append(layers, next)
-		current = next
-	}
-
-	return layers
-}
-
-func buildNextLayer(current [][32]byte) [][32]byte {
-	next := make([][32]byte, 0, (len(current)+1)/2)
-
-	for i := 0; i < len(current); i += 2 {
-		left := current[i]
-		right := left
-		if i+1 < len(current) {
-			right = current[i+1]
+func (t *MerkleTree) sibling(layer, idx int) [32]byte {
+	hashes := t.layers[layer]
+	if idx%2 == 0 {
+		if idx+1 < len(hashes) {
+			return hashes[idx+1]
 		}
-
-		// OpenZeppelin: sort siblings before hashing
-		if bytes.Compare(left[:], right[:]) > 0 {
-			left, right = right, left
-		}
-
-		combined := make([]byte, 64)
-		copy(combined[0:32], left[:])
-		copy(combined[32:64], right[:])
-
-		next = append(next, crypto.Keccak256Hash(combined))
+		return hashes[idx]
 	}
-
-	return next
+	return hashes[idx-1]
 }
 
-func encodeLeaves(clusters map[[32]byte]uint32) []Leaf {
+func makeLeaves(clusters map[[32]byte]uint32) []Leaf {
 	leaves := make([]Leaf, 0, len(clusters))
-	for clusterID, balance := range clusters {
+	for id, balance := range clusters {
 		leaves = append(leaves, Leaf{
-			ClusterID:        clusterID,
+			ClusterID:        id,
 			EffectiveBalance: balance,
-			Hash:             EncodeMerkleLeaf(clusterID, balance),
+			Hash:             EncodeLeafHash(id, balance),
 		})
 	}
 	return leaves
 }
 
-func extractHashes(leaves []Leaf) [][32]byte {
+func buildLayers(leaves []Leaf) [][][32]byte {
 	hashes := make([][32]byte, len(leaves))
 	for i, leaf := range leaves {
 		hashes[i] = leaf.Hash
 	}
-	return hashes
+
+	layers := [][][32]byte{hashes}
+	for len(hashes) > 1 {
+		hashes = hashLevel(hashes)
+		layers = append(layers, hashes)
+	}
+	return layers
 }
 
-func sortLeavesByClusterID(leaves []Leaf) {
-	sort.Slice(leaves, func(i, j int) bool {
-		return bytes.Compare(leaves[i].ClusterID[:], leaves[j].ClusterID[:]) < 0
-	})
+func hashLevel(hashes [][32]byte) [][32]byte {
+	next := make([][32]byte, (len(hashes)+1)/2)
+	for i := 0; i < len(hashes); i += 2 {
+		left, right := hashes[i], hashes[i]
+		if i+1 < len(hashes) {
+			right = hashes[i+1]
+		}
+		next[i/2] = hashPair(left, right)
+	}
+	return next
+}
+
+func hashPair(a, b [32]byte) [32]byte {
+	if bytes.Compare(a[:], b[:]) > 0 {
+		a, b = b, a
+	}
+	var buf [64]byte
+	copy(buf[:32], a[:])
+	copy(buf[32:], b[:])
+	return crypto.Keccak256Hash(buf[:])
 }

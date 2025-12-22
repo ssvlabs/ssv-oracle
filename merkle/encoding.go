@@ -5,29 +5,29 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-var leafArguments abi.Arguments
+var leafABI abi.Arguments
 
 func init() {
-	bytes32Type, err := abi.NewType("bytes32", "", nil)
-	if err != nil {
-		panic("failed to create bytes32 ABI type: " + err.Error())
-	}
-	uint32Type, err := abi.NewType("uint32", "", nil)
-	if err != nil {
-		panic("failed to create uint32 ABI type: " + err.Error())
-	}
-	leafArguments = abi.Arguments{
-		{Type: bytes32Type},
-		{Type: uint32Type},
+	leafABI = abi.Arguments{
+		{Type: mustType("bytes32")},
+		{Type: mustType("uint32")},
 	}
 }
 
-// EncodeMerkleLeaf encodes a cluster balance into a Merkle leaf hash.
-// Uses Solidity abi.encode(bytes32 clusterId, uint32 effectiveBalance).
-func EncodeMerkleLeaf(clusterID [32]byte, effectiveBalance uint32) [32]byte {
-	encoded, err := leafArguments.Pack(clusterID, effectiveBalance)
+// EncodeLeafHash computes the double-hashed leaf for OpenZeppelin StandardMerkleTree.
+// Returns keccak256(keccak256(abi.encode(clusterID, effectiveBalance))).
+func EncodeLeafHash(clusterID [32]byte, effectiveBalance uint32) [32]byte {
+	data, err := leafABI.Pack(clusterID, effectiveBalance)
 	if err != nil {
-		panic("failed to encode merkle leaf: " + err.Error())
+		panic(err)
 	}
-	return crypto.Keccak256Hash(encoded)
+	return crypto.Keccak256Hash(crypto.Keccak256(data))
+}
+
+func mustType(t string) abi.Type {
+	typ, err := abi.NewType(t, "", nil)
+	if err != nil {
+		panic(err)
+	}
+	return typ
 }
