@@ -51,14 +51,14 @@ func New(cfg Config) *EventSyncer {
 func (s *EventSyncer) SyncToFinalized(ctx context.Context, deployBlock uint64) error {
 	lastSynced, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get last synced block: %w", err)
+		return fmt.Errorf("get last synced block: %w", err)
 	}
 
 	if lastSynced == 0 {
 		logger.Infow("First run: setting initial sync position", "block", deployBlock-1)
 		err = s.storage.UpdateLastSyncedBlock(ctx, deployBlock-1)
 		if err != nil {
-			return fmt.Errorf("failed to set initial sync block: %w", err)
+			return fmt.Errorf("set initial sync block: %w", err)
 		}
 	}
 
@@ -69,7 +69,7 @@ func (s *EventSyncer) SyncToFinalized(ctx context.Context, deployBlock uint64) e
 func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error {
 	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get last synced block: %w", err)
+		return fmt.Errorf("get last synced block: %w", err)
 	}
 
 	if fromBlock >= targetBlock {
@@ -98,7 +98,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 		for _, blockLogs := range logs {
 			count, err := s.processBlockLogs(ctx, blockLogs)
 			if err != nil {
-				return fmt.Errorf("failed to process block %d: %w", blockLogs.BlockNumber, err)
+				return fmt.Errorf("process block %d: %w", blockLogs.BlockNumber, err)
 			}
 			knownEvents += count
 		}
@@ -110,14 +110,14 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 		// we don't re-scan empty block ranges on restart.
 		// Note: Per-block tx already updates progress for blocks WITH events.
 		if err := s.storage.UpdateLastSyncedBlock(ctx, batchEnd); err != nil {
-			return fmt.Errorf("failed to update sync progress: %w", err)
+			return fmt.Errorf("update sync progress: %w", err)
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to fetch logs: %w", err)
+		return fmt.Errorf("fetch logs: %w", err)
 	}
 
 	_ = bar.Finish()
@@ -130,7 +130,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 func (s *EventSyncer) syncOnce(ctx context.Context) error {
 	finalizedBlock, err := s.client.GetFinalizedBlock(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get finalized block: %w", err)
+		return fmt.Errorf("get finalized block: %w", err)
 	}
 	return s.SyncToBlock(ctx, finalizedBlock)
 }
@@ -140,7 +140,7 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
 	tx, err := s.storage.BeginTx(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to begin tx: %w", err)
+		return 0, fmt.Errorf("begin tx: %w", err)
 	}
 
 	committed := false
@@ -154,7 +154,7 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.
 	for _, log := range blockLogs.Logs {
 		known, err := s.processLog(ctx, tx, &log, blockLogs)
 		if err != nil {
-			return 0, fmt.Errorf("failed to process log at index %d: %w", log.Index, err)
+			return 0, fmt.Errorf("process log at index %d: %w", log.Index, err)
 		}
 		if known {
 			knownEvents++
@@ -163,11 +163,11 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.
 
 	// Update sync progress atomically with events
 	if err := tx.UpdateLastSyncedBlock(ctx, blockLogs.BlockNumber); err != nil {
-		return 0, fmt.Errorf("failed to update sync progress: %w", err)
+		return 0, fmt.Errorf("update sync progress: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("failed to commit tx: %w", err)
+		return 0, fmt.Errorf("commit tx: %w", err)
 	}
 	committed = true
 
@@ -184,12 +184,12 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 
 	rawLog, err := EncodeLogToJSON(log)
 	if err != nil {
-		return false, fmt.Errorf("failed to encode raw log: %w", err)
+		return false, fmt.Errorf("encode raw log: %w", err)
 	}
 
 	rawEvent, err := EncodeEventToJSON(eventData)
 	if err != nil {
-		return false, fmt.Errorf("failed to encode event: %w", err)
+		return false, fmt.Errorf("encode event: %w", err)
 	}
 
 	contractEvent := &storage.ContractEvent{
@@ -205,11 +205,11 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 	}
 
 	if err := tx.InsertEvent(ctx, contractEvent); err != nil {
-		return false, fmt.Errorf("failed to insert event: %w", err)
+		return false, fmt.Errorf("insert event: %w", err)
 	}
 
 	if err := s.applyEvent(ctx, tx, eventType, eventData); err != nil {
-		return false, fmt.Errorf("failed to apply event: %w", err)
+		return false, fmt.Errorf("apply event: %w", err)
 	}
 
 	return true, nil
@@ -227,7 +227,7 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *typ
 
 	rawLog, err := EncodeLogToJSON(log)
 	if err != nil {
-		return fmt.Errorf("failed to encode raw log: %w", err)
+		return fmt.Errorf("encode raw log: %w", err)
 	}
 
 	errMsg := parseErr.Error()
@@ -368,12 +368,12 @@ func computeClusterIDFromEvent(eventData any) []byte {
 func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get last synced block: %w", err)
+		return fmt.Errorf("get last synced block: %w", err)
 	}
 
 	headBlock, err := s.client.GetHeadBlock(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get head block: %w", err)
+		return fmt.Errorf("get head block: %w", err)
 	}
 
 	if fromBlock >= headBlock {

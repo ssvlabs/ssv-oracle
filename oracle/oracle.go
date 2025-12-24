@@ -67,7 +67,7 @@ func New(cfg *Config) *Oracle {
 func (o *Oracle) Run(ctx context.Context) error {
 	finalizedCh, err := o.beaconClient.SubscribeFinalizedCheckpoints(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to finalized checkpoints: %w", err)
+		return fmt.Errorf("subscribe to finalized checkpoints: %w", err)
 	}
 	logger.Info("Subscribed to finalized checkpoint events")
 
@@ -75,7 +75,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 	// so the previous epoch (Epoch - 1) is fully finalized.
 	checkpoint, err := o.beaconClient.GetFinalizedCheckpoint(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get initial checkpoint: %w", err)
+		return fmt.Errorf("get initial checkpoint: %w", err)
 	}
 	fullyFinalized := checkpoint.Epoch - 1
 	o.nextTarget = o.schedule.NextTarget(fullyFinalized)

@@ -56,13 +56,13 @@ func NewClient(cfg *Config) (*Client, error) {
 
 	ethClient, err := ethclient.Dial(cfg.RPCURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Ethereum node: %w", err)
+		return nil, fmt.Errorf("dial RPC: %w", err)
 	}
 
 	txMgr, err := txmanager.New(ethClient, cfg.Signer, cfg.ChainID, cfg.TxPolicy)
 	if err != nil {
 		ethClient.Close()
-		return nil, fmt.Errorf("failed to create tx manager: %w", err)
+		return nil, fmt.Errorf("create tx manager: %w", err)
 	}
 	txMgr.SetErrorSelectors(ErrorSelectors)
 
@@ -78,7 +78,7 @@ func NewClient(cfg *Config) (*Client, error) {
 		wsClient, err := ethclient.Dial(cfg.WSRPCURL)
 		if err != nil {
 			ethClient.Close()
-			return nil, fmt.Errorf("failed to connect to WebSocket endpoint: %w", err)
+			return nil, fmt.Errorf("dial WebSocket: %w", err)
 		}
 		client.wsClient = wsClient
 		logger.Infow("WebSocket client connected", "url", cfg.WSRPCURL)
@@ -101,7 +101,7 @@ func (c *Client) Close() {
 func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum, roundID, targetEpoch uint64) (*types.Receipt, error) {
 	data, err := SSVNetworkABI.Pack("commitRoot", merkleRoot, blockNum)
 	if err != nil {
-		return nil, fmt.Errorf("failed to pack commitRoot: %w", err)
+		return nil, fmt.Errorf("pack commitRoot: %w", err)
 	}
 
 	return c.txManager.SendTransaction(ctx, &txmanager.TxOpts{
@@ -114,7 +114,7 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum, 
 func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster Cluster) (uint32, error) {
 	data, err := SSVNetworkViewsABI.Pack("getEffectiveBalance", owner, operatorIDs, cluster)
 	if err != nil {
-		return 0, fmt.Errorf("failed to pack getEffectiveBalance: %w", err)
+		return 0, fmt.Errorf("pack getEffectiveBalance: %w", err)
 	}
 
 	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{
@@ -126,12 +126,12 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 			reason := c.txManager.ExtractRevertReason(err)
 			return 0, &txmanager.RevertError{Reason: reason, Simulated: true}
 		}
-		return 0, fmt.Errorf("failed to call getEffectiveBalance: %w", err)
+		return 0, fmt.Errorf("call getEffectiveBalance: %w", err)
 	}
 
 	var effectiveBalance uint32
 	if err := SSVNetworkViewsABI.UnpackIntoInterface(&effectiveBalance, "getEffectiveBalance", result); err != nil {
-		return 0, fmt.Errorf("failed to unpack getEffectiveBalance: %w", err)
+		return 0, fmt.Errorf("unpack getEffectiveBalance: %w", err)
 	}
 
 	return effectiveBalance, nil
@@ -150,7 +150,7 @@ func (c *Client) UpdateClusterBalance(
 ) (*types.Receipt, error) {
 	data, err := SSVNetworkABI.Pack("updateClusterBalance", blockNum, owner, operatorIds, cluster, effectiveBalance, merkleProof)
 	if err != nil {
-		return nil, fmt.Errorf("failed to pack updateClusterBalance: %w", err)
+		return nil, fmt.Errorf("pack updateClusterBalance: %w", err)
 	}
 
 	return c.txManager.SendTransaction(ctx, &txmanager.TxOpts{

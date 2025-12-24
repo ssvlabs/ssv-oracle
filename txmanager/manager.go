@@ -88,7 +88,7 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 
 	maxFee, err := policy.ParseMaxFeePerGas()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse max_fee_per_gas: %w", err)
+		return nil, fmt.Errorf("parse max_fee_per_gas: %w", err)
 	}
 
 	logger.Infow("Transaction policy",
@@ -135,12 +135,12 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 	gasTipCap, gasFeeCap, err := m.suggestGasFees(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get gas price: %w", err)
+		return nil, fmt.Errorf("get gas fees: %w", err)
 	}
 
 	nonce, err := m.client.PendingNonceAt(ctx, from)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get nonce: %w", err)
+		return nil, fmt.Errorf("get nonce: %w", err)
 	}
 
 	value := opts.Value
@@ -184,7 +184,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 				}
 				continue
 			}
-			return nil, fmt.Errorf("failed to send tx: %w", err)
+			return nil, fmt.Errorf("send tx: %w", err)
 		}
 
 		logger.Infow("Tx submitted",
@@ -257,7 +257,7 @@ func (m *TxManager) buildAndSignTx(opts *TxOpts, nonce, gasLimit uint64, gasTipC
 	})
 	signedTx, err := m.signer.Sign(tx, m.chainID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign tx: %w", err)
+		return nil, fmt.Errorf("sign tx: %w", err)
 	}
 	return signedTx, nil
 }
@@ -305,11 +305,11 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 
 	signedTx, err := m.signer.Sign(tx, m.chainID)
 	if err != nil {
-		return fmt.Errorf("failed to sign cancel tx: %w", err)
+		return fmt.Errorf("sign cancel tx: %w", err)
 	}
 
 	if err := m.client.SendTransaction(ctx, signedTx); err != nil {
-		return fmt.Errorf("failed to send cancel tx: %w", err)
+		return fmt.Errorf("send cancel tx: %w", err)
 	}
 
 	logger.Infow("Cancel tx submitted",
@@ -349,7 +349,7 @@ func (m *TxManager) estimateGas(ctx context.Context, opts *TxOpts) (uint64, erro
 			reason := m.ExtractRevertReason(err)
 			return 0, &RevertError{Reason: reason, Simulated: true}
 		}
-		return 0, fmt.Errorf("failed to estimate gas: %w", err)
+		return 0, fmt.Errorf("estimate gas: %w", err)
 	}
 
 	gasLimit := estimated * uint64(percentBase+m.policy.GasBufferPercent) / percentBase
@@ -399,12 +399,12 @@ func (m *TxManager) replayForRevertReason(ctx context.Context, opts *TxOpts, blo
 func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, error) {
 	gasTipCap, err := m.client.SuggestGasTipCap(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get gas tip cap: %w", err)
+		return nil, nil, fmt.Errorf("get gas tip cap: %w", err)
 	}
 
 	header, err := m.client.HeaderByNumber(ctx, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get latest header: %w", err)
+		return nil, nil, fmt.Errorf("get latest header: %w", err)
 	}
 
 	// EIP-1559: gasFeeCap = 2*baseFee + gasTipCap
@@ -425,7 +425,7 @@ func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, err
 func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (*types.Receipt, error) {
 	startBlock, err := m.client.BlockNumber(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get block number: %w", err)
+		return nil, fmt.Errorf("get block number: %w", err)
 	}
 
 	ticker := time.NewTicker(receiptPollInterval)

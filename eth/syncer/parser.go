@@ -82,7 +82,7 @@ func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent,
 
 	err := p.abi.UnpackIntoInterface(&result, EventValidatorAdded, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ValidatorAdded: %w", err)
+		return nil, fmt.Errorf("unpack ValidatorAdded: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -109,7 +109,7 @@ func (p *EventParser) parseValidatorRemoved(log *types.Log) (*ValidatorRemovedEv
 
 	err := p.abi.UnpackIntoInterface(&result, EventValidatorRemoved, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ValidatorRemoved: %w", err)
+		return nil, fmt.Errorf("unpack ValidatorRemoved: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -134,7 +134,7 @@ func (p *EventParser) parseClusterLiquidated(log *types.Log) (*ClusterLiquidated
 
 	err := p.abi.UnpackIntoInterface(&result, EventClusterLiquidated, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ClusterLiquidated: %w", err)
+		return nil, fmt.Errorf("unpack ClusterLiquidated: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -158,7 +158,7 @@ func (p *EventParser) parseClusterReactivated(log *types.Log) (*ClusterReactivat
 
 	err := p.abi.UnpackIntoInterface(&result, EventClusterReactivated, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ClusterReactivated: %w", err)
+		return nil, fmt.Errorf("unpack ClusterReactivated: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -183,7 +183,7 @@ func (p *EventParser) parseClusterWithdrawn(log *types.Log) (*ClusterWithdrawnEv
 
 	err := p.abi.UnpackIntoInterface(&result, EventClusterWithdrawn, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ClusterWithdrawn: %w", err)
+		return nil, fmt.Errorf("unpack ClusterWithdrawn: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -209,7 +209,7 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 
 	err := p.abi.UnpackIntoInterface(&result, EventClusterDeposited, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ClusterDeposited: %w", err)
+		return nil, fmt.Errorf("unpack ClusterDeposited: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -237,7 +237,7 @@ func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigrate
 
 	err := p.abi.UnpackIntoInterface(&result, EventClusterMigratedToETH, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ClusterMigratedToETH: %w", err)
+		return nil, fmt.Errorf("unpack ClusterMigratedToETH: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -266,7 +266,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 
 	err := p.abi.UnpackIntoInterface(&result, EventClusterBalanceUpdated, log.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack ClusterBalanceUpdated: %w", err)
+		return nil, fmt.Errorf("unpack ClusterBalanceUpdated: %w", err)
 	}
 
 	event.OperatorIDs = result.OperatorIds
@@ -280,7 +280,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 func EncodeEventToJSON(event any) (json.RawMessage, error) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal event: %w", err)
+		return nil, fmt.Errorf("marshal event: %w", err)
 	}
 	return data, nil
 }
@@ -299,7 +299,7 @@ func EncodeLogToJSON(log *types.Log) (json.RawMessage, error) {
 
 	data, err := json.Marshal(logData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal log: %w", err)
+		return nil, fmt.Errorf("marshal log: %w", err)
 	}
 
 	return data, nil

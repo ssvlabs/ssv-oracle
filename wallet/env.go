@@ -36,7 +36,7 @@ func NewEnvSigner(envVarName string) (*EnvSigner, error) {
 
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(keyHex, "0x"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key from %s: %w", envVarName, err)
+		return nil, fmt.Errorf("parse private key from %s: %w", envVarName, err)
 	}
 
 	return &EnvSigner{

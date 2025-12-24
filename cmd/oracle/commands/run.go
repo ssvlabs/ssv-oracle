@@ -56,7 +56,7 @@ func run(_ *cobra.Command, _ []string) error {
 
 	signer, err := wallet.NewSigner(&cfg.Wallet)
 	if err != nil {
-		return fmt.Errorf("failed to create signer: %w", err)
+		return fmt.Errorf("create signer: %w", err)
 	}
 	defer func() { _ = signer.Close() }()
 
@@ -79,14 +79,14 @@ func run(_ *cobra.Command, _ []string) error {
 
 	store, err := storage.New(cfg.DBPath)
 	if err != nil {
-		return fmt.Errorf("failed to create storage: %w", err)
+		return fmt.Errorf("create storage: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 
 	if freshStart {
 		logger.Info("Fresh start: clearing database")
 		if err := store.ClearAllState(ctx); err != nil {
-			return fmt.Errorf("failed to clear database: %w", err)
+			return fmt.Errorf("clear database: %w", err)
 		}
 	}
 
@@ -95,7 +95,7 @@ func run(_ *cobra.Command, _ []string) error {
 		FetchLogsBatchSize: cfg.SyncBatchSize,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create execution client: %w", err)
+		return fmt.Errorf("create execution client: %w", err)
 	}
 	defer execClient.Close()
 
@@ -108,7 +108,7 @@ func run(_ *cobra.Command, _ []string) error {
 		URL: cfg.BeaconRPC,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create beacon client: %w", err)
+		return fmt.Errorf("create beacon client: %w", err)
 	}
 
 	eventSyncer := syncer.New(syncer.Config{
@@ -127,7 +127,7 @@ func run(_ *cobra.Command, _ []string) error {
 		TxPolicy:             &cfg.TxPolicy,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create contract client: %w", err)
+		return fmt.Errorf("create contract client: %w", err)
 	}
 	defer ethClient.Close()
 
@@ -144,18 +144,18 @@ func run(_ *cobra.Command, _ []string) error {
 func validateChainID(ctx context.Context, store *storage.Storage, execClient *execution.Client) (*big.Int, error) {
 	chainID, err := execClient.GetChainID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID: %w", err)
+		return nil, fmt.Errorf("get chain ID: %w", err)
 	}
 	logger.Infow("Connected to chain", "chainID", chainID)
 
 	dbChainID, err := store.GetChainID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID from database: %w", err)
+		return nil, fmt.Errorf("get chain ID from database: %w", err)
 	}
 
 	if dbChainID == nil {
 		if err := store.SetChainID(ctx, chainID.Uint64()); err != nil {
-			return nil, fmt.Errorf("failed to store chain ID: %w", err)
+			return nil, fmt.Errorf("store chain ID: %w", err)
 		}
 		logger.Infow("Stored chain ID", "chainID", chainID)
 		return chainID, nil
@@ -178,7 +178,7 @@ func runServices(
 ) error {
 	logger.Info("Syncing SSV contract events")
 	if err := eventSyncer.SyncToFinalized(ctx, cfg.SSVContractDeployBlock); err != nil {
-		return fmt.Errorf("initial sync failed: %w", err)
+		return fmt.Errorf("initial sync: %w", err)
 	}
 
 	oracleInstance := oracle.New(&oracle.Config{

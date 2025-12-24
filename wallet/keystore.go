@@ -27,17 +27,17 @@ func NewKeystoreSigner(keystorePath, passwordEnv, passwordFile string) (*Keystor
 
 	password, err := readPassword(passwordEnv, passwordFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read password: %w", err)
+		return nil, fmt.Errorf("read password: %w", err)
 	}
 
 	keyjson, err := os.ReadFile(keystorePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read keystore file: %w", err)
+		return nil, fmt.Errorf("read keystore file: %w", err)
 	}
 
 	key, err := keystore.DecryptKey(keyjson, password)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt keystore: %w", err)
+		return nil, fmt.Errorf("decrypt keystore: %w", err)
 	}
 
 	return &KeystoreSigner{
@@ -74,7 +74,7 @@ func readPassword(passwordEnv, passwordFile string) (string, error) {
 	if passwordFile != "" {
 		data, err := os.ReadFile(passwordFile)
 		if err != nil {
-			return "", fmt.Errorf("failed to read password file: %w", err)
+			return "", fmt.Errorf("read password file: %w", err)
 		}
 		return strings.TrimSpace(string(data)), nil
 	}

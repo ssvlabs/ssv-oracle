@@ -37,7 +37,7 @@ type ClientConfig struct {
 func New(cfg ClientConfig) (*Client, error) {
 	rpcClient, err := rpc.Dial(cfg.URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial RPC: %w", err)
+		return nil, fmt.Errorf("dial RPC: %w", err)
 	}
 
 	client := ethclient.NewClient(rpcClient)
@@ -73,7 +73,7 @@ func (c *Client) GetFinalizedBlock(ctx context.Context) (uint64, error) {
 		return err
 	})
 	if err != nil {
-		return 0, fmt.Errorf("failed to get finalized block: %w", err)
+		return 0, fmt.Errorf("get finalized block: %w", err)
 	}
 	return result.Number.Uint64(), nil
 }
@@ -87,7 +87,7 @@ func (c *Client) GetHeadBlock(ctx context.Context) (uint64, error) {
 		return err
 	})
 	if err != nil {
-		return 0, fmt.Errorf("failed to get head block: %w", err)
+		return 0, fmt.Errorf("get head block: %w", err)
 	}
 	return result.Number.Uint64(), nil
 }
@@ -101,7 +101,7 @@ func (c *Client) GetBlockByNumber(ctx context.Context, number uint64) (*types.He
 		return err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get block %d: %w", number, err)
+		return nil, fmt.Errorf("get block %d: %w", number, err)
 	}
 	return result, nil
 }
@@ -188,7 +188,7 @@ func (c *Client) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, e
 	// Fetch all block timestamps in a single batch RPC call
 	blockTimes, err := c.getBlockTimestampsBatch(ctx, uniqueBlocks)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch block timestamps: %w", err)
+		return nil, fmt.Errorf("fetch block timestamps: %w", err)
 	}
 
 	// Group logs by block
@@ -237,14 +237,14 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 		return c.rpcClient.BatchCallContext(ctx, batch)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("batch RPC failed: %w", err)
+		return nil, fmt.Errorf("batch RPC: %w", err)
 	}
 
 	// Process results
 	blockTimes := make(map[uint64]time.Time)
 	for i, elem := range batch {
 		if elem.Error != nil {
-			return nil, fmt.Errorf("failed to get block %d: %w", blockNumbers[i], elem.Error)
+			return nil, fmt.Errorf("get block %d: %w", blockNumbers[i], elem.Error)
 		}
 		if results[i] == nil {
 			return nil, fmt.Errorf("nil result for block %d", blockNumbers[i])
@@ -274,7 +274,7 @@ func (c *Client) fetchLogsBatch(
 		return err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch logs [%d-%d]: %w", fromBlock, toBlock, err)
+		return nil, fmt.Errorf("fetch logs [%d-%d]: %w", fromBlock, toBlock, err)
 	}
 	return logs, nil
 }
@@ -288,7 +288,7 @@ func (c *Client) GetChainID(ctx context.Context) (*big.Int, error) {
 		return err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID: %w", err)
+		return nil, fmt.Errorf("get chain ID: %w", err)
 	}
 	return chainID, nil
 }

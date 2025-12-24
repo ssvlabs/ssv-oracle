@@ -113,17 +113,17 @@ type Storage struct {
 func New(dbPath string) (*Storage, error) {
 	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("failed to create db directory: %w", err)
+			return nil, fmt.Errorf("create db directory: %w", err)
 		}
 	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("open database: %w", err)
 	}
 
 	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
 	// WAL mode for concurrent reads, NORMAL sync for durability without excessive fsync
@@ -136,7 +136,7 @@ func New(dbPath string) (*Storage, error) {
 	}
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
-			return nil, fmt.Errorf("failed to set %s: %w", pragma, err)
+			return nil, fmt.Errorf("set %s: %w", pragma, err)
 		}
 	}
 
@@ -144,7 +144,7 @@ func New(dbPath string) (*Storage, error) {
 	db.SetConnMaxLifetime(time.Hour)
 
 	if _, err := db.Exec(schemaSQL); err != nil {
-		return nil, fmt.Errorf("failed to apply schema: %w", err)
+		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 	logger.Info("Database schema applied")
 
@@ -161,7 +161,7 @@ func (s *Storage) GetChainID(ctx context.Context) (*uint64, error) {
 	var chainID *uint64
 	err := s.db.QueryRowContext(ctx, `SELECT chain_id FROM sync_progress WHERE id = 1`).Scan(&chainID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID: %w", err)
+		return nil, fmt.Errorf("get chain ID: %w", err)
 	}
 	return chainID, nil
 }
@@ -170,7 +170,7 @@ func (s *Storage) GetChainID(ctx context.Context) (*uint64, error) {
 func (s *Storage) SetChainID(ctx context.Context, chainID uint64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE sync_progress SET chain_id = ?, updated_at = datetime('now') WHERE id = 1`, chainID)
 	if err != nil {
-		return fmt.Errorf("failed to set chain ID: %w", err)
+		return fmt.Errorf("set chain ID: %w", err)
 	}
 	return nil
 }
@@ -180,7 +180,7 @@ func (s *Storage) GetLastSyncedBlock(ctx context.Context) (uint64, error) {
 	var blockNum uint64
 	err := s.db.QueryRowContext(ctx, `SELECT last_synced_block FROM sync_progress WHERE id = 1`).Scan(&blockNum)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get last synced block: %w", err)
+		return 0, fmt.Errorf("get last synced block: %w", err)
 	}
 	return blockNum, nil
 }
@@ -226,7 +226,7 @@ func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to get cluster: %w", err)
+		return nil, fmt.Errorf("get cluster: %w", err)
 	}
 
 	operatorIDs, err := decodeOperatorIDs(operatorIDsJSON)
@@ -264,7 +264,7 @@ func (s *Storage) GetActiveValidators(ctx context.Context) ([]ActiveValidator, e
 	`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get active validators: %w", err)
+		return nil, fmt.Errorf("query active validators: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -272,7 +272,7 @@ func (s *Storage) GetActiveValidators(ctx context.Context) ([]ActiveValidator, e
 	for rows.Next() {
 		var v ActiveValidator
 		if err := rows.Scan(&v.ClusterID, &v.ValidatorPubkey); err != nil {
-			return nil, fmt.Errorf("failed to scan validator: %w", err)
+			return nil, fmt.Errorf("scan validator row: %w", err)
 		}
 		validators = append(validators, v)
 	}
@@ -283,7 +283,7 @@ func (s *Storage) GetActiveValidators(ctx context.Context) ([]ActiveValidator, e
 func (s *Storage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ClusterBalance) error {
 	balancesJSON, err := json.Marshal(clusterBalances)
 	if err != nil {
-		return fmt.Errorf("failed to marshal cluster balances: %w", err)
+		return fmt.Errorf("marshal cluster balances: %w", err)
 	}
 
 	query := `
@@ -293,7 +293,7 @@ func (s *Storage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch 
 	`
 	result, err := s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
 	if err != nil {
-		return fmt.Errorf("failed to insert oracle commit: %w", err)
+		return fmt.Errorf("insert oracle commit: %w", err)
 	}
 	if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
 		logger.Warnw("Duplicate round_id, commit ignored", "roundID", roundID)
@@ -306,7 +306,7 @@ func (s *Storage) UpdateCommitStatus(ctx context.Context, roundID uint64, status
 	query := `UPDATE oracle_commits SET status = ?, tx_hash = ? WHERE round_id = ?`
 	_, err := s.db.ExecContext(ctx, query, status, txHash, roundID)
 	if err != nil {
-		return fmt.Errorf("failed to update commit status: %w", err)
+		return fmt.Errorf("update commit status: %w", err)
 	}
 	return nil
 }
@@ -325,12 +325,12 @@ func (s *Storage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*Oracl
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to get commit: %w", err)
+		return nil, fmt.Errorf("get commit: %w", err)
 	}
 	c.Status = CommitStatus(status)
 	if balancesJSON != nil {
 		if err := json.Unmarshal(balancesJSON, &c.ClusterBalances); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal cluster balances: %w", err)
+			return nil, fmt.Errorf("unmarshal cluster balances: %w", err)
 		}
 	}
 	return &c, nil
@@ -340,7 +340,7 @@ func (s *Storage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*Oracl
 func (s *Storage) ClearAllState(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -352,17 +352,17 @@ func (s *Storage) ClearAllState(ctx context.Context) error {
 	tables := []string{"oracle_commits", "validators", "clusters", "contract_events"}
 	for _, table := range tables {
 		if _, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", table)); err != nil {
-			return fmt.Errorf("failed to clear %s: %w", table, err)
+			return fmt.Errorf("clear %s: %w", table, err)
 		}
 	}
 
 	_, err = tx.ExecContext(ctx, `UPDATE sync_progress SET chain_id = NULL, last_synced_block = 0, updated_at = datetime('now') WHERE id = 1`)
 	if err != nil {
-		return fmt.Errorf("failed to reset sync progress: %w", err)
+		return fmt.Errorf("reset sync progress: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	logger.Info("Database cleared")
 	return nil
@@ -372,7 +372,7 @@ func (s *Storage) ClearAllState(ctx context.Context) error {
 func (s *Storage) BeginTx(ctx context.Context) (Tx, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	return &storageTx{tx: tx}, nil
 }
@@ -423,7 +423,7 @@ func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 		string(event.RawLog), string(event.RawEvent), event.Error,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to insert event: %w", err)
+		return fmt.Errorf("insert event: %w", err)
 	}
 	return nil
 }
@@ -454,7 +454,7 @@ func upsertCluster(ctx context.Context, e executor, cluster *ClusterRow) error {
 		boolToInt(cluster.IsActive), cluster.Balance.String(),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to upsert cluster: %w", err)
+		return fmt.Errorf("upsert cluster: %w", err)
 	}
 	return nil
 }
@@ -462,7 +462,7 @@ func upsertCluster(ctx context.Context, e executor, cluster *ClusterRow) error {
 func deleteCluster(ctx context.Context, e executor, clusterID []byte) error {
 	_, err := e.ExecContext(ctx, `DELETE FROM clusters WHERE cluster_id = ?`, clusterID)
 	if err != nil {
-		return fmt.Errorf("failed to delete cluster: %w", err)
+		return fmt.Errorf("delete cluster: %w", err)
 	}
 	return nil
 }
@@ -476,7 +476,7 @@ func insertValidator(ctx context.Context, e executor, clusterID, pubkey []byte) 
 		clusterID, pubkey,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to insert validator: %w", err)
+		return fmt.Errorf("insert validator: %w", err)
 	}
 	return nil
 }
@@ -487,7 +487,7 @@ func deleteValidator(ctx context.Context, e executor, clusterID, pubkey []byte) 
 		clusterID, pubkey,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to delete validator: %w", err)
+		return fmt.Errorf("delete validator: %w", err)
 	}
 	return nil
 }
@@ -495,7 +495,7 @@ func deleteValidator(ctx context.Context, e executor, clusterID, pubkey []byte) 
 func updateLastSyncedBlock(ctx context.Context, e executor, blockNum uint64) error {
 	_, err := e.ExecContext(ctx, `UPDATE sync_progress SET last_synced_block = ?, updated_at = datetime('now') WHERE id = 1`, blockNum)
 	if err != nil {
-		return fmt.Errorf("failed to update last synced block: %w", err)
+		return fmt.Errorf("update last synced block: %w", err)
 	}
 	return nil
 }
@@ -514,7 +514,7 @@ func intToBool(i int) bool {
 func encodeOperatorIDs(ids []uint64) (string, error) {
 	data, err := json.Marshal(ids)
 	if err != nil {
-		return "", fmt.Errorf("failed to encode operator IDs: %w", err)
+		return "", fmt.Errorf("encode operator IDs: %w", err)
 	}
 	return string(data), nil
 }
@@ -522,7 +522,7 @@ func encodeOperatorIDs(ids []uint64) (string, error) {
 func decodeOperatorIDs(data string) ([]uint64, error) {
 	var ids []uint64
 	if err := json.Unmarshal([]byte(data), &ids); err != nil {
-		return nil, fmt.Errorf("failed to decode operator IDs: %w", err)
+		return nil, fmt.Errorf("decode operator IDs: %w", err)
 	}
 	return ids, nil
 }
@@ -546,7 +546,7 @@ func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow
 		cluster.ClusterID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update cluster: %w", err)
+		return fmt.Errorf("update cluster: %w", err)
 	}
 	return nil
 }

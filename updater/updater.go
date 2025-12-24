@@ -78,7 +78,7 @@ func (u *Updater) Run(ctx context.Context) error {
 func (u *Updater) subscribeAndProcess(ctx context.Context) error {
 	events, errChan, err := u.contractClient.SubscribeRootCommitted(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
+		return fmt.Errorf("subscribe: %w", err)
 	}
 
 	logger.Info("Subscribed to RootCommitted events")
@@ -274,7 +274,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 
 	cluster, err := u.storage.GetCluster(ctx, leaf.ClusterID[:])
 	if err != nil {
-		return false, fmt.Errorf("failed to get cluster: %w", err)
+		return false, fmt.Errorf("get cluster: %w", err)
 	}
 	if cluster == nil {
 		logger.Debugw("Cluster not found, skipping", "clusterID", clusterID)
@@ -283,13 +283,13 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 
 	proof, err := tree.GetProof(leaf.ClusterID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get proof: %w", err)
+		return false, fmt.Errorf("get proof: %w", err)
 	}
 
 	owner := common.BytesToAddress(cluster.OwnerAddress)
 	currentBalance, err := u.contractClient.GetClusterEffectiveBalance(ctx, owner, cluster.OperatorIDs, toContractCluster(cluster))
 	if err != nil {
-		return false, fmt.Errorf("failed to check current balance: %w", err)
+		return false, fmt.Errorf("get current balance: %w", err)
 	}
 	if currentBalance == leaf.EffectiveBalance {
 		logger.Debugw("Balance unchanged, skipping",

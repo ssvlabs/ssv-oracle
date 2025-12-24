@@ -45,7 +45,7 @@ func (c *Client) SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) 
 	logs := make(chan types.Log, 10)
 	sub, err := c.wsClient.SubscribeFilterLogs(ctx, query, logs)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to subscribe to logs: %w", err)
+		return nil, nil, fmt.Errorf("subscribe to logs: %w", err)
 	}
 
 	eventChan := make(chan *RootCommittedEvent, 10)

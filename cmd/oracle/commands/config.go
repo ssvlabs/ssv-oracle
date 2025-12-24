@@ -76,11 +76,11 @@ func loadConfig(path string, withUpdater bool) (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config %s: %w", path, err)
+		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config %s: %w", path, err)
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
 	if err := cfg.Validate(withUpdater); err != nil {
