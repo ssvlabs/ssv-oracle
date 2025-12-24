@@ -19,7 +19,8 @@ func init() {
 }
 
 // Init initializes the global logger.
-func Init(development bool) {
+// The level parameter sets the log level. Valid levels: debug, info, warn, error.
+func Init(development bool, level string) {
 	var config zap.Config
 	if development {
 		config = zap.NewDevelopmentConfig()
@@ -31,10 +32,11 @@ func Init(development bool) {
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	}
 
-	if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
-		var level zapcore.Level
-		if err := level.UnmarshalText([]byte(strings.ToLower(levelStr))); err == nil {
-			config.Level = zap.NewAtomicLevelAt(level)
+	// Set log level from parameter
+	if level != "" {
+		var l zapcore.Level
+		if err := l.UnmarshalText([]byte(strings.ToLower(level))); err == nil {
+			config.Level = zap.NewAtomicLevelAt(l)
 		}
 	}
 
@@ -50,10 +52,12 @@ func Init(development bool) {
 	L = logger.Sugar()
 }
 
-// InitFromEnv initializes the logger based on DEV and LOG_LEVEL env vars.
+// InitFromEnv initializes the logger based on DEV env var.
+// Used for early logging before config is loaded.
+// Log level uses zap defaults; config file sets the final level.
 func InitFromEnv() {
 	dev := os.Getenv("DEV") == "true"
-	Init(dev)
+	Init(dev, "")
 }
 
 // Sync flushes any buffered log entries.

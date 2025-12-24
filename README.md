@@ -68,6 +68,9 @@ make db-reset     # Remove SQLite database files
 Edit `config.yaml`:
 
 ```yaml
+# Logging
+log_level: "info"  # debug, info, warn, error
+
 # Network
 eth_rpc: "http://localhost:8545"
 eth_ws_rpc: "ws://localhost:8546"  # Required for --updater
@@ -241,23 +244,20 @@ ssv-oracle/
 
 ## Logging
 
-The oracle uses structured logging (zap). Configure via environment variables:
+The oracle uses structured logging (zap):
 
-| Variable | Values | Default | Description |
-|----------|--------|---------|-------------|
-| `LOG_LEVEL` | `debug`, `info`, `warn`, `error` | `info` (prod) / `debug` (dev) | Minimum log level |
-| `DEV` | `true`, `false` | `false` | Development mode: colored output, human-readable timestamps |
+| Setting | Source | Description |
+|---------|--------|-------------|
+| `log_level` | Config file | Log level: debug, info, warn, error (default: info) |
+| `DEV` | Environment | Development mode: colored output, human-readable timestamps |
 
 **Examples:**
 ```bash
-# Production (JSON logs, info level)
-LOG_LEVEL=info ./ssv-oracle run
+# Production (JSON logs, level from config)
+./ssv-oracle run
 
-# Development (colored console, debug level)
+# Development (colored console)
 DEV=true ./ssv-oracle run
-
-# Production with debug logging
-LOG_LEVEL=debug ./ssv-oracle run
 ```
 
 ## Development

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -53,6 +54,10 @@ func run(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Initialize logger: DEV env controls format, config/env controls level
+	dev := os.Getenv("DEV") == "true"
+	logger.Init(dev, cfg.LogLevel)
 
 	signer, err := wallet.NewSigner(&cfg.Wallet)
 	if err != nil {

@@ -17,6 +17,8 @@ const defaultDBPath = "./data/oracle.db"
 
 // Config represents the oracle configuration file.
 type Config struct {
+	LogLevel string `yaml:"log_level"` // debug, info, warn, error (default: info)
+
 	EthRPC    string `yaml:"eth_rpc"`
 	EthWSRPC  string `yaml:"eth_ws_rpc"` // Required only with --updater
 	BeaconRPC string `yaml:"beacon_rpc"`

@@ -156,6 +156,7 @@ sqlite3 data/oracle.db ".backup data/oracle.db.backup"
 ## Configuration
 
 ```yaml
+log_level: "info"                     # debug, info, warn, error
 eth_rpc: "http://localhost:8545"      # Execution layer RPC (HTTP)
 eth_ws_rpc: "ws://localhost:8546"     # Execution layer WebSocket (for updater)
 beacon_rpc: "http://localhost:5052"   # Beacon node RPC
