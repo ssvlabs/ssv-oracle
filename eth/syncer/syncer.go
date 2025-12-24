@@ -217,7 +217,7 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 
 // storeRawEvent stores a raw event when parsing fails.
 func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs, parseErr error) error {
-	if !errors.Is(parseErr, ErrUnknownEvent) {
+	if !errors.Is(parseErr, errUnknownEvent) {
 		logger.Warnw("Failed to parse event",
 			"block", blockLogs.BlockNumber,
 			"txHash", log.TxHash.Hex(),

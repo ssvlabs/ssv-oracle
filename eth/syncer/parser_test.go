@@ -42,8 +42,8 @@ func TestParseLog_UnknownSignature(t *testing.T) {
 	if err == nil {
 		t.Error("ParseLog() should error on unknown event signature")
 	}
-	if !errors.Is(err, ErrUnknownEvent) {
-		t.Errorf("ParseLog() error should wrap ErrUnknownEvent, got: %v", err)
+	if !errors.Is(err, errUnknownEvent) {
+		t.Errorf("ParseLog() error should wrap errUnknownEvent, got: %v", err)
 	}
 }
 

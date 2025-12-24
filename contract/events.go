@@ -18,6 +18,7 @@ const eventRootCommitted = "RootCommitted"
 type RootCommittedEvent struct {
 	MerkleRoot [32]byte
 	BlockNum   uint64
+	TxHash     common.Hash
 }
 
 // SubscribeRootCommitted subscribes to RootCommitted events.
@@ -105,5 +106,6 @@ func (c *Client) parseRootCommittedEvent(vLog types.Log) (*RootCommittedEvent, e
 	return &RootCommittedEvent{
 		MerkleRoot: merkleRoot,
 		BlockNum:   blockNum,
+		TxHash:     vLog.TxHash,
 	}, nil
 }

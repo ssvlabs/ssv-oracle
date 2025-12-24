@@ -31,6 +31,8 @@ type Updater struct {
 	storage        updaterStorage
 	contractClient *contract.Client
 	syncer         *syncer.EventSyncer
+
+	lastProcessedBlock uint64 // Deduplication: skip events for already-processed blocks
 }
 
 type updaterStorage interface {
@@ -112,8 +114,17 @@ func (u *Updater) subscribeAndProcess(ctx context.Context) error {
 
 func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommittedEvent) {
 	log := logger.With("blockNum", event.BlockNum)
+
+	// Deduplicate by block number
+	if event.BlockNum <= u.lastProcessedBlock {
+		log.Debugw("Skipping duplicate RootCommitted event",
+			"lastProcessed", u.lastProcessedBlock)
+		return
+	}
+
 	log.Infow("Received RootCommitted",
-		"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
+		"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot),
+		"txHash", event.TxHash.Hex())
 
 	commit, err := u.storage.GetCommitByBlock(ctx, event.BlockNum)
 	if err != nil {
@@ -132,7 +143,10 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 
 	if err := u.processCommit(ctx, commit); err != nil {
 		log.Errorw("Failed to process commit", "error", err)
+		return
 	}
+
+	u.lastProcessedBlock = event.BlockNum
 }
 
 func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommit) error {

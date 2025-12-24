@@ -110,12 +110,11 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum, 
 	})
 }
 
-// GetClusterEffectiveBalance returns the effective balance for a cluster by calling
-// the getBalance function on the SSVNetworkViews contract.
+// GetClusterEffectiveBalance returns the effective balance for a cluster.
 func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster Cluster) (uint32, error) {
-	data, err := SSVNetworkViewsABI.Pack("getBalance", owner, operatorIDs, cluster)
+	data, err := SSVNetworkViewsABI.Pack("getEffectiveBalance", owner, operatorIDs, cluster)
 	if err != nil {
-		return 0, fmt.Errorf("failed to pack getBalance: %w", err)
+		return 0, fmt.Errorf("failed to pack getEffectiveBalance: %w", err)
 	}
 
 	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{
@@ -127,18 +126,15 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 			reason := c.txManager.ExtractRevertReason(err)
 			return 0, &txmanager.RevertError{Reason: reason, Simulated: true}
 		}
-		return 0, fmt.Errorf("failed to call getBalance: %w", err)
+		return 0, fmt.Errorf("failed to call getEffectiveBalance: %w", err)
 	}
 
-	var output struct {
-		Balance          *big.Int
-		EffectiveBalance uint32
-	}
-	if err := SSVNetworkViewsABI.UnpackIntoInterface(&output, "getBalance", result); err != nil {
-		return 0, fmt.Errorf("failed to unpack getBalance: %w", err)
+	var effectiveBalance uint32
+	if err := SSVNetworkViewsABI.UnpackIntoInterface(&effectiveBalance, "getEffectiveBalance", result); err != nil {
+		return 0, fmt.Errorf("failed to unpack getEffectiveBalance: %w", err)
 	}
 
-	return output.EffectiveBalance, nil
+	return effectiveBalance, nil
 }
 
 // UpdateClusterBalance updates a cluster's balance using a merkle proof.

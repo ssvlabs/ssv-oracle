@@ -13,9 +13,9 @@ import (
 	"ssv-oracle/contract"
 )
 
-// ErrUnknownEvent is returned when the event signature is not recognized.
+// errUnknownEvent is returned when the event signature is not recognized.
 // This is expected for events we don't handle (e.g., RootCommitted, OperatorAdded).
-var ErrUnknownEvent = errors.New("unknown event signature")
+var errUnknownEvent = errors.New("unknown event signature")
 
 // EventParser parses SSV contract events.
 type EventParser struct {
@@ -61,7 +61,7 @@ func (p *EventParser) ParseLog(log *types.Log) (string, any, error) {
 		event, err := p.parseClusterBalanceUpdated(log)
 		return EventClusterBalanceUpdated, event, err
 	default:
-		return "", nil, fmt.Errorf("%w: %s", ErrUnknownEvent, eventSig.Hex())
+		return "", nil, fmt.Errorf("%w: %s", errUnknownEvent, eventSig.Hex())
 	}
 }
 
@@ -229,8 +229,8 @@ func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigrate
 
 	var result struct {
 		OperatorIds      []uint64
-		ETHDeposited     *big.Int
-		SSVRefunded      *big.Int
+		EthDeposited     *big.Int
+		SsvRefunded      *big.Int
 		EffectiveBalance uint32
 		Cluster          Cluster
 	}
@@ -241,8 +241,8 @@ func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigrate
 	}
 
 	event.OperatorIDs = result.OperatorIds
-	event.ETHDeposited = result.ETHDeposited
-	event.SSVRefunded = result.SSVRefunded
+	event.ETHDeposited = result.EthDeposited
+	event.SSVRefunded = result.SsvRefunded
 	event.EffectiveBalance = result.EffectiveBalance
 	event.Cluster = result.Cluster
 
