@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -40,6 +41,9 @@ func TestParseLog_UnknownSignature(t *testing.T) {
 	_, _, err := parser.ParseLog(log)
 	if err == nil {
 		t.Error("ParseLog() should error on unknown event signature")
+	}
+	if !errors.Is(err, ErrUnknownEvent) {
+		t.Errorf("ParseLog() error should wrap ErrUnknownEvent, got: %v", err)
 	}
 }
 

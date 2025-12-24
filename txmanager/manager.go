@@ -363,7 +363,7 @@ func (m *TxManager) estimateGas(ctx context.Context, opts *TxOpts) (uint64, erro
 // handleReceipt processes a mined transaction receipt.
 func (m *TxManager) handleReceipt(ctx context.Context, opts *TxOpts, tx *types.Transaction, receipt *types.Receipt) (*types.Receipt, error) {
 	if receipt.Status == 1 {
-		logger.Infow("Tx confirmed",
+		logger.Debugw("Tx confirmed",
 			"hash", tx.Hash().Hex(),
 			"block", receipt.BlockNumber.Uint64(),
 			"gasUsed", receipt.GasUsed)

@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -216,6 +217,14 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 
 // storeRawEvent stores a raw event when parsing fails.
 func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs, parseErr error) error {
+	if !errors.Is(parseErr, ErrUnknownEvent) {
+		logger.Warnw("Failed to parse event",
+			"block", blockLogs.BlockNumber,
+			"txHash", log.TxHash.Hex(),
+			"logIndex", log.Index,
+			"error", parseErr)
+	}
+
 	rawLog, err := EncodeLogToJSON(log)
 	if err != nil {
 		return fmt.Errorf("failed to encode raw log: %w", err)

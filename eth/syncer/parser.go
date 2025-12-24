@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -11,6 +12,10 @@ import (
 
 	"ssv-oracle/contract"
 )
+
+// ErrUnknownEvent is returned when the event signature is not recognized.
+// This is expected for events we don't handle (e.g., RootCommitted, OperatorAdded).
+var ErrUnknownEvent = errors.New("unknown event signature")
 
 // EventParser parses SSV contract events.
 type EventParser struct {
@@ -56,7 +61,7 @@ func (p *EventParser) ParseLog(log *types.Log) (string, any, error) {
 		event, err := p.parseClusterBalanceUpdated(log)
 		return EventClusterBalanceUpdated, event, err
 	default:
-		return "", nil, fmt.Errorf("unknown event signature: %s", eventSig.Hex())
+		return "", nil, fmt.Errorf("%w: %s", ErrUnknownEvent, eventSig.Hex())
 	}
 }
 
@@ -254,7 +259,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 	event.BlockNum = log.Topics[2].Big().Uint64()
 
 	var result struct {
-		OperatorIDs      []uint64
+		OperatorIds      []uint64
 		EffectiveBalance uint32
 		Cluster          Cluster
 	}
@@ -264,7 +269,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 		return nil, fmt.Errorf("failed to unpack ClusterBalanceUpdated: %w", err)
 	}
 
-	event.OperatorIDs = result.OperatorIDs
+	event.OperatorIDs = result.OperatorIds
 	event.EffectiveBalance = result.EffectiveBalance
 	event.Cluster = result.Cluster
 
