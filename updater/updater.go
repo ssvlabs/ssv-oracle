@@ -17,7 +17,10 @@ import (
 	"ssv-oracle/txmanager"
 )
 
-const retryDelay = 5 * time.Second
+const (
+	subscriptionRetryDelay = 5 * time.Second
+	commitLookupRetryDelay = 10 * time.Second
+)
 
 // Config holds Updater configuration.
 type Config struct {
@@ -67,7 +70,7 @@ func (u *Updater) Run(ctx context.Context) error {
 		}
 
 		select {
-		case <-time.After(retryDelay):
+		case <-time.After(subscriptionRetryDelay):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -113,7 +116,9 @@ func (u *Updater) subscribeAndProcess(ctx context.Context) error {
 }
 
 func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommittedEvent) {
-	log := logger.With("blockNum", event.BlockNum)
+	log := logger.With(
+		"blockNum", event.BlockNum,
+		"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
 
 	// Deduplicate by block number
 	if event.BlockNum <= u.lastProcessedBlock {
@@ -122,9 +127,7 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 
-	log.Infow("Received RootCommitted",
-		"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot),
-		"txHash", event.TxHash.Hex())
+	log.Infow("Received RootCommitted", "txHash", event.TxHash.Hex())
 
 	commit, err := u.storage.GetCommitByBlock(ctx, event.BlockNum)
 	if err != nil {
@@ -132,8 +135,21 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 	if commit == nil {
-		log.Warnw("Skipping RootCommitted event - not from this oracle",
-			"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
+		log.Debugw("Commit not found, retrying", "delay", commitLookupRetryDelay)
+		select {
+		case <-time.After(commitLookupRetryDelay):
+		case <-ctx.Done():
+			return
+		}
+		commit, err = u.storage.GetCommitByBlock(ctx, event.BlockNum)
+		if err != nil {
+			log.Errorw("Failed to lookup commit on retry", "error", err)
+			return
+		}
+	}
+
+	if commit == nil {
+		log.Warnw("Commit not found - likely from another oracle")
 		return
 	}
 
