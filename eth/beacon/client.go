@@ -2,7 +2,6 @@ package beacon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -25,27 +24,6 @@ const (
 	validatorBatchSize   = 1000 // Max validators per beacon API request
 	maxParallelRequests  = 5
 )
-
-// ErrBeaconSyncing indicates the beacon node is still syncing.
-var ErrBeaconSyncing = errors.New("beacon node is syncing")
-
-// wrapBeaconError provides context-specific error messages for beacon API failures.
-// Returns permanent errors for 404 (not found) to prevent retrying.
-func wrapBeaconError(err error, operation string) error {
-	if err == nil {
-		return nil
-	}
-	var apiErr *api.Error
-	if errors.As(err, &apiErr) {
-		switch apiErr.StatusCode {
-		case 404:
-			return eth.Permanent(fmt.Errorf("%s: not found", operation))
-		case 503:
-			return fmt.Errorf("%s: %w", operation, ErrBeaconSyncing)
-		}
-	}
-	return fmt.Errorf("%s: %w", operation, err)
-}
 
 // API defines the beacon node capabilities required by the oracle.
 type API interface {
@@ -107,22 +85,22 @@ func (c *Client) fetchSpec(ctx context.Context) error {
 	return eth.WithRetry(ctx, c.retryConfig, func() error {
 		genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
 		if err != nil {
-			return wrapBeaconError(err, "get genesis")
+			return fmt.Errorf("get genesis: %w", err)
 		}
 
 		specResp, err := c.client.Spec(ctx, &api.SpecOpts{})
 		if err != nil {
-			return wrapBeaconError(err, "get spec")
+			return fmt.Errorf("get spec: %w", err)
 		}
 
 		slotsPerEpoch, ok := specResp.Data["SLOTS_PER_EPOCH"].(uint64)
 		if !ok {
-			return eth.Permanent(fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec"))
+			return fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec")
 		}
 
 		secondsPerSlot, ok := specResp.Data["SECONDS_PER_SLOT"].(time.Duration)
 		if !ok {
-			return eth.Permanent(fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec"))
+			return fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec")
 		}
 
 		c.Spec = &Spec{
@@ -160,7 +138,7 @@ func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoi
 			State: "head",
 		})
 		if err != nil {
-			return wrapBeaconError(err, "get finality")
+			return fmt.Errorf("get finality: %w", err)
 		}
 
 		epoch := uint64(finalityResp.Data.Finalized.Epoch)
@@ -170,7 +148,7 @@ func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoi
 			Block: root.String(),
 		})
 		if err != nil {
-			return wrapBeaconError(err, "get beacon block")
+			return fmt.Errorf("get beacon block: %w", err)
 		}
 
 		blockNum, err := blockResp.Data.ExecutionBlockNumber()
@@ -227,7 +205,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pub
 					PubKeys: batch,
 				})
 				if err != nil {
-					return wrapBeaconError(err, "get validators")
+					return fmt.Errorf("get validators: %w", err)
 				}
 
 				mu.Lock()
@@ -296,7 +274,10 @@ func (c *Client) handleFinalizedEvent(ctx context.Context, event *apiv1.Finalize
 		blockResp, err = c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
 			Block: event.Block.String(),
 		})
-		return wrapBeaconError(err, "get finalized block")
+		if err != nil {
+			return fmt.Errorf("get finalized block: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

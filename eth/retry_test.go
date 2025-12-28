@@ -114,36 +114,3 @@ func TestWithRetry_OneRetry(t *testing.T) {
 	require.ErrorIs(t, err, testErr)
 	require.Equal(t, 2, calls, "MaxRetries=1 means 2 total attempts (1 initial + 1 retry)")
 }
-
-func TestWithRetry_PermanentError(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 5, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
-	calls := 0
-	testErr := errors.New("not found")
-
-	err := WithRetry(context.Background(), cfg, func() error {
-		calls++
-		return Permanent(testErr)
-	})
-
-	require.Error(t, err)
-	require.True(t, isPermanent(err))
-	require.ErrorIs(t, err, testErr)
-	require.Equal(t, 1, calls, "permanent errors should not be retried")
-}
-
-func TestWithRetry_PermanentAfterTransient(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 5, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
-	calls := 0
-
-	err := WithRetry(context.Background(), cfg, func() error {
-		calls++
-		if calls < 3 {
-			return errors.New("transient error")
-		}
-		return Permanent(errors.New("permanent error"))
-	})
-
-	require.Error(t, err)
-	require.True(t, isPermanent(err))
-	require.Equal(t, 3, calls, "should retry transient, stop on permanent")
-}

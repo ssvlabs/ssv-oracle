@@ -62,8 +62,7 @@ Three sub-packages organized by responsibility:
 
 **eth/retry.go** - Shared retry utilities:
 - Exponential backoff with jitter
-- Permanent errors (404) are not retried
-- Transient errors (503, network) are retried
+- All errors retry up to max retries
 
 ### Storage (storage/)
 - SQLite-based persistent storage

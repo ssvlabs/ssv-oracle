@@ -2,7 +2,6 @@ package eth
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -13,28 +12,6 @@ const (
 	defaultBaseDelay  = 2 * time.Second
 	defaultMaxDelay   = 15 * time.Second
 )
-
-// ErrPermanent wraps an error to indicate it should not be retried.
-type ErrPermanent struct {
-	Err error
-}
-
-func (e *ErrPermanent) Error() string { return e.Err.Error() }
-func (e *ErrPermanent) Unwrap() error { return e.Err }
-
-// Permanent marks an error as non-retryable.
-func Permanent(err error) error {
-	if err == nil {
-		return nil
-	}
-	return &ErrPermanent{Err: err}
-}
-
-// isPermanent returns true if the error should not be retried.
-func isPermanent(err error) bool {
-	var permErr *ErrPermanent
-	return errors.As(err, &permErr)
-}
 
 // RetryConfig holds retry behavior configuration.
 type RetryConfig struct {
@@ -56,7 +33,6 @@ func DefaultRetryConfig() RetryConfig {
 // Returns nil on success, or the last error after all attempts exhausted.
 // MaxRetries specifies the number of retries after the initial attempt,
 // so MaxRetries=3 means 4 total attempts.
-// Errors wrapped with Permanent() are not retried.
 func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 	if cfg.MaxRetries < 0 {
 		return fn()
@@ -66,9 +42,6 @@ func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
 		if err = fn(); err == nil {
 			return nil
-		}
-		if isPermanent(err) {
-			return err
 		}
 		if attempt < cfg.MaxRetries {
 			delay := cfg.BaseDelay * time.Duration(1<<attempt)
