@@ -31,7 +31,7 @@ ssv-oracle/
 │   ├── execution/      # Execution layer client (logs, blocks)
 │   └── syncer/         # Event syncing & parsing
 ├── logger/             # Zap-based structured logging
-├── merkle/             # Merkle tree (Bitcoin/OpenZeppelin standard)
+├── merkle/             # OpenZeppelin-compatible Merkle tree
 ├── oracle/             # Main oracle loop
 ├── storage/            # SQLite storage layer
 ├── txmanager/          # Transaction lifecycle (gas, retries, cancellation)
@@ -48,7 +48,6 @@ Three sub-packages organized by responsibility:
 **eth/beacon/** - Beacon chain client:
 - Finalized checkpoint subscription (SSE)
 - Validator effective balance queries
-- Chain spec (genesis, slots per epoch)
 
 **eth/execution/** - Execution layer client:
 - Log fetching with batching
@@ -98,12 +97,13 @@ Listens for RootCommitted events and updates cluster balances on-chain:
 5. Call UpdateClusterBalance on contract with proof
 
 ### Merkle Tree (merkle/)
-- Leaf: `keccak256(abi.encode(clusterId, effectiveBalance))`
-- Sort leaves by clusterId (bytes comparison)
-- Duplicate last node if odd count (Bitcoin standard)
-- Sort siblings before hashing (OpenZeppelin standard)
+OpenZeppelin StandardMerkleTree-compatible implementation:
+- Leaf: `keccak256(keccak256(abi.encode(clusterId, effectiveBalance)))` (double-hashed)
+- Sort leaves by leaf hash (not clusterId)
+- Duplicate last node if odd count
+- Sort siblings before hashing
 - Empty tree: `keccak256("")`
-- `BuildMerkleTreeWithProofs`: stores layers for proof generation
+- `NewTree`: builds tree and stores layers for proof generation
 - `GetProof`: returns sibling hashes from leaf to root
 
 ### Commit Schedule (oracle/)
@@ -115,10 +115,9 @@ type CommitPhase struct {
 }
 ```
 Methods:
-- `Validate()` - checks phases are non-empty, sorted, with valid intervals
+- `Validate()` - checks phases are non-empty, sorted, have valid intervals, and are aligned (each phase's StartEpoch must be a valid target of the previous phase)
 - `PhaseAt(epoch)` - returns active phase for given epoch
 - `NextTarget(epoch)` - returns next target after epoch
-- `RoundAt(targetEpoch)` - returns round number for a target epoch
 
 ### Cluster ID (eth/syncer)
 ```go
@@ -193,12 +192,12 @@ Automatic transaction management with gas bumping, retries, and cancellation:
 
 ```yaml
 tx_policy:
-  gas_buffer_percent: 20        # Add 20% to gas estimates
+  gas_buffer_percent: 20        # Extra % added to gas estimates (0-100)
   max_fee_per_gas: "100 gwei"   # Hard cap on gas price
-  pending_timeout_blocks: 10    # Blocks before bumping
-  gas_bump_percent: 10          # Minimum bump for RBF (EIP-1559 requires ≥10%)
-  max_retries: 3                # Attempts before cancellation
-  retry_delay: 5s               # Delay between retries
+  pending_timeout_blocks: 10    # Blocks before bumping gas on pending tx
+  gas_bump_percent: 10          # Gas price bump per attempt (min 10%)
+  max_retries: 3                # Max submission attempts
+  retry_delay: 5s               # Delay after RPC error before retry
 ```
 
 **Lifecycle:** estimate gas → submit tx → monitor blocks → bump if stuck → cancel if max reached

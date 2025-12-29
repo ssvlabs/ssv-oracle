@@ -12,7 +12,7 @@ func TestComputeClusterID(t *testing.T) {
 	owner := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	operatorIDs := []uint64{1, 2, 3, 4}
 
-	clusterID := ComputeClusterID(owner, operatorIDs)
+	clusterID := computeClusterID(owner, operatorIDs)
 
 	// Verify it produces a 32-byte hash
 	if len(clusterID) != 32 {
@@ -20,26 +20,26 @@ func TestComputeClusterID(t *testing.T) {
 	}
 
 	// Verify it's deterministic (same inputs = same output)
-	clusterID2 := ComputeClusterID(owner, operatorIDs)
+	clusterID2 := computeClusterID(owner, operatorIDs)
 	if clusterID != clusterID2 {
-		t.Error("ComputeClusterID is not deterministic")
+		t.Error("computeClusterID is not deterministic")
 	}
 
 	// Verify different operators produce different IDs
 	differentOps := []uint64{1, 2, 3, 5}
-	differentID := ComputeClusterID(owner, differentOps)
+	differentID := computeClusterID(owner, differentOps)
 	if clusterID == differentID {
 		t.Error("Different operator IDs should produce different cluster IDs")
 	}
 
 	// Verify different owner produces different ID
 	differentOwner := common.HexToAddress("0x9876543210987654321098765432109876543210")
-	differentOwnerID := ComputeClusterID(differentOwner, operatorIDs)
+	differentOwnerID := computeClusterID(differentOwner, operatorIDs)
 	if clusterID == differentOwnerID {
 		t.Error("Different owners should produce different cluster IDs")
 	}
 
-	t.Logf("Cluster ID: 0x%s", hex.EncodeToString(clusterID[:]))
+	t.Logf("cluster ID: 0x%s", hex.EncodeToString(clusterID[:]))
 }
 
 func TestComputeClusterID_SortingInvariant(t *testing.T) {
@@ -50,9 +50,9 @@ func TestComputeClusterID_SortingInvariant(t *testing.T) {
 	ops2 := []uint64{4, 3, 2, 1}
 	ops3 := []uint64{2, 4, 1, 3}
 
-	id1 := ComputeClusterID(owner, ops1)
-	id2 := ComputeClusterID(owner, ops2)
-	id3 := ComputeClusterID(owner, ops3)
+	id1 := computeClusterID(owner, ops1)
+	id2 := computeClusterID(owner, ops2)
+	id3 := computeClusterID(owner, ops3)
 
 	if id1 != id2 {
 		t.Error("Same operators in different order should produce same cluster ID")
@@ -61,5 +61,5 @@ func TestComputeClusterID_SortingInvariant(t *testing.T) {
 		t.Error("Same operators in different order should produce same cluster ID")
 	}
 
-	t.Logf("Cluster ID (sorted): 0x%s", hex.EncodeToString(id1[:]))
+	t.Logf("cluster ID (sorted): 0x%s", hex.EncodeToString(id1[:]))
 }

@@ -46,6 +46,7 @@ type Config struct {
 }
 
 // NewClient creates a contract client.
+// Assumes addresses are pre-validated by config layer.
 func NewClient(cfg *Config) (*Client, error) {
 	if cfg.ChainID == nil {
 		return nil, fmt.Errorf("chain ID cannot be nil")
@@ -64,7 +65,7 @@ func NewClient(cfg *Config) (*Client, error) {
 		ethClient.Close()
 		return nil, fmt.Errorf("create tx manager: %w", err)
 	}
-	txMgr.SetErrorSelectors(ErrorSelectors)
+	txMgr.SetErrorSelectors(errorSelectors)
 
 	client := &Client{
 		ethClient:            ethClient,
@@ -98,7 +99,7 @@ func (c *Client) Close() {
 }
 
 // CommitRoot submits a merkle root to the SSV Network contract.
-func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum, roundID, targetEpoch uint64) (*types.Receipt, error) {
+func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum uint64) (*types.Receipt, error) {
 	data, err := SSVNetworkABI.Pack("commitRoot", merkleRoot, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("pack commitRoot: %w", err)
@@ -112,7 +113,7 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum, 
 
 // GetClusterEffectiveBalance returns the effective balance for a cluster.
 func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster Cluster) (uint32, error) {
-	data, err := SSVNetworkViewsABI.Pack("getEffectiveBalance", owner, operatorIDs, cluster)
+	data, err := ssvNetworkViewsABI.Pack("getEffectiveBalance", owner, operatorIDs, cluster)
 	if err != nil {
 		return 0, fmt.Errorf("pack getEffectiveBalance: %w", err)
 	}
@@ -130,7 +131,7 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 	}
 
 	var effectiveBalance uint32
-	if err := SSVNetworkViewsABI.UnpackIntoInterface(&effectiveBalance, "getEffectiveBalance", result); err != nil {
+	if err := ssvNetworkViewsABI.UnpackIntoInterface(&effectiveBalance, "getEffectiveBalance", result); err != nil {
 		return 0, fmt.Errorf("unpack getEffectiveBalance: %w", err)
 	}
 

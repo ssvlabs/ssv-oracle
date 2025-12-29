@@ -10,27 +10,27 @@ import (
 )
 
 func TestNewParser(t *testing.T) {
-	parser := NewParser()
+	parser := newParser()
 	if parser == nil {
-		t.Fatal("NewParser() returned nil")
+		t.Fatal("newParser() returned nil")
 	}
 }
 
 func TestParseLog_EmptyTopics(t *testing.T) {
-	parser := NewParser()
+	parser := newParser()
 
 	log := &types.Log{
 		Topics: []common.Hash{},
 	}
 
-	_, _, err := parser.ParseLog(log)
+	_, _, err := parser.parseLog(log)
 	if err == nil {
-		t.Error("ParseLog() should error on empty topics")
+		t.Error("parseLog() should error on empty topics")
 	}
 }
 
 func TestParseLog_UnknownSignature(t *testing.T) {
-	parser := NewParser()
+	parser := newParser()
 
 	log := &types.Log{
 		Topics: []common.Hash{
@@ -38,29 +38,29 @@ func TestParseLog_UnknownSignature(t *testing.T) {
 		},
 	}
 
-	_, _, err := parser.ParseLog(log)
+	_, _, err := parser.parseLog(log)
 	if err == nil {
-		t.Error("ParseLog() should error on unknown event signature")
+		t.Error("parseLog() should error on unknown event signature")
 	}
 	if !errors.Is(err, errUnknownEvent) {
-		t.Errorf("ParseLog() error should wrap errUnknownEvent, got: %v", err)
+		t.Errorf("parseLog() error should wrap errUnknownEvent, got: %v", err)
 	}
 }
 
 func TestParseLog_MissingOwnerTopic(t *testing.T) {
-	parser := NewParser()
+	parser := newParser()
 
 	// ValidatorAdded signature but no owner topic
 	log := &types.Log{
 		Topics: []common.Hash{
-			EventSigValidatorAdded,
+			eventSigValidatorAdded,
 		},
 		Data: []byte{},
 	}
 
-	_, _, err := parser.ParseLog(log)
+	_, _, err := parser.parseLog(log)
 	if err == nil {
-		t.Error("ParseLog() should error on missing owner topic")
+		t.Error("parseLog() should error on missing owner topic")
 	}
 }
 
@@ -74,9 +74,9 @@ func TestEncodeLogToJSON(t *testing.T) {
 		Data: []byte{0x01, 0x02, 0x03},
 	}
 
-	result, err := EncodeLogToJSON(log)
+	result, err := encodeLogToJSON(log)
 	if err != nil {
-		t.Fatalf("EncodeLogToJSON() error = %v", err)
+		t.Fatalf("encodeLogToJSON() error = %v", err)
 	}
 
 	if len(result) == 0 {
@@ -109,9 +109,9 @@ func TestEncodeLogToJSON_EmptyLog(t *testing.T) {
 		Data:    []byte{},
 	}
 
-	result, err := EncodeLogToJSON(log)
+	result, err := encodeLogToJSON(log)
 	if err != nil {
-		t.Fatalf("EncodeLogToJSON() error = %v", err)
+		t.Fatalf("encodeLogToJSON() error = %v", err)
 	}
 
 	var decoded map[string]any
@@ -129,15 +129,15 @@ func TestEncodeLogToJSON_EmptyLog(t *testing.T) {
 }
 
 func TestEncodeEventToJSON(t *testing.T) {
-	event := &ValidatorAddedEvent{
+	event := &validatorAddedEvent{
 		Owner:       common.HexToAddress("0x1234567890123456789012345678901234567890"),
 		OperatorIDs: []uint64{1, 2, 3, 4},
 		PublicKey:   []byte{0xaa, 0xbb, 0xcc},
 	}
 
-	result, err := EncodeEventToJSON(event)
+	result, err := encodeEventToJSON(event)
 	if err != nil {
-		t.Fatalf("EncodeEventToJSON() error = %v", err)
+		t.Fatalf("encodeEventToJSON() error = %v", err)
 	}
 
 	if len(result) == 0 {
@@ -152,9 +152,9 @@ func TestEncodeEventToJSON(t *testing.T) {
 }
 
 func TestEncodeEventToJSON_NilEvent(t *testing.T) {
-	result, err := EncodeEventToJSON(nil)
+	result, err := encodeEventToJSON(nil)
 	if err != nil {
-		t.Fatalf("EncodeEventToJSON(nil) error = %v", err)
+		t.Fatalf("encodeEventToJSON(nil) error = %v", err)
 	}
 
 	// Should produce "null"
@@ -166,14 +166,14 @@ func TestEncodeEventToJSON_NilEvent(t *testing.T) {
 func TestEventSignatures(t *testing.T) {
 	// Verify event signatures are non-zero and unique
 	signatures := []common.Hash{
-		EventSigValidatorAdded,
-		EventSigValidatorRemoved,
-		EventSigClusterLiquidated,
-		EventSigClusterReactivated,
-		EventSigClusterWithdrawn,
-		EventSigClusterDeposited,
-		EventSigClusterMigratedToETH,
-		EventSigClusterBalanceUpdated,
+		eventSigValidatorAdded,
+		eventSigValidatorRemoved,
+		eventSigClusterLiquidated,
+		eventSigClusterReactivated,
+		eventSigClusterWithdrawn,
+		eventSigClusterDeposited,
+		eventSigClusterMigratedToETH,
+		eventSigClusterBalanceUpdated,
 	}
 
 	seen := make(map[common.Hash]bool)
@@ -191,20 +191,20 @@ func TestEventSignatures(t *testing.T) {
 func TestEventSignatures_MatchABI(t *testing.T) {
 	// Verify our hardcoded event signatures match the ABI
 	// This catches ABI changes that would break event parsing
-	parser := NewParser()
+	parser := newParser()
 
 	tests := []struct {
 		name     string
 		expected common.Hash
 	}{
-		{EventValidatorAdded, EventSigValidatorAdded},
-		{EventValidatorRemoved, EventSigValidatorRemoved},
-		{EventClusterLiquidated, EventSigClusterLiquidated},
-		{EventClusterReactivated, EventSigClusterReactivated},
-		{EventClusterWithdrawn, EventSigClusterWithdrawn},
-		{EventClusterDeposited, EventSigClusterDeposited},
-		{EventClusterMigratedToETH, EventSigClusterMigratedToETH},
-		{EventClusterBalanceUpdated, EventSigClusterBalanceUpdated},
+		{eventValidatorAdded, eventSigValidatorAdded},
+		{eventValidatorRemoved, eventSigValidatorRemoved},
+		{eventClusterLiquidated, eventSigClusterLiquidated},
+		{eventClusterReactivated, eventSigClusterReactivated},
+		{eventClusterWithdrawn, eventSigClusterWithdrawn},
+		{eventClusterDeposited, eventSigClusterDeposited},
+		{eventClusterMigratedToETH, eventSigClusterMigratedToETH},
+		{eventClusterBalanceUpdated, eventSigClusterBalanceUpdated},
 	}
 
 	for _, tt := range tests {

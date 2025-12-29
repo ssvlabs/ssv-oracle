@@ -12,15 +12,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// KeystoreSigner signs transactions using an encrypted keystore file.
-type KeystoreSigner struct {
+// keystoreSigner signs transactions using an encrypted keystore file.
+type keystoreSigner struct {
 	privateKey *ecdsa.PrivateKey
 	address    common.Address
 }
 
-// NewKeystoreSigner creates a signer from an encrypted keystore file.
-// Password is read from passwordEnv (env var) or passwordFile.
-func NewKeystoreSigner(keystorePath, passwordEnv, passwordFile string) (*KeystoreSigner, error) {
+func newKeystoreSigner(keystorePath, passwordEnv, passwordFile string) (*keystoreSigner, error) {
 	if keystorePath == "" {
 		return nil, fmt.Errorf("keystore path cannot be empty")
 	}
@@ -40,19 +38,19 @@ func NewKeystoreSigner(keystorePath, passwordEnv, passwordFile string) (*Keystor
 		return nil, fmt.Errorf("decrypt keystore: %w", err)
 	}
 
-	return &KeystoreSigner{
+	return &keystoreSigner{
 		privateKey: key.PrivateKey,
 		address:    key.Address,
 	}, nil
 }
 
 // Address returns the signer's Ethereum address.
-func (s *KeystoreSigner) Address() common.Address {
+func (s *keystoreSigner) Address() common.Address {
 	return s.address
 }
 
 // Close zeros out the private key (best-effort).
-func (s *KeystoreSigner) Close() error {
+func (s *keystoreSigner) Close() error {
 	if s.privateKey != nil && s.privateKey.D != nil {
 		s.privateKey.D.SetInt64(0)
 	}
@@ -61,22 +59,32 @@ func (s *KeystoreSigner) Close() error {
 }
 
 // Sign signs a transaction with the private key.
-func (s *KeystoreSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+func (s *keystoreSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+	if s.privateKey == nil {
+		return nil, fmt.Errorf("signer is closed")
+	}
+	if chainID == nil || chainID.Sign() == 0 {
+		return nil, fmt.Errorf("chainID is required (EIP-155 replay protection)")
+	}
 	return types.SignTx(tx, types.LatestSignerForChainID(chainID), s.privateKey)
 }
 
 func readPassword(passwordEnv, passwordFile string) (string, error) {
-	if passwordEnv != "" {
-		if password := os.Getenv(passwordEnv); password != "" {
-			return password, nil
-		}
-	}
+	// Prefer file over env var (files can have restricted permissions, env vars visible in /proc)
 	if passwordFile != "" {
 		data, err := os.ReadFile(passwordFile)
 		if err != nil {
 			return "", fmt.Errorf("read password file: %w", err)
 		}
-		return strings.TrimSpace(string(data)), nil
+		// Only trim trailing newlines (not spaces/tabs which may be part of password)
+		return strings.TrimRight(string(data), "\r\n"), nil
 	}
-	return "", fmt.Errorf("no password source provided: set password_env or password_file")
+	if passwordEnv != "" {
+		password := os.Getenv(passwordEnv)
+		if password == "" {
+			return "", fmt.Errorf("environment variable %s is not set or empty", passwordEnv)
+		}
+		return password, nil
+	}
+	return "", fmt.Errorf("no password source provided: set password_file or password_env")
 }

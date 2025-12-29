@@ -20,9 +20,9 @@ type mockStorage struct {
 }
 
 type commitStatusUpdate struct {
-	roundID uint64
-	status  storage.CommitStatus
-	txHash  []byte
+	targetEpoch uint64
+	status      storage.CommitStatus
+	txHash      []byte
 }
 
 func newMockStorage() *mockStorage {
@@ -33,16 +33,17 @@ func newMockStorage() *mockStorage {
 	}
 }
 
+// GetActiveValidators returns the stubbed validator set.
 func (m *mockStorage) GetActiveValidators(ctx context.Context) ([]storage.ActiveValidator, error) {
 	return m.validators, nil
 }
 
-func (m *mockStorage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []storage.ClusterBalance) error {
+// InsertPendingCommit records a pending commit for assertions.
+func (m *mockStorage) InsertPendingCommit(ctx context.Context, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []storage.ClusterBalance) error {
 	if m.insertErr != nil {
 		return m.insertErr
 	}
 	m.insertedCommits = append(m.insertedCommits, storage.OracleCommit{
-		RoundID:         roundID,
 		TargetEpoch:     targetEpoch,
 		MerkleRoot:      merkleRoot,
 		ReferenceBlock:  referenceBlock,
@@ -51,14 +52,15 @@ func (m *mockStorage) InsertPendingCommit(ctx context.Context, roundID, targetEp
 	return nil
 }
 
-func (m *mockStorage) UpdateCommitStatus(ctx context.Context, roundID uint64, status storage.CommitStatus, txHash []byte) error {
+// UpdateCommitStatus records a status update for assertions.
+func (m *mockStorage) UpdateCommitStatus(ctx context.Context, targetEpoch uint64, status storage.CommitStatus, txHash []byte) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
 	m.updatedStatuses = append(m.updatedStatuses, commitStatusUpdate{
-		roundID: roundID,
-		status:  status,
-		txHash:  txHash,
+		targetEpoch: targetEpoch,
+		status:      status,
+		txHash:      txHash,
 	})
 	return nil
 }
@@ -67,7 +69,7 @@ func TestNew(t *testing.T) {
 	schedule := CommitSchedule{{StartEpoch: 0, Interval: 225}}
 
 	cfg := &Config{
-		Storage:        nil, // Would be *ethsync.Storage
+		Storage:        nil, // Would be *storage.Storage
 		ContractClient: nil, // Would be *contract.Client
 		Schedule:       schedule,
 	}
@@ -83,77 +85,78 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNew_EmptyConfig(t *testing.T) {
-	cfg := &Config{}
-
-	o := New(cfg)
-	if o == nil {
-		t.Fatal("New() returned nil with empty config")
-	}
-
-	// Note: Go interfaces holding nil concrete pointers are not nil interfaces.
-	// We just verify the oracle was created successfully with empty config.
-	if len(o.schedule) != 0 {
-		t.Errorf("Expected 0 phases with empty config, got %d", len(o.schedule))
-	}
-}
-
 func TestOracleStorageInterface(t *testing.T) {
 	// Verify mockStorage implements the oracleStorage interface
 	var _ oracleStorage = (*mockStorage)(nil)
 }
 
-func TestClusterBalanceAggregation(t *testing.T) {
-	// Test the logic for aggregating balances by cluster
-	// This mirrors what fetchClusterBalances does internally
+func TestAggregateByCluster_MultipleClusters(t *testing.T) {
+	o := &Oracle{}
+
+	// Create distinct pubkeys for each validator
+	pk1, pk2, pk3 := make([]byte, 48), make([]byte, 48), make([]byte, 48)
+	pk1[0], pk2[0], pk3[0] = 0x01, 0x02, 0x03
+
+	cluster1, cluster2 := make([]byte, 32), make([]byte, 32)
+	cluster1[0], cluster2[0] = 0x01, 0x02
 
 	validators := []storage.ActiveValidator{
-		{ClusterID: []byte{0x01}, ValidatorPubkey: make([]byte, 48)},
-		{ClusterID: []byte{0x01}, ValidatorPubkey: make([]byte, 48)}, // Same cluster
-		{ClusterID: []byte{0x02}, ValidatorPubkey: make([]byte, 48)},
+		{ClusterID: cluster1, ValidatorPubkey: pk1},
+		{ClusterID: cluster1, ValidatorPubkey: pk2}, // Same cluster
+		{ClusterID: cluster2, ValidatorPubkey: pk3},
 	}
 
-	// Simulate balance fetching (32 ETH each in gwei)
-	balancePerValidator := uint64(32000000000)
+	// Build balance map: 32 ETH each
+	balanceMap := make(map[phase0.BLSPubKey]uint64)
+	var blsPk1, blsPk2, blsPk3 phase0.BLSPubKey
+	copy(blsPk1[:], pk1)
+	copy(blsPk2[:], pk2)
+	copy(blsPk3[:], pk3)
+	balanceMap[blsPk1] = 32_000_000_000
+	balanceMap[blsPk2] = 32_000_000_000
+	balanceMap[blsPk3] = 32_000_000_000
 
-	// Aggregate by cluster
-	clusterTotals := make(map[string]uint64)
-	for _, v := range validators {
-		clusterKey := string(v.ClusterID)
-		clusterTotals[clusterKey] += balancePerValidator
+	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
+
+	if notOnBeacon != 0 {
+		t.Errorf("Expected 0 not on beacon, got %d", notOnBeacon)
+	}
+	if len(result) != 2 {
+		t.Fatalf("Expected 2 clusters, got %d", len(result))
 	}
 
-	// Cluster 0x01 should have 64 ETH (2 validators)
-	if clusterTotals[string([]byte{0x01})] != 64000000000 {
-		t.Errorf("Cluster 0x01 balance: expected 64 ETH, got %d gwei", clusterTotals[string([]byte{0x01})])
+	// Find cluster 0x01 and 0x02 in results
+	var cluster1Balance, cluster2Balance uint32
+	for _, r := range result {
+		switch r.ClusterID[0] {
+		case 0x01:
+			cluster1Balance = r.EffectiveBalance
+		case 0x02:
+			cluster2Balance = r.EffectiveBalance
+		}
 	}
 
-	// Cluster 0x02 should have 32 ETH (1 validator)
-	if clusterTotals[string([]byte{0x02})] != 32000000000 {
-		t.Errorf("Cluster 0x02 balance: expected 32 ETH, got %d gwei", clusterTotals[string([]byte{0x02})])
+	if cluster1Balance != 64 {
+		t.Errorf("Cluster 0x01: expected 64 ETH, got %d", cluster1Balance)
+	}
+	if cluster2Balance != 32 {
+		t.Errorf("Cluster 0x02: expected 32 ETH, got %d", cluster2Balance)
 	}
 }
 
-func TestPubkeyDeduplication(t *testing.T) {
-	// Test that duplicate pubkeys are handled correctly
-	// This mirrors the deduplication logic in fetchClusterBalances
+func TestDeduplicatePubkeys(t *testing.T) {
+	o := &Oracle{}
+
+	pk1, pk2 := make([]byte, 48), make([]byte, 48)
+	pk1[0], pk2[0] = 0xAA, 0xBB
 
 	validators := []storage.ActiveValidator{
-		{ClusterID: []byte{0x01}, ValidatorPubkey: []byte{0xAA}},
-		{ClusterID: []byte{0x01}, ValidatorPubkey: []byte{0xAA}}, // Duplicate pubkey
-		{ClusterID: []byte{0x01}, ValidatorPubkey: []byte{0xBB}}, // Different pubkey
+		{ClusterID: []byte{0x01}, ValidatorPubkey: pk1},
+		{ClusterID: []byte{0x01}, ValidatorPubkey: pk1}, // Duplicate pubkey
+		{ClusterID: []byte{0x01}, ValidatorPubkey: pk2}, // Different pubkey
 	}
 
-	// Deduplicate
-	seen := make(map[string]struct{})
-	var uniquePubkeys [][]byte
-	for _, v := range validators {
-		key := string(v.ValidatorPubkey)
-		if _, exists := seen[key]; !exists {
-			seen[key] = struct{}{}
-			uniquePubkeys = append(uniquePubkeys, v.ValidatorPubkey)
-		}
-	}
+	uniquePubkeys := o.deduplicatePubkeys(validators)
 
 	if len(uniquePubkeys) != 2 {
 		t.Errorf("Expected 2 unique pubkeys, got %d", len(uniquePubkeys))
@@ -177,9 +180,10 @@ func TestEmptyValidators(t *testing.T) {
 
 func TestOracleSchedule(t *testing.T) {
 	// Verify Oracle correctly stores schedule from config
+	// Phases must be aligned: 900 = 0 + 4*225
 	schedule := CommitSchedule{
 		{StartEpoch: 0, Interval: 225},
-		{StartEpoch: 1000, Interval: 450},
+		{StartEpoch: 900, Interval: 450},
 	}
 
 	cfg := &Config{
@@ -200,8 +204,8 @@ func TestOracleSchedule(t *testing.T) {
 		t.Errorf("Phase 0 interval: expected 225, got %d", o.schedule[0].Interval)
 	}
 
-	if o.schedule[1].StartEpoch != 1000 {
-		t.Errorf("Phase 1 start epoch: expected 1000, got %d", o.schedule[1].StartEpoch)
+	if o.schedule[1].StartEpoch != 900 {
+		t.Errorf("Phase 1 start epoch: expected 900, got %d", o.schedule[1].StartEpoch)
 	}
 
 	if o.schedule[1].Interval != 450 {
@@ -303,6 +307,8 @@ func TestAggregateByCluster_AllBelowThreshold(t *testing.T) {
 }
 
 func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
+	// Per spec: validators missing from beacon response (not yet activated, pending deposit)
+	// are floored to 32 ETH to ensure clusters always have a valid balance.
 	o := &Oracle{}
 
 	pk1 := make([]byte, 48)
@@ -315,7 +321,7 @@ func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
 		{ClusterID: clusterID, ValidatorPubkey: pk1},
 	}
 
-	// Empty balance map - validator not on beacon
+	// Empty balance map - validator not on beacon (e.g., pending activation)
 	balanceMap := make(map[phase0.BLSPubKey]uint64)
 
 	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
@@ -324,7 +330,7 @@ func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
 		t.Errorf("Expected 1 validator not on beacon, got %d", notOnBeacon)
 	}
 
-	// Should default to balance floor (32 ETH)
+	// Should default to balance floor (32 ETH) per spec
 	expectedBalance := uint32(32)
 	if result[0].EffectiveBalance != expectedBalance {
 		t.Errorf("Expected cluster balance %d ETH, got %d ETH",

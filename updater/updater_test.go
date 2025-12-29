@@ -3,7 +3,6 @@ package updater
 import (
 	"bytes"
 	"context"
-	"math/big"
 	"testing"
 
 	"ssv-oracle/merkle"
@@ -23,24 +22,14 @@ func newMockStorage() *mockStorage {
 	}
 }
 
+// GetCluster returns a cluster row by ID.
 func (m *mockStorage) GetCluster(ctx context.Context, clusterID []byte) (*storage.ClusterRow, error) {
 	return m.clusters[string(clusterID)], nil
 }
 
+// GetCommitByBlock returns a commit by reference block.
 func (m *mockStorage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*storage.OracleCommit, error) {
 	return m.commits[blockNum], nil
-}
-
-func TestNew(t *testing.T) {
-	cfg := &Config{
-		Storage:        nil, // Would be *storage.Storage
-		ContractClient: nil, // Would be *contract.Client
-	}
-
-	u := New(cfg)
-	if u == nil {
-		t.Fatal("New() returned nil")
-	}
 }
 
 func TestProcessCommit_EmptyClusters(t *testing.T) {
@@ -51,7 +40,6 @@ func TestProcessCommit_EmptyClusters(t *testing.T) {
 	emptyRoot := merkle.NewTree(nil).Root
 
 	commit := &storage.OracleCommit{
-		RoundID:         1,
 		TargetEpoch:     100,
 		MerkleRoot:      emptyRoot[:],
 		ReferenceBlock:  1000,
@@ -75,7 +63,6 @@ func TestProcessCommit_RootMismatch(t *testing.T) {
 	}
 
 	commit := &storage.OracleCommit{
-		RoundID:         1,
 		TargetEpoch:     100,
 		MerkleRoot:      make([]byte, 32), // Wrong root (all zeros)
 		ReferenceBlock:  1000,
@@ -89,50 +76,4 @@ func TestProcessCommit_RootMismatch(t *testing.T) {
 	if err != nil && !bytes.Contains([]byte(err.Error()), []byte("root mismatch")) {
 		t.Errorf("Expected 'root mismatch' error, got: %v", err)
 	}
-}
-
-func TestProcessCommit_ValidRootNoContractClient(t *testing.T) {
-	store := newMockStorage()
-
-	// Create a cluster in store
-	clusterID := [32]byte{0x01}
-	store.clusters[string(clusterID[:])] = &storage.ClusterRow{
-		ClusterID:      clusterID[:],
-		OwnerAddress:   make([]byte, 20),
-		OperatorIDs:    []uint64{1, 2, 3, 4},
-		ValidatorCount: 1,
-		IsActive:       true,
-		Balance:        big.NewInt(1000),
-	}
-
-	clusterMap := map[[32]byte]uint32{
-		clusterID: 32,
-	}
-	tree := merkle.NewTree(clusterMap)
-
-	clusterBalances := []storage.ClusterBalance{
-		{ClusterID: clusterID[:], EffectiveBalance: 32},
-	}
-
-	commit := &storage.OracleCommit{
-		RoundID:         1,
-		TargetEpoch:     100,
-		MerkleRoot:      tree.Root[:],
-		ReferenceBlock:  1000,
-		ClusterBalances: clusterBalances,
-	}
-
-	// Without contract client, processCluster will panic
-	// This test verifies root validation passes before that point
-	u := &Updater{storage: store, contractClient: nil}
-
-	// We expect a panic since contractClient is nil
-	// This is a limitation - full testing requires mock contract client
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when contractClient is nil")
-		}
-	}()
-
-	_ = u.processCommit(context.Background(), commit)
 }

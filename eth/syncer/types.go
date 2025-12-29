@@ -9,32 +9,29 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// Event type constants for SSV contract events.
 const (
-	EventValidatorAdded        = "ValidatorAdded"
-	EventValidatorRemoved      = "ValidatorRemoved"
-	EventClusterLiquidated     = "ClusterLiquidated"
-	EventClusterReactivated    = "ClusterReactivated"
-	EventClusterWithdrawn      = "ClusterWithdrawn"
-	EventClusterDeposited      = "ClusterDeposited"
-	EventClusterMigratedToETH  = "ClusterMigratedToETH"
-	EventClusterBalanceUpdated = "ClusterBalanceUpdated"
+	eventValidatorAdded        = "ValidatorAdded"
+	eventValidatorRemoved      = "ValidatorRemoved"
+	eventClusterLiquidated     = "ClusterLiquidated"
+	eventClusterReactivated    = "ClusterReactivated"
+	eventClusterWithdrawn      = "ClusterWithdrawn"
+	eventClusterDeposited      = "ClusterDeposited"
+	eventClusterMigratedToETH  = "ClusterMigratedToETH"
+	eventClusterBalanceUpdated = "ClusterBalanceUpdated"
 )
 
-// Event signatures use Solidity tuple format: (type1,type2,...) NOT tuple(type1,type2,...)
 var (
-	EventSigValidatorAdded        = crypto.Keccak256Hash([]byte("ValidatorAdded(address,uint64[],bytes,bytes,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigValidatorRemoved      = crypto.Keccak256Hash([]byte("ValidatorRemoved(address,uint64[],bytes,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterLiquidated     = crypto.Keccak256Hash([]byte("ClusterLiquidated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterReactivated    = crypto.Keccak256Hash([]byte("ClusterReactivated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterWithdrawn      = crypto.Keccak256Hash([]byte("ClusterWithdrawn(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterDeposited      = crypto.Keccak256Hash([]byte("ClusterDeposited(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterMigratedToETH  = crypto.Keccak256Hash([]byte("ClusterMigratedToETH(address,uint64[],uint256,uint256,uint32,(uint32,uint64,uint64,bool,uint256))"))
-	EventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(address,uint64[],uint64,uint32,(uint32,uint64,uint64,bool,uint256))"))
+	eventSigValidatorAdded        = crypto.Keccak256Hash([]byte("ValidatorAdded(address,uint64[],bytes,bytes,(uint32,uint64,uint64,bool,uint256))"))
+	eventSigValidatorRemoved      = crypto.Keccak256Hash([]byte("ValidatorRemoved(address,uint64[],bytes,(uint32,uint64,uint64,bool,uint256))"))
+	eventSigClusterLiquidated     = crypto.Keccak256Hash([]byte("ClusterLiquidated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
+	eventSigClusterReactivated    = crypto.Keccak256Hash([]byte("ClusterReactivated(address,uint64[],(uint32,uint64,uint64,bool,uint256))"))
+	eventSigClusterWithdrawn      = crypto.Keccak256Hash([]byte("ClusterWithdrawn(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
+	eventSigClusterDeposited      = crypto.Keccak256Hash([]byte("ClusterDeposited(address,uint64[],uint256,(uint32,uint64,uint64,bool,uint256))"))
+	eventSigClusterMigratedToETH  = crypto.Keccak256Hash([]byte("ClusterMigratedToETH(address,uint64[],uint256,uint256,uint32,(uint32,uint64,uint64,bool,uint256))"))
+	eventSigClusterBalanceUpdated = crypto.Keccak256Hash([]byte("ClusterBalanceUpdated(address,uint64[],uint64,uint32,(uint32,uint64,uint64,bool,uint256))"))
 )
 
-// Cluster represents an SSV cluster state (matches ISSVNetworkCore.sol).
-type Cluster struct {
+type cluster struct {
 	ValidatorCount  uint32
 	NetworkFeeIndex uint64
 	Index           uint64
@@ -42,75 +39,66 @@ type Cluster struct {
 	Balance         *big.Int
 }
 
-// ValidatorAddedEvent is emitted when a validator is registered.
-type ValidatorAddedEvent struct {
+type validatorAddedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
 	PublicKey   []byte
 	Shares      []byte
-	Cluster     Cluster
+	Cluster     cluster
 }
 
-// ValidatorRemovedEvent is emitted when a validator is removed.
-type ValidatorRemovedEvent struct {
+type validatorRemovedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
 	PublicKey   []byte
-	Cluster     Cluster
+	Cluster     cluster
 }
 
-// ClusterLiquidatedEvent is emitted when a cluster is liquidated.
-type ClusterLiquidatedEvent struct {
+type clusterLiquidatedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
-	Cluster     Cluster
+	Cluster     cluster
 }
 
-// ClusterReactivatedEvent is emitted when a liquidated cluster is reactivated.
-type ClusterReactivatedEvent struct {
+type clusterReactivatedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
-	Cluster     Cluster
+	Cluster     cluster
 }
 
-// ClusterWithdrawnEvent is emitted when SSV tokens are withdrawn from a cluster.
-type ClusterWithdrawnEvent struct {
+type clusterWithdrawnEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
 	Value       *big.Int
-	Cluster     Cluster
+	Cluster     cluster
 }
 
-// ClusterDepositedEvent is emitted when SSV tokens are deposited to a cluster.
-type ClusterDepositedEvent struct {
+type clusterDepositedEvent struct {
 	Owner       common.Address
 	OperatorIDs []uint64
 	Value       *big.Int
-	Cluster     Cluster
+	Cluster     cluster
 }
 
-// ClusterMigratedToETHEvent is emitted when a cluster migrates to ETH payments.
-type ClusterMigratedToETHEvent struct {
+type clusterMigratedToETHEvent struct {
 	Owner            common.Address
 	OperatorIDs      []uint64
 	ETHDeposited     *big.Int
 	SSVRefunded      *big.Int
 	EffectiveBalance uint32
-	Cluster          Cluster
+	Cluster          cluster
 }
 
-// ClusterBalanceUpdatedEvent is emitted when a cluster's effective balance is updated.
-type ClusterBalanceUpdatedEvent struct {
+type clusterBalanceUpdatedEvent struct {
 	Owner            common.Address // indexed
 	OperatorIDs      []uint64
 	BlockNum         uint64 // indexed
 	EffectiveBalance uint32
-	Cluster          Cluster
+	Cluster          cluster
 }
 
-// ComputeClusterID computes keccak256(abi.encodePacked(owner, uint256(op1), uint256(op2), ...))
-// with operator IDs sorted ascending. Matches SSV contract's cluster ID computation.
-func ComputeClusterID(owner common.Address, operatorIDs []uint64) [32]byte {
+// computeClusterID matches the contract's cluster ID computation.
+func computeClusterID(owner common.Address, operatorIDs []uint64) [32]byte {
 	sortedIDs := make([]uint64, len(operatorIDs))
 	copy(sortedIDs, operatorIDs)
 	sort.Slice(sortedIDs, func(i, j int) bool {
@@ -137,43 +125,43 @@ func ComputeClusterID(owner common.Address, operatorIDs []uint64) [32]byte {
 // clusterEvent is implemented by all events that affect cluster state.
 type clusterEvent interface {
 	clusterKey() (common.Address, []uint64)
-	cluster() *Cluster
+	cluster() *cluster
 }
 
-func (e *ValidatorAddedEvent) clusterKey() (common.Address, []uint64) { return e.Owner, e.OperatorIDs }
-func (e *ValidatorAddedEvent) cluster() *Cluster                      { return &e.Cluster }
+func (e *validatorAddedEvent) clusterKey() (common.Address, []uint64) { return e.Owner, e.OperatorIDs }
+func (e *validatorAddedEvent) cluster() *cluster                      { return &e.Cluster }
 
-func (e *ValidatorRemovedEvent) clusterKey() (common.Address, []uint64) {
+func (e *validatorRemovedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
-func (e *ValidatorRemovedEvent) cluster() *Cluster { return &e.Cluster }
+func (e *validatorRemovedEvent) cluster() *cluster { return &e.Cluster }
 
-func (e *ClusterLiquidatedEvent) clusterKey() (common.Address, []uint64) {
+func (e *clusterLiquidatedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
-func (e *ClusterLiquidatedEvent) cluster() *Cluster { return &e.Cluster }
+func (e *clusterLiquidatedEvent) cluster() *cluster { return &e.Cluster }
 
-func (e *ClusterReactivatedEvent) clusterKey() (common.Address, []uint64) {
+func (e *clusterReactivatedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
-func (e *ClusterReactivatedEvent) cluster() *Cluster { return &e.Cluster }
+func (e *clusterReactivatedEvent) cluster() *cluster { return &e.Cluster }
 
-func (e *ClusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
+func (e *clusterWithdrawnEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
-func (e *ClusterWithdrawnEvent) cluster() *Cluster { return &e.Cluster }
+func (e *clusterWithdrawnEvent) cluster() *cluster { return &e.Cluster }
 
-func (e *ClusterDepositedEvent) clusterKey() (common.Address, []uint64) {
+func (e *clusterDepositedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
-func (e *ClusterDepositedEvent) cluster() *Cluster { return &e.Cluster }
+func (e *clusterDepositedEvent) cluster() *cluster { return &e.Cluster }
 
-func (e *ClusterMigratedToETHEvent) clusterKey() (common.Address, []uint64) {
+func (e *clusterMigratedToETHEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
-func (e *ClusterMigratedToETHEvent) cluster() *Cluster { return &e.Cluster }
+func (e *clusterMigratedToETHEvent) cluster() *cluster { return &e.Cluster }
 
-func (e *ClusterBalanceUpdatedEvent) clusterKey() (common.Address, []uint64) {
+func (e *clusterBalanceUpdatedEvent) clusterKey() (common.Address, []uint64) {
 	return e.Owner, e.OperatorIDs
 }
-func (e *ClusterBalanceUpdatedEvent) cluster() *Cluster { return &e.Cluster }
+func (e *clusterBalanceUpdatedEvent) cluster() *cluster { return &e.Cluster }

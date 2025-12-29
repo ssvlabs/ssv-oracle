@@ -59,10 +59,11 @@ func TestNewTree_LeavesSortedByHash(t *testing.T) {
 	}
 
 	tree := NewTree(clusters)
-	require.Len(t, tree.Leaves, 3)
+	leaves := tree.Leaves()
+	require.Len(t, leaves, 3)
 
-	for i := 1; i < len(tree.Leaves); i++ {
-		require.True(t, bytes.Compare(tree.Leaves[i-1].Hash[:], tree.Leaves[i].Hash[:]) < 0)
+	for i := 1; i < len(leaves); i++ {
+		require.True(t, bytes.Compare(leaves[i-1].Hash[:], leaves[i].Hash[:]) < 0)
 	}
 }
 
@@ -75,7 +76,7 @@ func TestGetProof_Verify(t *testing.T) {
 
 	tree := NewTree(clusters)
 
-	for _, leaf := range tree.Leaves {
+	for _, leaf := range tree.Leaves() {
 		proof, err := tree.GetProof(leaf.ClusterID)
 		require.NoError(t, err)
 
@@ -92,7 +93,7 @@ func TestGetProof_SingleCluster(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, proof)
 
-	computed := verifyProof(tree.Leaves[0].Hash, proof)
+	computed := verifyProof(tree.Leaves()[0].Hash, proof)
 	require.Equal(t, tree.Root, computed)
 }
 
@@ -111,7 +112,7 @@ func TestGetProof_LargeTree(t *testing.T) {
 
 	tree := NewTree(clusters)
 
-	for _, leaf := range tree.Leaves {
+	for _, leaf := range tree.Leaves() {
 		proof, err := tree.GetProof(leaf.ClusterID)
 		require.NoError(t, err)
 

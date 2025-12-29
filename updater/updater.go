@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 
 	"ssv-oracle/contract"
 	"ssv-oracle/eth/syncer"
@@ -153,9 +152,7 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 
-	log.Infow("Found commit",
-		"targetEpoch", commit.TargetEpoch,
-		"round", commit.RoundID)
+	log.Infow("Found commit", "targetEpoch", commit.TargetEpoch)
 
 	if err := u.processCommit(ctx, commit); err != nil {
 		log.Errorw("Failed to process commit", "error", err)
@@ -233,7 +230,7 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 	var stats processStats
 	var staleLeaves []merkle.Leaf
 
-	for _, leaf := range tree.Leaves {
+	for _, leaf := range tree.Leaves() {
 		if ctx.Err() != nil {
 			break
 		}
@@ -314,7 +311,15 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		return false, nil
 	}
 
-	receipt, err := u.submitUpdate(ctx, blockNum, cluster, leaf, proof)
+	receipt, err := u.contractClient.UpdateClusterBalance(
+		ctx,
+		blockNum,
+		common.BytesToAddress(cluster.OwnerAddress),
+		cluster.OperatorIDs,
+		toContractCluster(cluster),
+		leaf.EffectiveBalance,
+		proof,
+	)
 	if err != nil {
 		return false, err
 	}
@@ -326,22 +331,4 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		"block", receipt.BlockNumber.Uint64())
 
 	return true, nil
-}
-
-func (u *Updater) submitUpdate(
-	ctx context.Context,
-	blockNum uint64,
-	cluster *storage.ClusterRow,
-	leaf merkle.Leaf,
-	proof [][32]byte,
-) (*types.Receipt, error) {
-	return u.contractClient.UpdateClusterBalance(
-		ctx,
-		blockNum,
-		common.BytesToAddress(cluster.OwnerAddress),
-		cluster.OperatorIDs,
-		toContractCluster(cluster),
-		leaf.EffectiveBalance,
-		proof,
-	)
 }

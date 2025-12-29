@@ -25,10 +25,7 @@ const (
 	maxParallelRequests  = 5
 )
 
-// API defines the beacon node capabilities required by the oracle.
-type API interface {
-	eth2client.GenesisProvider
-	eth2client.SpecProvider
+type beaconAPI interface {
 	eth2client.FinalityProvider
 	eth2client.SignedBeaconBlockProvider
 	eth2client.ValidatorsProvider
@@ -37,8 +34,7 @@ type API interface {
 
 // Client wraps a beacon node client for fetching chain data.
 type Client struct {
-	client      API
-	Spec        *Spec
+	beacon      beaconAPI
 	retryConfig eth.RetryConfig
 }
 
@@ -49,7 +45,7 @@ type ClientConfig struct {
 	RetryConfig *eth.RetryConfig // nil uses DefaultRetryConfig()
 }
 
-// New creates a new beacon client and fetches the chain spec.
+// New creates a new beacon client.
 func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = defaultBeaconTimeout
@@ -69,58 +65,10 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		retryConfig = *cfg.RetryConfig
 	}
 
-	bc := &Client{
-		client:      client.(API),
+	return &Client{
+		beacon:      client.(beaconAPI),
 		retryConfig: retryConfig,
-	}
-
-	if err := bc.fetchSpec(ctx); err != nil {
-		return nil, err
-	}
-
-	return bc, nil
-}
-
-func (c *Client) fetchSpec(ctx context.Context) error {
-	return eth.WithRetry(ctx, c.retryConfig, func() error {
-		genesisResp, err := c.client.Genesis(ctx, &api.GenesisOpts{})
-		if err != nil {
-			return fmt.Errorf("get genesis: %w", err)
-		}
-
-		specResp, err := c.client.Spec(ctx, &api.SpecOpts{})
-		if err != nil {
-			return fmt.Errorf("get spec: %w", err)
-		}
-
-		slotsPerEpoch, ok := specResp.Data["SLOTS_PER_EPOCH"].(uint64)
-		if !ok {
-			return fmt.Errorf("SLOTS_PER_EPOCH not found or invalid type in spec")
-		}
-
-		secondsPerSlot, ok := specResp.Data["SECONDS_PER_SLOT"].(time.Duration)
-		if !ok {
-			return fmt.Errorf("SECONDS_PER_SLOT not found or invalid type in spec")
-		}
-
-		c.Spec = &Spec{
-			GenesisTime:   genesisResp.Data.GenesisTime,
-			SlotsPerEpoch: slotsPerEpoch,
-			SlotDuration:  secondsPerSlot,
-		}
-
-		logger.Infow("Beacon spec loaded",
-			"genesis", c.Spec.GenesisTime.Format(time.RFC3339),
-			"slotsPerEpoch", c.Spec.SlotsPerEpoch,
-			"slotDuration", c.Spec.SlotDuration)
-
-		return nil
-	})
-}
-
-// CurrentEpoch returns the current epoch based on wall clock time.
-func (c *Client) CurrentEpoch() uint64 {
-	return c.Spec.CurrentEpoch()
+	}, nil
 }
 
 // FinalizedCheckpoint contains the finalized epoch and corresponding execution block.
@@ -134,7 +82,7 @@ type FinalizedCheckpoint struct {
 func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoint, error) {
 	var checkpoint *FinalizedCheckpoint
 	err := eth.WithRetry(ctx, c.retryConfig, func() error {
-		finalityResp, err := c.client.Finality(ctx, &api.FinalityOpts{
+		finalityResp, err := c.beacon.Finality(ctx, &api.FinalityOpts{
 			State: "head",
 		})
 		if err != nil {
@@ -144,7 +92,7 @@ func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoi
 		epoch := uint64(finalityResp.Data.Finalized.Epoch)
 		root := finalityResp.Data.Finalized.Root
 
-		blockResp, err := c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
+		blockResp, err := c.beacon.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
 			Block: root.String(),
 		})
 		if err != nil {
@@ -200,7 +148,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pub
 	for _, batch := range batches {
 		g.Go(func() error {
 			return eth.WithRetry(ctx, c.retryConfig, func() error {
-				resp, err := c.client.Validators(ctx, &api.ValidatorsOpts{
+				resp, err := c.beacon.Validators(ctx, &api.ValidatorsOpts{
 					State:   stateRoot,
 					PubKeys: batch,
 				})
@@ -231,7 +179,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pub
 func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *FinalizedCheckpoint, error) {
 	ch := make(chan *FinalizedCheckpoint, 1)
 
-	err := c.client.Events(ctx, &api.EventsOpts{
+	err := c.beacon.Events(ctx, &api.EventsOpts{
 		Topics: []string{"finalized_checkpoint"},
 		FinalizedCheckpointHandler: func(_ context.Context, event *apiv1.FinalizedCheckpointEvent) {
 			checkpoint, err := c.handleFinalizedEvent(ctx, event)
@@ -249,7 +197,8 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 					"fullyFinalized", checkpoint.Epoch-1,
 					"referenceBlock", checkpoint.BlockNum)
 			default:
-				// Channel full, skip (consumer will get next one)
+				logger.Warnw("Dropped finalized checkpoint (consumer slow)",
+					"epoch", checkpoint.Epoch)
 			}
 		},
 	})
@@ -258,7 +207,6 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 		return nil, fmt.Errorf("subscribe to finalized checkpoints: %w", err)
 	}
 
-	// Close channel when context is done
 	go func() {
 		<-ctx.Done()
 		close(ch)
@@ -271,7 +219,7 @@ func (c *Client) handleFinalizedEvent(ctx context.Context, event *apiv1.Finalize
 	var blockResp *api.Response[*spec.VersionedSignedBeaconBlock]
 	err := eth.WithRetry(ctx, c.retryConfig, func() error {
 		var err error
-		blockResp, err = c.client.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
+		blockResp, err = c.beacon.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
 			Block: event.Block.String(),
 		})
 		if err != nil {

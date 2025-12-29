@@ -12,19 +12,18 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// EnvSigner signs transactions using a private key from an environment variable.
+// envSigner signs transactions using a private key from an environment variable.
 //
 // WARNING: For development/testing only. Not recommended for production.
 // Environment variables may be logged, visible in process listings, or persisted
 // in shell history. Private keys are not securely erased by Go's GC.
-// For production, use KeystoreSigner with encrypted keystore files.
-type EnvSigner struct {
+// For production, use an encrypted keystore signer.
+type envSigner struct {
 	privateKey *ecdsa.PrivateKey
 	address    common.Address
 }
 
-// NewEnvSigner creates a signer from an environment variable containing a hex private key.
-func NewEnvSigner(envVarName string) (*EnvSigner, error) {
+func newEnvSigner(envVarName string) (*envSigner, error) {
 	if envVarName == "" {
 		return nil, fmt.Errorf("environment variable name cannot be empty")
 	}
@@ -39,19 +38,19 @@ func NewEnvSigner(envVarName string) (*EnvSigner, error) {
 		return nil, fmt.Errorf("parse private key from %s: %w", envVarName, err)
 	}
 
-	return &EnvSigner{
+	return &envSigner{
 		privateKey: privateKey,
 		address:    crypto.PubkeyToAddress(privateKey.PublicKey),
 	}, nil
 }
 
 // Address returns the signer's Ethereum address.
-func (s *EnvSigner) Address() common.Address {
+func (s *envSigner) Address() common.Address {
 	return s.address
 }
 
 // Close zeros out the private key (best-effort).
-func (s *EnvSigner) Close() error {
+func (s *envSigner) Close() error {
 	if s.privateKey != nil && s.privateKey.D != nil {
 		s.privateKey.D.SetInt64(0)
 	}
@@ -60,6 +59,12 @@ func (s *EnvSigner) Close() error {
 }
 
 // Sign signs a transaction with the private key.
-func (s *EnvSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+func (s *envSigner) Sign(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+	if s.privateKey == nil {
+		return nil, fmt.Errorf("signer is closed")
+	}
+	if chainID == nil || chainID.Sign() == 0 {
+		return nil, fmt.Errorf("chainID is required (EIP-155 replay protection)")
+	}
 	return types.SignTx(tx, types.LatestSignerForChainID(chainID), s.privateKey)
 }

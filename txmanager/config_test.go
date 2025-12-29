@@ -125,32 +125,6 @@ func TestTxPolicy_Validate(t *testing.T) {
 	}
 }
 
-func TestDefaultTxPolicy(t *testing.T) {
-	policy := DefaultTxPolicy()
-	if err := policy.Validate(); err != nil {
-		t.Errorf("DefaultTxPolicy() should be valid, got error: %v", err)
-	}
-
-	if policy.GasBufferPercent != DefaultGasBufferPercent {
-		t.Errorf("GasBufferPercent = %d, want %d", policy.GasBufferPercent, DefaultGasBufferPercent)
-	}
-	if policy.MaxFeePerGas != DefaultMaxFeePerGas {
-		t.Errorf("MaxFeePerGas = %s, want %s", policy.MaxFeePerGas, DefaultMaxFeePerGas)
-	}
-	if policy.PendingTimeoutBlocks != DefaultPendingTimeoutBlocks {
-		t.Errorf("PendingTimeoutBlocks = %d, want %d", policy.PendingTimeoutBlocks, DefaultPendingTimeoutBlocks)
-	}
-	if policy.GasBumpPercent != DefaultGasBumpPercent {
-		t.Errorf("GasBumpPercent = %d, want %d", policy.GasBumpPercent, DefaultGasBumpPercent)
-	}
-	if policy.MaxRetries != DefaultMaxRetries {
-		t.Errorf("MaxRetries = %d, want %d", policy.MaxRetries, DefaultMaxRetries)
-	}
-	if policy.RetryDelay != DefaultRetryDelay {
-		t.Errorf("RetryDelay = %v, want %v", policy.RetryDelay, DefaultRetryDelay)
-	}
-}
-
 func TestTxPolicy_ApplyDefaults(t *testing.T) {
 	// Empty policy should get all defaults
 	policy := &TxPolicy{}
@@ -178,7 +152,7 @@ func TestTxPolicy_ApplyDefaults(t *testing.T) {
 		t.Errorf("MaxRetries should remain 5, got %d", policy2.MaxRetries)
 	}
 	// Other fields should get defaults
-	if policy2.PendingTimeoutBlocks != DefaultPendingTimeoutBlocks {
+	if policy2.PendingTimeoutBlocks != defaultPendingTimeoutBlocks {
 		t.Errorf("PendingTimeoutBlocks should be default, got %d", policy2.PendingTimeoutBlocks)
 	}
 }

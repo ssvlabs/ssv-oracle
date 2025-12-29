@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/term"
 
 	"ssv-oracle/eth/execution"
 	"ssv-oracle/logger"
@@ -26,7 +29,7 @@ type Storage interface {
 type EventSyncer struct {
 	client      *execution.Client
 	storage     Storage
-	parser      *EventParser
+	parser      *eventParser
 	ssvContract common.Address
 }
 
@@ -42,7 +45,7 @@ func New(cfg Config) *EventSyncer {
 	return &EventSyncer{
 		client:      cfg.ExecutionClient,
 		storage:     cfg.Storage,
-		parser:      NewParser(),
+		parser:      newParser(),
 		ssvContract: cfg.SSVContract,
 	}
 }
@@ -78,12 +81,17 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	}
 
 	totalBlocks := int(targetBlock - fromBlock)
+	isTTY := term.IsTerminal(int(os.Stderr.Fd()))
 
-	bar := progressbar.NewOptions(totalBlocks,
+	barOpts := []progressbar.Option{
 		progressbar.OptionSetDescription("Syncing events"),
+		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionSetWidth(40),
 		progressbar.OptionShowCount(),
 		progressbar.OptionShowIts(),
+		progressbar.OptionThrottle(65 * time.Millisecond),
+		progressbar.OptionSetPredictTime(true),
+		progressbar.OptionClearOnFinish(),
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        "=",
 			SaucerHead:    ">",
@@ -91,7 +99,11 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 			BarStart:      "[",
 			BarEnd:        "]",
 		}),
-	)
+	}
+	if !isTTY {
+		barOpts = append(barOpts, progressbar.OptionSetVisibility(false))
+	}
+	bar := progressbar.NewOptions(totalBlocks, barOpts...)
 
 	knownEvents := 0
 	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, targetBlock, func(batchEnd uint64, logs []execution.BlockLogs) error {
@@ -121,12 +133,10 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	}
 
 	_ = bar.Finish()
-	fmt.Println() // New line after progress bar
 	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "newEvents", knownEvents)
 	return nil
 }
 
-// syncOnce syncs to the current finalized block.
 func (s *EventSyncer) syncOnce(ctx context.Context) error {
 	finalizedBlock, err := s.client.GetFinalizedBlock(ctx)
 	if err != nil {
@@ -135,8 +145,6 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 	return s.SyncToBlock(ctx, finalizedBlock)
 }
 
-// processBlockLogs processes all logs from a block in a single transaction.
-// Returns the count of known (successfully parsed) events.
 func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
 	tx, err := s.storage.BeginTx(ctx)
 	if err != nil {
@@ -174,20 +182,18 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.
 	return knownEvents, nil
 }
 
-// processLog processes a single log entry.
-// Returns (known, error) where known indicates if the event was a recognized type.
 func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs) (bool, error) {
-	eventType, eventData, err := s.parser.ParseLog(log)
+	eventType, eventData, err := s.parser.parseLog(log)
 	if err != nil {
 		return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
 	}
 
-	rawLog, err := EncodeLogToJSON(log)
+	rawLog, err := encodeLogToJSON(log)
 	if err != nil {
 		return false, fmt.Errorf("encode raw log: %w", err)
 	}
 
-	rawEvent, err := EncodeEventToJSON(eventData)
+	rawEvent, err := encodeEventToJSON(eventData)
 	if err != nil {
 		return false, fmt.Errorf("encode event: %w", err)
 	}
@@ -215,7 +221,6 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 	return true, nil
 }
 
-// storeRawEvent stores a raw event when parsing fails.
 func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs, parseErr error) error {
 	if !errors.Is(parseErr, errUnknownEvent) {
 		logger.Warnw("Failed to parse event",
@@ -225,7 +230,7 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *typ
 			"error", parseErr)
 	}
 
-	rawLog, err := EncodeLogToJSON(log)
+	rawLog, err := encodeLogToJSON(log)
 	if err != nil {
 		return fmt.Errorf("encode raw log: %w", err)
 	}
@@ -251,28 +256,28 @@ func (s *EventSyncer) applyEvent(ctx context.Context, tx storage.Tx, eventType s
 	clusterID := computeClusterIDFromEvent(eventData)
 
 	switch eventType {
-	case EventValidatorAdded:
-		return s.handleValidatorAdded(ctx, tx, eventData.(*ValidatorAddedEvent), clusterID)
-	case EventValidatorRemoved:
-		return s.handleValidatorRemoved(ctx, tx, eventData.(*ValidatorRemovedEvent), clusterID)
-	case EventClusterLiquidated:
-		return s.handleClusterLiquidated(ctx, tx, eventData.(*ClusterLiquidatedEvent), clusterID)
-	case EventClusterReactivated:
-		return s.handleClusterReactivated(ctx, tx, eventData.(*ClusterReactivatedEvent), clusterID)
-	case EventClusterWithdrawn:
-		return s.handleClusterWithdrawn(ctx, tx, eventData.(*ClusterWithdrawnEvent), clusterID)
-	case EventClusterDeposited:
-		return s.handleClusterDeposited(ctx, tx, eventData.(*ClusterDepositedEvent), clusterID)
-	case EventClusterMigratedToETH:
-		return s.handleClusterMigratedToETH(ctx, tx, eventData.(*ClusterMigratedToETHEvent), clusterID)
-	case EventClusterBalanceUpdated:
-		return s.handleClusterBalanceUpdated(ctx, tx, eventData.(*ClusterBalanceUpdatedEvent), clusterID)
+	case eventValidatorAdded:
+		return s.handleValidatorAdded(ctx, tx, eventData.(*validatorAddedEvent), clusterID)
+	case eventValidatorRemoved:
+		return s.handleValidatorRemoved(ctx, tx, eventData.(*validatorRemovedEvent), clusterID)
+	case eventClusterLiquidated:
+		return s.handleClusterLiquidated(ctx, tx, eventData.(*clusterLiquidatedEvent), clusterID)
+	case eventClusterReactivated:
+		return s.handleClusterReactivated(ctx, tx, eventData.(*clusterReactivatedEvent), clusterID)
+	case eventClusterWithdrawn:
+		return s.handleClusterWithdrawn(ctx, tx, eventData.(*clusterWithdrawnEvent), clusterID)
+	case eventClusterDeposited:
+		return s.handleClusterDeposited(ctx, tx, eventData.(*clusterDepositedEvent), clusterID)
+	case eventClusterMigratedToETH:
+		return s.handleClusterMigratedToETH(ctx, tx, eventData.(*clusterMigratedToETHEvent), clusterID)
+	case eventClusterBalanceUpdated:
+		return s.handleClusterBalanceUpdated(ctx, tx, eventData.(*clusterBalanceUpdatedEvent), clusterID)
 	default:
 		return fmt.Errorf("unhandled event type: %s", eventType)
 	}
 }
 
-func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx storage.Tx, event *ValidatorAddedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx storage.Tx, event *validatorAddedEvent, clusterID []byte) error {
 	cluster := &storage.ClusterRow{
 		ClusterID:       clusterID,
 		OwnerAddress:    event.Owner.Bytes(),
@@ -290,8 +295,7 @@ func (s *EventSyncer) handleValidatorAdded(ctx context.Context, tx storage.Tx, e
 	return tx.InsertValidator(ctx, clusterID, event.PublicKey)
 }
 
-// handleValidatorRemoved deletes the validator and removes the cluster if empty.
-func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx storage.Tx, event *ValidatorRemovedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx storage.Tx, event *validatorRemovedEvent, clusterID []byte) error {
 	if err := tx.DeleteValidator(ctx, clusterID, event.PublicKey); err != nil {
 		return err
 	}
@@ -314,31 +318,31 @@ func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx storage.Tx,
 	return tx.UpsertCluster(ctx, cluster)
 }
 
-func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx storage.Tx, event *ClusterLiquidatedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx storage.Tx, event *clusterLiquidatedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterReactivated(ctx context.Context, tx storage.Tx, event *ClusterReactivatedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterReactivated(ctx context.Context, tx storage.Tx, event *clusterReactivatedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterWithdrawn(ctx context.Context, tx storage.Tx, event *ClusterWithdrawnEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterWithdrawn(ctx context.Context, tx storage.Tx, event *clusterWithdrawnEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx storage.Tx, event *ClusterDepositedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterDeposited(ctx context.Context, tx storage.Tx, event *clusterDepositedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterMigratedToETH(ctx context.Context, tx storage.Tx, event *ClusterMigratedToETHEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterMigratedToETH(ctx context.Context, tx storage.Tx, event *clusterMigratedToETHEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx storage.Tx, event *ClusterBalanceUpdatedEvent, clusterID []byte) error {
+func (s *EventSyncer) handleClusterBalanceUpdated(ctx context.Context, tx storage.Tx, event *clusterBalanceUpdatedEvent, clusterID []byte) error {
 	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
-func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx storage.Tx, owner common.Address, operatorIDs []uint64, clusterID []byte, cluster *Cluster) error {
+func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx storage.Tx, owner common.Address, operatorIDs []uint64, clusterID []byte, cluster *cluster) error {
 	row := &storage.ClusterRow{
 		ClusterID:       clusterID,
 		OwnerAddress:    owner.Bytes(),
@@ -352,11 +356,10 @@ func (s *EventSyncer) upsertClusterFromEvent(ctx context.Context, tx storage.Tx,
 	return tx.UpsertCluster(ctx, row)
 }
 
-// computeClusterIDFromEvent extracts cluster ID from event data, or nil if unknown type.
 func computeClusterIDFromEvent(eventData any) []byte {
 	if e, ok := eventData.(clusterEvent); ok {
 		owner, operatorIDs := e.clusterKey()
-		id := ComputeClusterID(owner, operatorIDs)
+		id := computeClusterID(owner, operatorIDs)
 		return id[:]
 	}
 	return nil
@@ -395,13 +398,18 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 		})
 }
 
-// applyClusterUpdates processes events and updates only the clusters table.
-// Does not insert events, validators, or update sync progress.
 func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) error {
 	for _, log := range blockLogs.Logs {
-		_, eventData, err := s.parser.ParseLog(&log)
+		_, eventData, err := s.parser.parseLog(&log)
 		if err != nil {
-			continue // skip unknown events
+			if !errors.Is(err, errUnknownEvent) {
+				logger.Warnw("Failed to parse event in head sync",
+					"block", blockLogs.BlockNumber,
+					"txHash", log.TxHash.Hex(),
+					"logIndex", log.Index,
+					"error", err)
+			}
+			continue
 		}
 
 		e, ok := eventData.(clusterEvent)
@@ -410,7 +418,7 @@ func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs executi
 		}
 
 		owner, operatorIDs := e.clusterKey()
-		clusterID := ComputeClusterID(owner, operatorIDs)
+		clusterID := computeClusterID(owner, operatorIDs)
 		cluster := e.cluster()
 
 		row := &storage.ClusterRow{

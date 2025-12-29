@@ -7,10 +7,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// Signer type constants.
 const (
-	TypeEnv      = "env"
-	TypeKeystore = "keystore"
+	typeEnv      = "env"
+	typeKeystore = "keystore"
 )
 
 // Config holds wallet configuration.

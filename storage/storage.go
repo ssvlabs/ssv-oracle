@@ -18,6 +18,16 @@ import (
 	"ssv-oracle/logger"
 )
 
+// SQLite configuration constants.
+const (
+	sqliteBusyTimeoutMs = 5000  // Wait up to 5s for locks
+	sqliteCacheSizeKB   = 64000 // 64MB page cache
+	maxIdleConns        = 2
+)
+
+//go:embed schema.sql
+var schemaSQL string
+
 // Tx defines the interface for database transactions.
 type Tx interface {
 	Commit() error
@@ -78,14 +88,16 @@ type ClusterBalance struct {
 type CommitStatus string
 
 const (
-	CommitStatusPending   CommitStatus = "pending"
+	// CommitStatusPending indicates a commit awaiting confirmation.
+	CommitStatusPending CommitStatus = "pending"
+	// CommitStatusConfirmed indicates a confirmed commit.
 	CommitStatusConfirmed CommitStatus = "confirmed"
-	CommitStatusFailed    CommitStatus = "failed"
+	// CommitStatusFailed indicates a failed commit.
+	CommitStatusFailed CommitStatus = "failed"
 )
 
 // OracleCommit represents a stored oracle merkle root commit.
 type OracleCommit struct {
-	RoundID         uint64
 	TargetEpoch     uint64
 	MerkleRoot      []byte
 	ReferenceBlock  uint64
@@ -93,16 +105,6 @@ type OracleCommit struct {
 	Status          CommitStatus
 	TxHash          []byte
 }
-
-// SQLite configuration constants.
-const (
-	sqliteBusyTimeoutMs = 5000  // Wait up to 5s for locks
-	sqliteCacheSizeKB   = 64000 // 64MB page cache
-	maxIdleConns        = 2
-)
-
-//go:embed schema.sql
-var schemaSQL string
 
 // Storage implements persistent storage using SQLite.
 type Storage struct {
@@ -117,7 +119,12 @@ func New(dbPath string) (*Storage, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// Use DSN pragmas for per-connection settings (foreign_keys, busy_timeout, cache_size)
+	// These are applied to every connection from the pool automatically
+	dsn := fmt.Sprintf("%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(%d)&_pragma=cache_size(-%d)",
+		dbPath, sqliteBusyTimeoutMs, sqliteCacheSizeKB)
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -126,15 +133,13 @@ func New(dbPath string) (*Storage, error) {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
+	// Database-level pragmas (only need to be set once, not per-connection)
 	// WAL mode for concurrent reads, NORMAL sync for durability without excessive fsync
-	pragmas := []string{
+	dbPragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL",
-		"PRAGMA foreign_keys=ON",
-		fmt.Sprintf("PRAGMA busy_timeout=%d", sqliteBusyTimeoutMs),
-		fmt.Sprintf("PRAGMA cache_size=-%d", sqliteCacheSizeKB),
 	}
-	for _, pragma := range pragmas {
+	for _, pragma := range dbPragmas {
 		if _, err := db.Exec(pragma); err != nil {
 			return nil, fmt.Errorf("set %s: %w", pragma, err)
 		}
@@ -280,33 +285,36 @@ func (s *Storage) GetActiveValidators(ctx context.Context) ([]ActiveValidator, e
 }
 
 // InsertPendingCommit stores a new oracle commit with pending status.
-func (s *Storage) InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ClusterBalance) error {
+func (s *Storage) InsertPendingCommit(ctx context.Context, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []ClusterBalance) error {
 	balancesJSON, err := json.Marshal(clusterBalances)
 	if err != nil {
 		return fmt.Errorf("marshal cluster balances: %w", err)
 	}
 
 	query := `
-		INSERT INTO oracle_commits (round_id, target_epoch, merkle_root, reference_block, cluster_balances, status)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (round_id) DO NOTHING
+		INSERT INTO oracle_commits (target_epoch, merkle_root, reference_block, cluster_balances, status)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (target_epoch) DO NOTHING
 	`
-	result, err := s.db.ExecContext(ctx, query, roundID, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
+	result, err := s.db.ExecContext(ctx, query, targetEpoch, merkleRoot, referenceBlock, balancesJSON, CommitStatusPending)
 	if err != nil {
 		return fmt.Errorf("insert oracle commit: %w", err)
 	}
 	if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
-		logger.Warnw("Duplicate round_id, commit ignored", "roundID", roundID)
+		logger.Warnw("Duplicate target_epoch, commit ignored", "targetEpoch", targetEpoch)
 	}
 	return nil
 }
 
 // UpdateCommitStatus updates the status and transaction hash of a commit.
-func (s *Storage) UpdateCommitStatus(ctx context.Context, roundID uint64, status CommitStatus, txHash []byte) error {
-	query := `UPDATE oracle_commits SET status = ?, tx_hash = ? WHERE round_id = ?`
-	_, err := s.db.ExecContext(ctx, query, status, txHash, roundID)
+func (s *Storage) UpdateCommitStatus(ctx context.Context, targetEpoch uint64, status CommitStatus, txHash []byte) error {
+	query := `UPDATE oracle_commits SET status = ?, tx_hash = ? WHERE target_epoch = ?`
+	result, err := s.db.ExecContext(ctx, query, status, txHash, targetEpoch)
 	if err != nil {
 		return fmt.Errorf("update commit status: %w", err)
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return fmt.Errorf("commit not found: target_epoch=%d", targetEpoch)
 	}
 	return nil
 }
@@ -314,13 +322,13 @@ func (s *Storage) UpdateCommitStatus(ctx context.Context, roundID uint64, status
 // GetCommitByBlock retrieves a commit by reference block, or nil if not found.
 func (s *Storage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*OracleCommit, error) {
 	query := `
-		SELECT round_id, target_epoch, merkle_root, reference_block, cluster_balances, status, tx_hash
+		SELECT target_epoch, merkle_root, reference_block, cluster_balances, status, tx_hash
 		FROM oracle_commits WHERE reference_block = ?
 	`
 	var c OracleCommit
 	var balancesJSON []byte
 	var status string
-	err := s.db.QueryRowContext(ctx, query, blockNum).Scan(&c.RoundID, &c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON, &status, &c.TxHash)
+	err := s.db.QueryRowContext(ctx, query, blockNum).Scan(&c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON, &status, &c.TxHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -382,29 +390,38 @@ type storageTx struct {
 	tx *sql.Tx
 }
 
-func (t *storageTx) Commit() error   { return t.tx.Commit() }
+// Commit commits the transaction.
+func (t *storageTx) Commit() error { return t.tx.Commit() }
+
+// Rollback rolls back the transaction.
 func (t *storageTx) Rollback() error { return t.tx.Rollback() }
 
+// InsertEvent inserts a contract event within the transaction.
 func (t *storageTx) InsertEvent(ctx context.Context, event *ContractEvent) error {
 	return insertEvent(ctx, t.tx, event)
 }
 
+// UpsertCluster inserts or updates a cluster within the transaction.
 func (t *storageTx) UpsertCluster(ctx context.Context, cluster *ClusterRow) error {
 	return upsertCluster(ctx, t.tx, cluster)
 }
 
+// DeleteCluster deletes a cluster within the transaction.
 func (t *storageTx) DeleteCluster(ctx context.Context, clusterID []byte) error {
 	return deleteCluster(ctx, t.tx, clusterID)
 }
 
+// InsertValidator inserts a validator within the transaction.
 func (t *storageTx) InsertValidator(ctx context.Context, clusterID, pubkey []byte) error {
 	return insertValidator(ctx, t.tx, clusterID, pubkey)
 }
 
+// DeleteValidator deletes a validator within the transaction.
 func (t *storageTx) DeleteValidator(ctx context.Context, clusterID, pubkey []byte) error {
 	return deleteValidator(ctx, t.tx, clusterID, pubkey)
 }
 
+// UpdateLastSyncedBlock updates sync progress within the transaction.
 func (t *storageTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error {
 	return updateLastSyncedBlock(ctx, t.tx, blockNum)
 }

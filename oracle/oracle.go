@@ -48,11 +48,12 @@ type Oracle struct {
 
 type oracleStorage interface {
 	GetActiveValidators(ctx context.Context) ([]storage.ActiveValidator, error)
-	InsertPendingCommit(ctx context.Context, roundID, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []storage.ClusterBalance) error
-	UpdateCommitStatus(ctx context.Context, roundID uint64, status storage.CommitStatus, txHash []byte) error
+	InsertPendingCommit(ctx context.Context, targetEpoch uint64, merkleRoot []byte, referenceBlock uint64, clusterBalances []storage.ClusterBalance) error
+	UpdateCommitStatus(ctx context.Context, targetEpoch uint64, status storage.CommitStatus, txHash []byte) error
 }
 
 // New creates a new Oracle instance.
+// Schedule must be validated before calling (via CommitSchedule.Validate).
 func New(cfg *Config) *Oracle {
 	return &Oracle{
 		storage:        cfg.Storage,
@@ -77,6 +78,9 @@ func (o *Oracle) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get initial checkpoint: %w", err)
 	}
+	if checkpoint.Epoch == 0 {
+		return fmt.Errorf("cannot start at genesis (epoch 0): no fully finalized epoch exists")
+	}
 	fullyFinalized := checkpoint.Epoch - 1
 	o.nextTarget = o.schedule.NextTarget(fullyFinalized)
 
@@ -87,7 +91,6 @@ func (o *Oracle) Run(ctx context.Context) error {
 		"phaseStart", phase.StartEpoch,
 		"interval", phase.Interval)
 
-	// Main loop: react to finalized checkpoint events
 	for {
 		select {
 		case <-ctx.Done():
@@ -102,10 +105,12 @@ func (o *Oracle) Run(ctx context.Context) error {
 				return fmt.Errorf("finalized checkpoint subscription closed")
 			}
 
-			// checkpoint.Epoch - 1 is the fully finalized epoch
+			if checkpoint.Epoch == 0 {
+				continue
+			}
+
 			fullyFinalized := checkpoint.Epoch - 1
 
-			// Not yet at target
 			if fullyFinalized < o.nextTarget {
 				logger.Debugw("Waiting for target",
 					"fullyFinalized", fullyFinalized,
@@ -113,7 +118,6 @@ func (o *Oracle) Run(ctx context.Context) error {
 				continue
 			}
 
-			// Target already passed - can happen if finalization was delayed
 			if fullyFinalized > o.nextTarget {
 				missed := o.nextTarget
 				o.nextTarget = o.schedule.NextTarget(fullyFinalized)
@@ -124,7 +128,6 @@ func (o *Oracle) Run(ctx context.Context) error {
 				continue
 			}
 
-			// Exactly on target - commit
 			if err := o.commit(ctx, checkpoint, o.nextTarget); err != nil {
 				logger.Errorw("Commit failed", "target", o.nextTarget, "error", err)
 				continue
@@ -136,10 +139,8 @@ func (o *Oracle) Run(ctx context.Context) error {
 	}
 }
 
-// commit performs a single commit for the given target epoch.
 func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpoint, target uint64) error {
-	round := o.schedule.RoundAt(target)
-	log := logger.With("target", target, "round", round)
+	log := logger.With("target", target)
 
 	log.Infow("Committing",
 		"fullyFinalized", checkpoint.Epoch-1,
@@ -159,16 +160,16 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		"root", fmt.Sprintf("0x%x", merkleRoot),
 		"clusters", len(clusterBalances))
 
-	if err := o.storage.InsertPendingCommit(ctx, round, target, merkleRoot[:], checkpoint.BlockNum, clusterBalances); err != nil {
+	if err := o.storage.InsertPendingCommit(ctx, target, merkleRoot[:], checkpoint.BlockNum, clusterBalances); err != nil {
 		return fmt.Errorf("store pending commit: %w", err)
 	}
 
-	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum, round, target)
+	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum)
 	if err != nil {
-		return o.handleCommitError(ctx, log, round, target, receipt, err)
+		return o.handleCommitError(ctx, log, target, receipt, err)
 	}
 
-	if err := o.storage.UpdateCommitStatus(ctx, round, storage.CommitStatusConfirmed, receipt.TxHash.Bytes()); err != nil {
+	if err := o.storage.UpdateCommitStatus(ctx, target, storage.CommitStatusConfirmed, receipt.TxHash.Bytes()); err != nil {
 		log.Warnw("Failed to update commit status", "error", err)
 	}
 
@@ -241,6 +242,8 @@ func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanc
 
 		balance, onBeacon := balanceMap[pk]
 		if !onBeacon {
+			// Validator not in beacon state (pending activation, exited, or withdrawn).
+			// Balance is 0, will be floored to 32 ETH below.
 			notOnBeacon++
 		}
 		if balance < balanceFloorGwei {
@@ -266,7 +269,7 @@ func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanc
 func (o *Oracle) handleCommitError(
 	ctx context.Context,
 	log logger.Logger,
-	round, target uint64,
+	target uint64,
 	receipt *types.Receipt,
 	err error,
 ) error {
@@ -274,7 +277,7 @@ func (o *Oracle) handleCommitError(
 	if receipt != nil {
 		txHash = receipt.TxHash.Bytes()
 	}
-	if statusErr := o.storage.UpdateCommitStatus(ctx, round, storage.CommitStatusFailed, txHash); statusErr != nil {
+	if statusErr := o.storage.UpdateCommitStatus(ctx, target, storage.CommitStatusFailed, txHash); statusErr != nil {
 		log.Warnw("Failed to update commit status", "error", statusErr)
 	}
 
@@ -282,7 +285,7 @@ func (o *Oracle) handleCommitError(
 		log.Errorw("Commit reverted, skipping",
 			"reason", revertErr.Reason,
 			"simulated", revertErr.Simulated)
-		return nil // Skip to next target
+		return nil
 	}
 
 	return fmt.Errorf("commit failed: %w", err)

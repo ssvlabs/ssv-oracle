@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"os/signal"
 	"syscall"
 
@@ -55,9 +54,7 @@ func run(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Initialize logger: DEV env controls format, config/env controls level
-	dev := os.Getenv("DEV") == "true"
-	logger.Init(dev, cfg.LogLevel)
+	logger.Init(cfg.LogLevel)
 
 	signer, err := wallet.NewSigner(&cfg.Wallet)
 	if err != nil {
@@ -122,15 +119,18 @@ func run(_ *cobra.Command, _ []string) error {
 		SSVContract:     common.HexToAddress(cfg.SSVContract),
 	})
 
-	ethClient, err := contract.NewClient(&contract.Config{
-		RPCURL:               cfg.EthRPC,
-		WSRPCURL:             cfg.EthWSRPC,
-		ContractAddress:      cfg.SSVContract,
-		ViewsContractAddress: cfg.SSVViewsContract,
-		ChainID:              chainID,
-		Signer:               signer,
-		TxPolicy:             &cfg.TxPolicy,
-	})
+	contractCfg := &contract.Config{
+		RPCURL:          cfg.EthRPC,
+		ContractAddress: cfg.SSVContract,
+		ChainID:         chainID,
+		Signer:          signer,
+		TxPolicy:        &cfg.TxPolicy,
+	}
+	if withUpdater {
+		contractCfg.WSRPCURL = cfg.EthWSRPC
+		contractCfg.ViewsContractAddress = cfg.SSVViewsContract
+	}
+	ethClient, err := contract.NewClient(contractCfg)
 	if err != nil {
 		return fmt.Errorf("create contract client: %w", err)
 	}
@@ -175,7 +175,7 @@ func validateChainID(ctx context.Context, store *storage.Storage, execClient *ex
 
 func runServices(
 	ctx context.Context,
-	cfg *Config,
+	cfg *config,
 	store *storage.Storage,
 	ethClient *contract.Client,
 	eventSyncer *syncer.EventSyncer,

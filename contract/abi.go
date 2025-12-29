@@ -17,11 +17,10 @@ var ssvNetworkViewsABIJSON string
 // SSVNetworkABI is the parsed ABI for the SSV Network contract.
 var SSVNetworkABI abi.ABI
 
-// SSVNetworkViewsABI is the parsed ABI for the SSV Network Views contract.
-var SSVNetworkViewsABI abi.ABI
+var ssvNetworkViewsABI abi.ABI
 
-// ErrorSelectors maps 4-byte error selectors to human-readable names.
-var ErrorSelectors map[string]string
+// errorSelectors maps 4-byte error selectors to error names for revert decoding.
+var errorSelectors map[string]string
 
 func init() {
 	var err error
@@ -30,14 +29,14 @@ func init() {
 		panic("failed to parse SSVNetwork ABI: " + err.Error())
 	}
 
-	SSVNetworkViewsABI, err = abi.JSON(strings.NewReader(ssvNetworkViewsABIJSON))
+	ssvNetworkViewsABI, err = abi.JSON(strings.NewReader(ssvNetworkViewsABIJSON))
 	if err != nil {
 		panic("failed to parse SSVNetworkViews ABI: " + err.Error())
 	}
 
-	ErrorSelectors = make(map[string]string)
+	errorSelectors = make(map[string]string)
 	for name, abiError := range SSVNetworkABI.Errors {
 		selector := hex.EncodeToString(abiError.ID[:4])
-		ErrorSelectors[selector] = name
+		errorSelectors[selector] = name
 	}
 }

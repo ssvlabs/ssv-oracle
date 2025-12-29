@@ -1,9 +1,6 @@
 package oracle
 
-import (
-	"errors"
-	"fmt"
-)
+import "errors"
 
 // CommitPhase defines a commit schedule with start epoch and interval.
 type CommitPhase struct {
@@ -27,10 +24,17 @@ func (s CommitSchedule) Validate() error {
 
 	for i, p := range s {
 		if p.Interval == 0 {
-			return fmt.Errorf("commit_phases[%d]: interval must be > 0", i)
+			return errors.New("commit_phases: interval must be > 0")
 		}
-		if i > 0 && s[i].StartEpoch <= s[i-1].StartEpoch {
-			return errors.New("commit_phases: phases must be sorted by start_epoch ascending")
+		if i > 0 {
+			prev := s[i-1]
+			if p.StartEpoch <= prev.StartEpoch {
+				return errors.New("commit_phases: phases must be sorted by start_epoch ascending")
+			}
+			// Ensure phase transition aligns: StartEpoch must be a target of previous phase
+			if (p.StartEpoch-prev.StartEpoch)%prev.Interval != 0 {
+				return errors.New("commit_phases: start_epoch must align with previous phase interval")
+			}
 		}
 	}
 
@@ -58,14 +62,4 @@ func (s CommitSchedule) NextTarget(epoch uint64) uint64 {
 
 	round := (epoch - phase.StartEpoch) / phase.Interval
 	return phase.TargetAt(round + 1)
-}
-
-// RoundAt returns the round number for a target epoch.
-// Panics if targetEpoch is before schedule start (programming error).
-func (s CommitSchedule) RoundAt(targetEpoch uint64) uint64 {
-	phase := s.PhaseAt(targetEpoch)
-	if targetEpoch < phase.StartEpoch {
-		panic(fmt.Sprintf("RoundAt: epoch %d is before schedule start %d", targetEpoch, phase.StartEpoch))
-	}
-	return (targetEpoch - phase.StartEpoch) / phase.Interval
 }

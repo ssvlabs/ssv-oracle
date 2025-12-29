@@ -76,7 +76,18 @@ func (c *Client) processRootCommittedLogs(
 				errChan <- err
 			}
 			return
-		case vLog := <-logs:
+		case vLog, ok := <-logs:
+			if !ok {
+				logger.Debug("RootCommitted subscription channel closed")
+				return
+			}
+			if vLog.Removed {
+				// Skip reorged events
+				logger.Debugw("Skipping reorged RootCommitted event",
+					"txHash", vLog.TxHash.Hex(),
+					"blockNumber", vLog.BlockNumber)
+				continue
+			}
 			parsedEvent, err := c.parseRootCommittedEvent(vLog)
 			if err != nil {
 				logger.Warnw("Failed to parse RootCommitted event", "error", err)
@@ -91,8 +102,6 @@ func (c *Client) processRootCommittedLogs(
 	}
 }
 
-// parseRootCommittedEvent parses a log into a RootCommittedEvent.
-// Event signature: RootCommitted(bytes32 indexed merkleRoot, uint64 indexed blockNum)
 func (c *Client) parseRootCommittedEvent(vLog types.Log) (*RootCommittedEvent, error) {
 	if len(vLog.Topics) < 3 {
 		return nil, fmt.Errorf("invalid log: expected 3 topics, got %d", len(vLog.Topics))

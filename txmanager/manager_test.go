@@ -1,6 +1,7 @@
 package txmanager
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -301,4 +302,34 @@ func TestIsContractRevert(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestErrorTypes(t *testing.T) {
+	t.Run("errBaseFeeExceedsMax is distinguishable", func(t *testing.T) {
+		err := fmt.Errorf("test: %w", errBaseFeeExceedsMax)
+		if !errors.Is(err, errBaseFeeExceedsMax) {
+			t.Error("Expected errors.Is to match errBaseFeeExceedsMax")
+		}
+		if errors.Is(err, errMaxGasReached) {
+			t.Error("errBaseFeeExceedsMax should not match errMaxGasReached")
+		}
+	})
+
+	t.Run("all error types are distinct", func(t *testing.T) {
+		errs := []error{
+			errMaxGasReached,
+			errMaxRetriesExhausted,
+			errNonceTooLow,
+			errInsufficientFunds,
+			errBaseFeeExceedsMax,
+		}
+
+		for i, err1 := range errs {
+			for j, err2 := range errs {
+				if i != j && errors.Is(err1, err2) {
+					t.Errorf("Error %v should not match %v", err1, err2)
+				}
+			}
+		}
+	})
 }

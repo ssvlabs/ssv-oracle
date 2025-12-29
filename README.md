@@ -52,6 +52,8 @@ make fresh-all    # Fresh start with updater
 make test         # Run tests
 make lint         # Run linters
 make docker       # Build Docker image
+make docker-run   # Run Docker container
+make docker-stop  # Stop Docker container
 make clean        # Remove build artifacts and database
 make db-reset     # Remove SQLite database files
 ```
@@ -85,7 +87,7 @@ ssv_contract_deploy_block: 17507487  # Mainnet example
 sync_batch_size: 200
 
 # Database (SQLite)
-db_path: "./data/oracle.db"
+db_path: "./data/oracle.db"  # For Docker: "/data/oracle.db"
 
 # Wallet
 wallet:
@@ -117,22 +119,22 @@ The oracle includes automatic transaction management with gas optimization, retr
 
 ```yaml
 tx_policy:
-  gas_buffer_percent: 20        # Add 20% to estimated gas
-  max_fee_per_gas: "100 gwei"   # Never exceed this gas price
-  pending_timeout_blocks: 10    # Blocks before bumping gas
-  gas_bump_percent: 10          # Minimum 10% for replace-by-fee
-  max_retries: 3                # Attempts before cancellation
-  retry_delay: 5s               # Delay between retries
+  gas_buffer_percent: 20        # Extra % added to gas estimates (0-100)
+  max_fee_per_gas: "100 gwei"   # Hard cap on gas price
+  pending_timeout_blocks: 10    # Blocks before bumping gas on pending tx
+  gas_bump_percent: 10          # Gas price bump per attempt (min 10%)
+  max_retries: 3                # Max submission attempts
+  retry_delay: 5s               # Delay after RPC error before retry
 ```
 
 | Setting | Description |
 |---------|-------------|
-| `gas_buffer_percent` | Extra gas added to estimates to prevent out-of-gas errors |
-| `max_fee_per_gas` | Hard cap on gas price (supports "gwei", "wei" suffixes) |
-| `pending_timeout_blocks` | Blocks to wait before bumping a stuck transaction |
-| `gas_bump_percent` | Percentage increase when bumping (EIP-1559 requires ≥10%) |
-| `max_retries` | Maximum retry attempts before cancelling and giving up |
-| `retry_delay` | Wait time between retry attempts |
+| `gas_buffer_percent` | Extra % added to gas estimates to prevent out-of-gas errors |
+| `max_fee_per_gas` | Hard cap on gas price (supports "wei", "gwei", "eth"/"ether") |
+| `pending_timeout_blocks` | Blocks to wait before bumping gas on a pending transaction |
+| `gas_bump_percent` | Gas price increase per attempt (EIP-1559 requires ≥10%) |
+| `max_retries` | Maximum submission attempts before cancelling |
+| `retry_delay` | Delay after RPC/submission error before retry |
 
 **Automatic cancellation:** When max retries are exhausted or max gas price is reached, the oracle sends a 0-value self-transfer to free the nonce and prevent stuck transactions.
 
@@ -179,15 +181,15 @@ can safely continue processing commits.
 
 ## Merkle Tree Specification
 
-The oracle builds an OpenZeppelin-compatible Merkle tree:
+The oracle builds an OpenZeppelin StandardMerkleTree-compatible Merkle tree:
 
-**Leaf encoding:**
+**Leaf encoding (double-hashed for second preimage resistance):**
 ```solidity
-leaf = keccak256(abi.encode(clusterId, effectiveBalance))
+leaf = keccak256(keccak256(abi.encode(clusterId, effectiveBalance)))
 ```
 
 **Tree construction:**
-- Sort leaves by `clusterId` (ascending byte order)
+- Sort leaves by leaf hash (ascending byte order)
 - Duplicate last leaf if odd count
 - Sort sibling pairs before hashing: `parent = keccak256(min(left, right) || max(left, right))`
 

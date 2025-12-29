@@ -8,23 +8,24 @@ import (
 	"ssv-oracle/logger"
 )
 
-// Build-time variables set via ldflags.
 var (
-	Version   = "dev"
+	// Version is the build version.
+	Version = "dev"
+	// GitCommit is the git commit hash.
 	GitCommit = "unknown"
+	// BuildTime is the build timestamp.
 	BuildTime = "unknown"
 )
 
 func main() {
-	logger.InitFromEnv()
-	defer logger.Sync()
-
 	commands.Version = Version
 	commands.GitCommit = GitCommit
 	commands.BuildTime = BuildTime
 
 	if err := commands.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
+		logger.Sync()
 		os.Exit(1)
 	}
+	logger.Sync()
 }

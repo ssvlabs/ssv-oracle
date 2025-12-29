@@ -48,16 +48,13 @@ CREATE INDEX IF NOT EXISTS idx_validators_cluster ON validators(cluster_id);
 
 -- Oracle commit history for merkle proof reconstruction
 CREATE TABLE IF NOT EXISTS oracle_commits (
-    round_id INTEGER PRIMARY KEY,
-    target_epoch INTEGER NOT NULL,
+    target_epoch INTEGER PRIMARY KEY,
     merkle_root BLOB NOT NULL,
-    reference_block INTEGER NOT NULL,
+    reference_block INTEGER NOT NULL UNIQUE,
     cluster_balances TEXT,
-    status TEXT NOT NULL DEFAULT 'pending',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'failed')),
     tx_hash BLOB,
     committed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_oracle_commits_epoch ON oracle_commits(target_epoch);
-CREATE INDEX IF NOT EXISTS idx_oracle_commits_ref_block ON oracle_commits(reference_block);
 CREATE INDEX IF NOT EXISTS idx_oracle_commits_status ON oracle_commits(status);

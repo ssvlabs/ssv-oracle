@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"gopkg.in/yaml.v3"
@@ -15,8 +18,7 @@ import (
 
 const defaultDBPath = "./data/oracle.db"
 
-// Config represents the oracle configuration file.
-type Config struct {
+type config struct {
 	LogLevel string `yaml:"log_level"` // debug, info, warn, error (default: info)
 
 	EthRPC    string `yaml:"eth_rpc"`
@@ -36,43 +38,81 @@ type Config struct {
 	Schedule oracle.CommitSchedule `yaml:"commit_phases"`
 }
 
-// Validate checks config format and syntax.
-func (c *Config) Validate(withUpdater bool) error {
-	if c.EthRPC == "" {
-		return errors.New("eth_rpc is required")
+// validate checks all config values and returns all errors joined together, or nil if valid.
+// String fields are trimmed before validation.
+func (c *config) validate(withUpdater bool) error {
+	c.DBPath = strings.TrimSpace(c.DBPath)
+	c.LogLevel = strings.TrimSpace(c.LogLevel)
+
+	var errs []error
+	if err := validateURL(c.EthRPC, "eth_rpc", "http", "https"); err != nil {
+		errs = append(errs, err)
 	}
-	if c.BeaconRPC == "" {
-		return errors.New("beacon_rpc is required")
+	if err := validateURL(c.BeaconRPC, "beacon_rpc", "http", "https"); err != nil {
+		errs = append(errs, err)
 	}
-	if c.SSVContract == "" {
-		return errors.New("ssv_contract is required")
-	}
-	if !common.IsHexAddress(c.SSVContract) {
-		return fmt.Errorf("invalid ssv_contract address: %s", c.SSVContract)
+	if err := validateAddress(c.SSVContract, "ssv_contract"); err != nil {
+		errs = append(errs, err)
 	}
 	if c.SSVContractDeployBlock == 0 {
-		return errors.New("ssv_contract_deploy_block is required")
+		errs = append(errs, errors.New("ssv_contract_deploy_block is required"))
 	}
 	if err := c.Schedule.Validate(); err != nil {
-		return fmt.Errorf("invalid commit_phases: %w", err)
+		errs = append(errs, fmt.Errorf("invalid commit_phases: %w", err))
 	}
 	if withUpdater {
-		if c.EthWSRPC == "" {
-			return errors.New("eth_ws_rpc is required when running with --updater")
+		if err := validateURL(c.EthWSRPC, "eth_ws_rpc", "ws", "wss"); err != nil {
+			errs = append(errs, err)
 		}
-		if c.SSVViewsContract == "" {
-			return errors.New("ssv_views_contract is required when running with --updater")
+		if err := validateAddress(c.SSVViewsContract, "ssv_views_contract"); err != nil {
+			errs = append(errs, err)
 		}
-		if !common.IsHexAddress(c.SSVViewsContract) {
-			return fmt.Errorf("invalid ssv_views_contract address: %s", c.SSVViewsContract)
-		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func validateAddress(addr, name string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if !common.IsHexAddress(addr) {
+		return fmt.Errorf("invalid %s address: %s", name, addr)
+	}
+	if common.HexToAddress(addr) == (common.Address{}) {
+		return fmt.Errorf("%s cannot be zero address", name)
 	}
 	return nil
 }
 
-// loadConfig reads and validates the configuration file.
-func loadConfig(path string, withUpdater bool) (*Config, error) {
-	cfg := &Config{
+func validateURL(value, name string, schemes ...string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("invalid %s url: %s", name, value)
+	}
+
+	if len(schemes) == 0 {
+		return nil
+	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	for _, allowed := range schemes {
+		if scheme == strings.ToLower(allowed) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("invalid %s scheme: %s (allowed: %s)", name, parsed.Scheme, strings.Join(schemes, ", "))
+}
+
+func loadConfig(path string, withUpdater bool) (*config, error) {
+	cfg := &config{
 		DBPath: defaultDBPath,
 	}
 
@@ -81,11 +121,13 @@ func loadConfig(path string, withUpdater bool) (*Config, error) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
-	if err := cfg.Validate(withUpdater); err != nil {
+	if err := cfg.validate(withUpdater); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 

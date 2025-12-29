@@ -1,4 +1,4 @@
-.PHONY: help build test lint run run-all fresh fresh-all docker clean
+.PHONY: help build test lint run run-all fresh fresh-all docker docker-run docker-stop clean
 .DEFAULT_GOAL := help
 
 # Load .env file if it exists
@@ -52,10 +52,23 @@ docker: ## Build Docker image
 	docker build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
-		--build-arg BUILD_TIME=$(BUILD_TIME) \
 		-t ssv-oracle:$(VERSION) \
 		-t ssv-oracle:latest \
 		.
+
+docker-run: ## Run Docker container
+	@mkdir -p ./data
+	docker run -d \
+		--name ssv-oracle \
+		-v $(PWD)/data:/data \
+		-v $(PWD)/config.yaml:/config/config.yaml:ro \
+		-e PRIVATE_KEY \
+		--restart unless-stopped \
+		ssv-oracle:latest
+
+docker-stop: ## Stop and remove Docker container
+	docker stop ssv-oracle 2>/dev/null || true
+	docker rm ssv-oracle 2>/dev/null || true
 
 clean: db-reset ## Remove build artifacts and database
 	rm -f ssv-oracle

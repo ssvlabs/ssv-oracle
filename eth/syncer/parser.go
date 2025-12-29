@@ -17,18 +17,15 @@ import (
 // This is expected for events we don't handle (e.g., RootCommitted, OperatorAdded).
 var errUnknownEvent = errors.New("unknown event signature")
 
-// EventParser parses SSV contract events.
-type EventParser struct {
+type eventParser struct {
 	abi abi.ABI
 }
 
-// NewParser creates a new event parser.
-func NewParser() *EventParser {
-	return &EventParser{abi: contract.SSVNetworkABI}
+func newParser() *eventParser {
+	return &eventParser{abi: contract.SSVNetworkABI}
 }
 
-// ParseLog parses an Ethereum log into a structured event.
-func (p *EventParser) ParseLog(log *types.Log) (string, any, error) {
+func (p *eventParser) parseLog(log *types.Log) (string, any, error) {
 	if len(log.Topics) == 0 {
 		return "", nil, fmt.Errorf("log has no topics")
 	}
@@ -36,37 +33,37 @@ func (p *EventParser) ParseLog(log *types.Log) (string, any, error) {
 	eventSig := log.Topics[0]
 
 	switch eventSig {
-	case EventSigValidatorAdded:
+	case eventSigValidatorAdded:
 		event, err := p.parseValidatorAdded(log)
-		return EventValidatorAdded, event, err
-	case EventSigValidatorRemoved:
+		return eventValidatorAdded, event, err
+	case eventSigValidatorRemoved:
 		event, err := p.parseValidatorRemoved(log)
-		return EventValidatorRemoved, event, err
-	case EventSigClusterLiquidated:
+		return eventValidatorRemoved, event, err
+	case eventSigClusterLiquidated:
 		event, err := p.parseClusterLiquidated(log)
-		return EventClusterLiquidated, event, err
-	case EventSigClusterReactivated:
+		return eventClusterLiquidated, event, err
+	case eventSigClusterReactivated:
 		event, err := p.parseClusterReactivated(log)
-		return EventClusterReactivated, event, err
-	case EventSigClusterWithdrawn:
+		return eventClusterReactivated, event, err
+	case eventSigClusterWithdrawn:
 		event, err := p.parseClusterWithdrawn(log)
-		return EventClusterWithdrawn, event, err
-	case EventSigClusterDeposited:
+		return eventClusterWithdrawn, event, err
+	case eventSigClusterDeposited:
 		event, err := p.parseClusterDeposited(log)
-		return EventClusterDeposited, event, err
-	case EventSigClusterMigratedToETH:
+		return eventClusterDeposited, event, err
+	case eventSigClusterMigratedToETH:
 		event, err := p.parseClusterMigratedToETH(log)
-		return EventClusterMigratedToETH, event, err
-	case EventSigClusterBalanceUpdated:
+		return eventClusterMigratedToETH, event, err
+	case eventSigClusterBalanceUpdated:
 		event, err := p.parseClusterBalanceUpdated(log)
-		return EventClusterBalanceUpdated, event, err
+		return eventClusterBalanceUpdated, event, err
 	default:
 		return "", nil, fmt.Errorf("%w: %s", errUnknownEvent, eventSig.Hex())
 	}
 }
 
-func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent, error) {
-	event := &ValidatorAddedEvent{}
+func (p *eventParser) parseValidatorAdded(log *types.Log) (*validatorAddedEvent, error) {
+	event := &validatorAddedEvent{}
 
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
@@ -77,10 +74,10 @@ func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent,
 		OperatorIds []uint64
 		PublicKey   []byte
 		Shares      []byte
-		Cluster     Cluster
+		Cluster     cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventValidatorAdded, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventValidatorAdded, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ValidatorAdded: %w", err)
 	}
@@ -93,8 +90,8 @@ func (p *EventParser) parseValidatorAdded(log *types.Log) (*ValidatorAddedEvent,
 	return event, nil
 }
 
-func (p *EventParser) parseValidatorRemoved(log *types.Log) (*ValidatorRemovedEvent, error) {
-	event := &ValidatorRemovedEvent{}
+func (p *eventParser) parseValidatorRemoved(log *types.Log) (*validatorRemovedEvent, error) {
+	event := &validatorRemovedEvent{}
 
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
@@ -104,10 +101,10 @@ func (p *EventParser) parseValidatorRemoved(log *types.Log) (*ValidatorRemovedEv
 	var result struct {
 		OperatorIds []uint64
 		PublicKey   []byte
-		Cluster     Cluster
+		Cluster     cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventValidatorRemoved, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventValidatorRemoved, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ValidatorRemoved: %w", err)
 	}
@@ -119,8 +116,8 @@ func (p *EventParser) parseValidatorRemoved(log *types.Log) (*ValidatorRemovedEv
 	return event, nil
 }
 
-func (p *EventParser) parseClusterLiquidated(log *types.Log) (*ClusterLiquidatedEvent, error) {
-	event := &ClusterLiquidatedEvent{}
+func (p *eventParser) parseClusterLiquidated(log *types.Log) (*clusterLiquidatedEvent, error) {
+	event := &clusterLiquidatedEvent{}
 
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
@@ -129,10 +126,10 @@ func (p *EventParser) parseClusterLiquidated(log *types.Log) (*ClusterLiquidated
 
 	var result struct {
 		OperatorIds []uint64
-		Cluster     Cluster
+		Cluster     cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventClusterLiquidated, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventClusterLiquidated, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ClusterLiquidated: %w", err)
 	}
@@ -143,8 +140,8 @@ func (p *EventParser) parseClusterLiquidated(log *types.Log) (*ClusterLiquidated
 	return event, nil
 }
 
-func (p *EventParser) parseClusterReactivated(log *types.Log) (*ClusterReactivatedEvent, error) {
-	event := &ClusterReactivatedEvent{}
+func (p *eventParser) parseClusterReactivated(log *types.Log) (*clusterReactivatedEvent, error) {
+	event := &clusterReactivatedEvent{}
 
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
@@ -153,10 +150,10 @@ func (p *EventParser) parseClusterReactivated(log *types.Log) (*ClusterReactivat
 
 	var result struct {
 		OperatorIds []uint64
-		Cluster     Cluster
+		Cluster     cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventClusterReactivated, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventClusterReactivated, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ClusterReactivated: %w", err)
 	}
@@ -167,8 +164,8 @@ func (p *EventParser) parseClusterReactivated(log *types.Log) (*ClusterReactivat
 	return event, nil
 }
 
-func (p *EventParser) parseClusterWithdrawn(log *types.Log) (*ClusterWithdrawnEvent, error) {
-	event := &ClusterWithdrawnEvent{}
+func (p *eventParser) parseClusterWithdrawn(log *types.Log) (*clusterWithdrawnEvent, error) {
+	event := &clusterWithdrawnEvent{}
 
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
@@ -178,10 +175,10 @@ func (p *EventParser) parseClusterWithdrawn(log *types.Log) (*ClusterWithdrawnEv
 	var result struct {
 		OperatorIds []uint64
 		Value       *big.Int
-		Cluster     Cluster
+		Cluster     cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventClusterWithdrawn, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventClusterWithdrawn, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ClusterWithdrawn: %w", err)
 	}
@@ -193,8 +190,8 @@ func (p *EventParser) parseClusterWithdrawn(log *types.Log) (*ClusterWithdrawnEv
 	return event, nil
 }
 
-func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEvent, error) {
-	event := &ClusterDepositedEvent{}
+func (p *eventParser) parseClusterDeposited(log *types.Log) (*clusterDepositedEvent, error) {
+	event := &clusterDepositedEvent{}
 
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
@@ -204,10 +201,10 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 	var result struct {
 		OperatorIds []uint64
 		Value       *big.Int
-		Cluster     Cluster
+		Cluster     cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventClusterDeposited, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventClusterDeposited, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ClusterDeposited: %w", err)
 	}
@@ -219,8 +216,8 @@ func (p *EventParser) parseClusterDeposited(log *types.Log) (*ClusterDepositedEv
 	return event, nil
 }
 
-func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigratedToETHEvent, error) {
-	event := &ClusterMigratedToETHEvent{}
+func (p *eventParser) parseClusterMigratedToETH(log *types.Log) (*clusterMigratedToETHEvent, error) {
+	event := &clusterMigratedToETHEvent{}
 
 	if len(log.Topics) < 2 {
 		return nil, fmt.Errorf("missing owner topic")
@@ -232,10 +229,10 @@ func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigrate
 		EthDeposited     *big.Int
 		SsvRefunded      *big.Int
 		EffectiveBalance uint32
-		Cluster          Cluster
+		Cluster          cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventClusterMigratedToETH, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventClusterMigratedToETH, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ClusterMigratedToETH: %w", err)
 	}
@@ -249,8 +246,8 @@ func (p *EventParser) parseClusterMigratedToETH(log *types.Log) (*ClusterMigrate
 	return event, nil
 }
 
-func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanceUpdatedEvent, error) {
-	event := &ClusterBalanceUpdatedEvent{}
+func (p *eventParser) parseClusterBalanceUpdated(log *types.Log) (*clusterBalanceUpdatedEvent, error) {
+	event := &clusterBalanceUpdatedEvent{}
 
 	if len(log.Topics) < 3 {
 		return nil, fmt.Errorf("missing indexed topics (owner, blockNum)")
@@ -261,10 +258,10 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 	var result struct {
 		OperatorIds      []uint64
 		EffectiveBalance uint32
-		Cluster          Cluster
+		Cluster          cluster
 	}
 
-	err := p.abi.UnpackIntoInterface(&result, EventClusterBalanceUpdated, log.Data)
+	err := p.abi.UnpackIntoInterface(&result, eventClusterBalanceUpdated, log.Data)
 	if err != nil {
 		return nil, fmt.Errorf("unpack ClusterBalanceUpdated: %w", err)
 	}
@@ -276,8 +273,7 @@ func (p *EventParser) parseClusterBalanceUpdated(log *types.Log) (*ClusterBalanc
 	return event, nil
 }
 
-// EncodeEventToJSON encodes a parsed event to JSON for storage.
-func EncodeEventToJSON(event any) (json.RawMessage, error) {
+func encodeEventToJSON(event any) (json.RawMessage, error) {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return nil, fmt.Errorf("marshal event: %w", err)
@@ -285,8 +281,7 @@ func EncodeEventToJSON(event any) (json.RawMessage, error) {
 	return data, nil
 }
 
-// EncodeLogToJSON encodes an Ethereum log to JSON for storage.
-func EncodeLogToJSON(log *types.Log) (json.RawMessage, error) {
+func encodeLogToJSON(log *types.Log) (json.RawMessage, error) {
 	logData := map[string]any{
 		"address": log.Address.Hex(),
 		"topics":  make([]string, len(log.Topics)),

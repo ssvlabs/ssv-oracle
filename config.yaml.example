@@ -19,21 +19,22 @@ beacon_rpc: "http://127.0.0.1:5052"    # Consensus layer
 # Contract
 # ============================================================================
 
-ssv_contract: "0x..."                   # SSV Network contract address
-ssv_views_contract: "0x..."             # Required for --updater (SSV Network Views contract)
+ssv_contract: "0x..."                   # SSV Network contract address (REPLACE)
+ssv_views_contract: "0x..."             # SSV Network Views contract (REPLACE, required for --updater)
 
 # ============================================================================
 # Database (SQLite)
 # ============================================================================
 
-db_path: "./data/oracle.db"            # SQLite database file
+db_path: "./data/oracle.db"            # SQLite database file (local)
+                                       # For Docker: use "/data/oracle.db"
 
 # ============================================================================
 # Event Syncing
 # ============================================================================
 
-ssv_contract_deploy_block: 0           # Block when SSV contract was deployed
-sync_batch_size: 200                   # Blocks per batch (default: 200)
+ssv_contract_deploy_block: 17507487    # Block when SSV contract was deployed (mainnet example)
+sync_batch_size: 200                   # Blocks per batch when fetching logs
 
 # ============================================================================
 # Wallet
@@ -58,18 +59,25 @@ wallet:
 # ============================================================================
 
 tx_policy:
-  gas_buffer_percent: 20               # Added to gas estimates
+  gas_buffer_percent: 20               # Extra % added to gas estimates (0-100)
   max_fee_per_gas: "100 gwei"          # Hard cap on gas price
-  pending_timeout_blocks: 10           # Blocks before bumping
-  gas_bump_percent: 10                 # Min bump for replace-by-fee
-  max_retries: 3                       # Attempts before cancellation
-  retry_delay: 5s
+  pending_timeout_blocks: 10           # Blocks before bumping gas on pending tx
+  gas_bump_percent: 10                 # Gas price bump per attempt (min 10%)
+  max_retries: 3                       # Max submission attempts
+  retry_delay: 5s                      # Delay after RPC error before retry
 
 # ============================================================================
 # Commit Phases
 # ============================================================================
 
 # Phases define commit schedule. Multiple phases allow changing interval over time.
+# Note: Each phase's start_epoch must be a valid target of the previous phase.
+#
+# Example with two phases:
+#   - start_epoch: 0
+#     interval: 225
+#   - start_epoch: 900    # Must be divisible by previous interval (225)
+#     interval: 450
 commit_phases:
   - start_epoch: 0                     # First epoch to commit
     interval: 225                      # Commit every N epochs

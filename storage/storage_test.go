@@ -411,7 +411,6 @@ func TestStorage_OracleCommit(t *testing.T) {
 	storage := setupTestStorage(t)
 	ctx := context.Background()
 
-	roundID := uint64(12345)
 	targetEpoch := uint64(100)
 	merkleRoot := make([]byte, 32)
 	merkleRoot[0] = 0xff
@@ -424,7 +423,7 @@ func TestStorage_OracleCommit(t *testing.T) {
 	clusterBalances[0].ClusterID[0] = 0x01
 	clusterBalances[1].ClusterID[0] = 0x02
 
-	err := storage.InsertPendingCommit(ctx, roundID, targetEpoch, merkleRoot, referenceBlock, clusterBalances)
+	err := storage.InsertPendingCommit(ctx, targetEpoch, merkleRoot, referenceBlock, clusterBalances)
 	if err != nil {
 		t.Fatalf("Failed to insert pending commit: %v", err)
 	}
@@ -435,9 +434,6 @@ func TestStorage_OracleCommit(t *testing.T) {
 	}
 	if commit == nil {
 		t.Fatal("Expected commit, got nil")
-	}
-	if commit.RoundID != roundID {
-		t.Errorf("Expected round ID %d, got %d", roundID, commit.RoundID)
 	}
 	if commit.TargetEpoch != targetEpoch {
 		t.Errorf("Expected target epoch %d, got %d", targetEpoch, commit.TargetEpoch)
@@ -452,7 +448,7 @@ func TestStorage_OracleCommit(t *testing.T) {
 	// Update status
 	txHash := make([]byte, 32)
 	txHash[0] = 0xee
-	err = storage.UpdateCommitStatus(ctx, roundID, CommitStatusConfirmed, txHash)
+	err = storage.UpdateCommitStatus(ctx, targetEpoch, CommitStatusConfirmed, txHash)
 	if err != nil {
 		t.Fatalf("Failed to update commit status: %v", err)
 	}
@@ -468,8 +464,8 @@ func TestStorage_OracleCommit(t *testing.T) {
 		t.Error("Expected tx hash to be set")
 	}
 
-	// Test idempotency
-	err = storage.InsertPendingCommit(ctx, roundID, targetEpoch, merkleRoot, referenceBlock, clusterBalances)
+	// Test idempotency (same target_epoch)
+	err = storage.InsertPendingCommit(ctx, targetEpoch, merkleRoot, referenceBlock, clusterBalances)
 	if err != nil {
 		t.Fatalf("InsertPendingCommit should be idempotent, got error: %v", err)
 	}
@@ -639,5 +635,153 @@ func TestStorage_ForeignKeysEnabled(t *testing.T) {
 
 	if foreignKeys != 1 {
 		t.Errorf("Expected foreign_keys=1, got %d", foreignKeys)
+	}
+}
+
+func TestStorage_UpdateClusterIfExists_Missing(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	// Try to update a cluster that doesn't exist
+	cluster := &ClusterRow{
+		ClusterID:       []byte("nonexistent-cluster-id-here!"),
+		NetworkFeeIndex: 100,
+		Index:           200,
+		IsActive:        true,
+		Balance:         big.NewInt(1000),
+	}
+
+	// Should not error - just updates 0 rows
+	err := storage.UpdateClusterIfExists(ctx, cluster)
+	if err != nil {
+		t.Errorf("UpdateClusterIfExists() unexpected error: %v", err)
+	}
+
+	// Verify cluster was not created
+	got, err := storage.GetCluster(ctx, cluster.ClusterID)
+	if err != nil {
+		t.Fatalf("GetCluster() error: %v", err)
+	}
+	if got != nil {
+		t.Error("Expected nil cluster, but cluster was created")
+	}
+}
+
+func TestStorage_UpdateClusterIfExists_Existing(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	// First create a cluster
+	clusterID := []byte("test-cluster-id-32-bytes-long!!")
+	owner := []byte("owner-address-20-bytes")
+	operatorIDs := []uint64{1, 2, 3, 4}
+
+	original := &ClusterRow{
+		ClusterID:       clusterID,
+		OwnerAddress:    owner,
+		OperatorIDs:     operatorIDs,
+		ValidatorCount:  1,
+		NetworkFeeIndex: 100,
+		Index:           200,
+		IsActive:        true,
+		Balance:         big.NewInt(1000),
+	}
+
+	err := storage.UpsertCluster(ctx, original)
+	if err != nil {
+		t.Fatalf("UpsertCluster() error: %v", err)
+	}
+
+	// Now update using UpdateClusterIfExists
+	updated := &ClusterRow{
+		ClusterID:       clusterID,
+		NetworkFeeIndex: 500,
+		Index:           600,
+		IsActive:        false,
+		Balance:         big.NewInt(9999),
+	}
+
+	err = storage.UpdateClusterIfExists(ctx, updated)
+	if err != nil {
+		t.Errorf("UpdateClusterIfExists() error: %v", err)
+	}
+
+	// Verify the update
+	got, err := storage.GetCluster(ctx, clusterID)
+	if err != nil {
+		t.Fatalf("GetCluster() error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("Expected cluster, got nil")
+	}
+
+	if got.NetworkFeeIndex != 500 {
+		t.Errorf("NetworkFeeIndex = %d, want 500", got.NetworkFeeIndex)
+	}
+	if got.Index != 600 {
+		t.Errorf("Index = %d, want 600", got.Index)
+	}
+	if got.IsActive {
+		t.Error("IsActive = true, want false")
+	}
+	if got.Balance.Cmp(big.NewInt(9999)) != 0 {
+		t.Errorf("Balance = %v, want 9999", got.Balance)
+	}
+	// ValidatorCount should remain unchanged
+	if got.ValidatorCount != 1 {
+		t.Errorf("ValidatorCount = %d, want 1 (unchanged)", got.ValidatorCount)
+	}
+}
+
+func TestStorage_DecodeOperatorIDs_Malformed(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"empty string", ""},
+		{"invalid json", "not json"},
+		{"wrong type", `{"key": "value"}`},
+		{"array of strings", `["a", "b", "c"]`},
+		{"unclosed bracket", "[1, 2, 3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decodeOperatorIDs(tt.input)
+			if err == nil {
+				t.Errorf("decodeOperatorIDs(%q) expected error, got nil", tt.input)
+			}
+		})
+	}
+}
+
+func TestStorage_DecodeOperatorIDs_Valid(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect []uint64
+	}{
+		{"empty array", "[]", []uint64{}},
+		{"single element", "[1]", []uint64{1}},
+		{"multiple elements", "[1,2,3,4]", []uint64{1, 2, 3, 4}},
+		{"with spaces", "[1, 2, 3]", []uint64{1, 2, 3}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := decodeOperatorIDs(tt.input)
+			if err != nil {
+				t.Fatalf("decodeOperatorIDs(%q) error: %v", tt.input, err)
+			}
+			if len(got) != len(tt.expect) {
+				t.Errorf("len = %d, want %d", len(got), len(tt.expect))
+				return
+			}
+			for i := range got {
+				if got[i] != tt.expect[i] {
+					t.Errorf("got[%d] = %d, want %d", i, got[i], tt.expect[i])
+				}
+			}
+		})
 	}
 }

@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	ErrMaxGasReached       = errors.New("max gas price reached, tx cancelled")
-	ErrMaxRetriesExhausted = errors.New("max retries exhausted")
-	ErrNonceTooLow         = errors.New("nonce too low")
-	ErrInsufficientFunds   = errors.New("insufficient funds")
+	errMaxGasReached       = errors.New("max gas price reached, tx cancelled")
+	errMaxRetriesExhausted = errors.New("max retries exhausted")
+	errNonceTooLow         = errors.New("nonce too low")
+	errInsufficientFunds   = errors.New("insufficient funds")
+	errBaseFeeExceedsMax   = errors.New("base fee exceeds max_fee_per_gas")
 )
 
 // RPC error detection patterns (case-insensitive).
@@ -48,6 +49,7 @@ type RevertError struct {
 	TxHash    string
 }
 
+// Error formats the revert reason for logging and wrapping.
 func (e *RevertError) Error() string {
 	if e.Simulated {
 		return fmt.Sprintf("call reverted: %s", e.Reason)
@@ -135,7 +137,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 	gasTipCap, gasFeeCap, err := m.suggestGasFees(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get gas fees: %w", err)
+		return nil, err
 	}
 
 	nonce, err := m.client.PendingNonceAt(ctx, from)
@@ -149,6 +151,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	}
 
 	var lastTx *types.Transaction
+	var publishedTxs []*types.Transaction // Track all published txs for receipt lookup
 	currentTip := gasTipCap
 	currentFeeCap := gasFeeCap
 
@@ -165,13 +168,21 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 				logger.Infow("Tx already in mempool",
 					"hash", signedTx.Hash().Hex(),
 					"nonce", nonce)
+				publishedTxs = append(publishedTxs, signedTx)
 				goto waitForReceipt
 			}
 			if isNonceTooLow(err) {
-				return nil, fmt.Errorf("%w: %w", ErrNonceTooLow, err)
+				// If we've published before, the tx may have been mined after our timeout.
+				// Check for a receipt before returning error.
+				if len(publishedTxs) > 0 {
+					if receipt, recErr := m.findMinedReceipt(ctx, opts, publishedTxs); receipt != nil {
+						return receipt, recErr
+					}
+				}
+				return nil, fmt.Errorf("%w: %w", errNonceTooLow, err)
 			}
 			if isInsufficientFunds(err) {
-				return nil, fmt.Errorf("%w: %w", ErrInsufficientFunds, err)
+				return nil, fmt.Errorf("%w: %w", errInsufficientFunds, err)
 			}
 			if attempt < m.policy.MaxRetries {
 				logger.Warnw("Tx submission failed, retrying",
@@ -187,6 +198,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			return nil, fmt.Errorf("send tx: %w", err)
 		}
 
+		publishedTxs = append(publishedTxs, signedTx)
 		logger.Infow("Tx submitted",
 			"hash", signedTx.Hash().Hex(),
 			"nonce", nonce,
@@ -220,7 +232,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 				logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
 			}
-			return nil, ErrMaxGasReached
+			return nil, errMaxGasReached
 		}
 
 		logger.Warnw("Tx pending timeout, bumping gas",
@@ -240,7 +252,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
 	}
 
-	return nil, ErrMaxRetriesExhausted
+	return nil, errMaxRetriesExhausted
 }
 
 // buildAndSignTx creates and signs a transaction.
@@ -362,7 +374,7 @@ func (m *TxManager) estimateGas(ctx context.Context, opts *TxOpts) (uint64, erro
 
 // handleReceipt processes a mined transaction receipt.
 func (m *TxManager) handleReceipt(ctx context.Context, opts *TxOpts, tx *types.Transaction, receipt *types.Receipt) (*types.Receipt, error) {
-	if receipt.Status == 1 {
+	if receipt.Status == types.ReceiptStatusSuccessful {
 		logger.Debugw("Tx confirmed",
 			"hash", tx.Hash().Hex(),
 			"block", receipt.BlockNumber.Uint64(),
@@ -396,6 +408,7 @@ func (m *TxManager) replayForRevertReason(ctx context.Context, opts *TxOpts, blo
 }
 
 // suggestGasFees returns suggested tip and fee cap, capped at maxFeePerGas.
+// Returns errBaseFeeExceedsMax if current base fee exceeds the configured maximum.
 func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, error) {
 	gasTipCap, err := m.client.SuggestGasTipCap(ctx)
 	if err != nil {
@@ -405,6 +418,12 @@ func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, err
 	header, err := m.client.HeaderByNumber(ctx, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get latest header: %w", err)
+	}
+
+	// Check if base fee already exceeds our cap - tx would be rejected as underpriced
+	if header.BaseFee.Cmp(m.maxFeePerGas) > 0 {
+		return nil, nil, fmt.Errorf("%w: base fee %s > max %s",
+			errBaseFeeExceedsMax, header.BaseFee, m.maxFeePerGas)
 	}
 
 	// EIP-1559: gasFeeCap = 2*baseFee + gasTipCap
@@ -419,6 +438,24 @@ func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, err
 	}
 
 	return gasTipCap, gasFeeCap, nil
+}
+
+// findMinedReceipt checks if any previously published tx was mined and returns its receipt.
+// Used when we get "nonce too low" to recover the actual receipt.
+// Returns the receipt and any error (e.g., RevertError if the tx reverted).
+func (m *TxManager) findMinedReceipt(ctx context.Context, opts *TxOpts, txs []*types.Transaction) (*types.Receipt, error) {
+	for _, tx := range txs {
+		receipt, err := m.client.TransactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			continue
+		}
+		logger.Infow("Found mined tx after nonce-too-low",
+			"hash", tx.Hash().Hex(),
+			"block", receipt.BlockNumber.Uint64())
+
+		return m.handleReceipt(ctx, opts, tx, receipt)
+	}
+	return nil, nil
 }
 
 // waitForReceipt polls for a transaction receipt until confirmed or timeout.
@@ -496,8 +533,6 @@ func (m *TxManager) decodeErrorSelector(reason string) string {
 	return reason
 }
 
-// Error detection helpers.
-
 // IsContractRevert returns true if the error is a contract revert (not a network error).
 func IsContractRevert(err error) bool {
 	if err == nil {
@@ -509,17 +544,14 @@ func IsContractRevert(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), errPatternExecutionReverted)
 }
 
-// isTxAlreadyKnown returns true if the error indicates the tx is already in mempool.
 func isTxAlreadyKnown(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), errPatternAlreadyKnown)
 }
 
-// isNonceTooLow returns true if the error indicates the nonce was already used.
 func isNonceTooLow(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), errPatternNonceTooLow)
 }
 
-// isInsufficientFunds returns true if the error indicates the wallet lacks funds.
 func isInsufficientFunds(err error) bool {
 	if err == nil {
 		return false

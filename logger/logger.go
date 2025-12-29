@@ -11,18 +11,26 @@ import (
 // Logger is an alias for zap.SugaredLogger for use in type signatures.
 type Logger = *zap.SugaredLogger
 
-// L is the global logger instance.
-var L *zap.SugaredLogger
+var l *zap.SugaredLogger
 
 func init() {
-	L = zap.Must(zap.NewDevelopment()).Sugar()
+	l = zap.Must(zap.NewDevelopment()).Sugar()
 }
 
 // Init initializes the global logger.
+// Development mode is determined by DEV=true env var.
 // The level parameter sets the log level. Valid levels: debug, info, warn, error.
-func Init(development bool, level string) {
+// Panics if logger configuration fails (logging is critical infrastructure).
+func Init(level string) {
+	// Sync old logger before replacing to avoid losing buffered logs
+	if l != nil {
+		_ = l.Sync()
+	}
+
+	dev := os.Getenv("DEV") == "true"
+
 	var config zap.Config
-	if development {
+	if dev {
 		config = zap.NewDevelopmentConfig()
 		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05")
@@ -34,9 +42,11 @@ func Init(development bool, level string) {
 
 	// Set log level from parameter
 	if level != "" {
-		var l zapcore.Level
-		if err := l.UnmarshalText([]byte(strings.ToLower(level))); err == nil {
-			config.Level = zap.NewAtomicLevelAt(l)
+		var lvl zapcore.Level
+		if err := lvl.UnmarshalText([]byte(strings.ToLower(level))); err != nil {
+			l.Warnw("Invalid log level, using default", "level", level, "error", err)
+		} else {
+			config.Level = zap.NewAtomicLevelAt(lvl)
 		}
 	}
 
@@ -45,49 +55,65 @@ func Init(development bool, level string) {
 
 	logger, err := config.Build(zap.AddCallerSkip(1))
 	if err != nil {
-		L = zap.NewNop().Sugar()
-		return
+		panic("failed to build logger: " + err.Error())
 	}
 
-	L = logger.Sugar()
-}
-
-// InitFromEnv initializes the logger based on DEV env var.
-// Used for early logging before config is loaded.
-// Log level uses zap defaults; config file sets the final level.
-func InitFromEnv() {
-	dev := os.Getenv("DEV") == "true"
-	Init(dev, "")
+	l = logger.Sugar()
 }
 
 // Sync flushes any buffered log entries.
 func Sync() {
-	if L != nil {
-		_ = L.Sync()
+	if l != nil {
+		_ = l.Sync()
 	}
 }
 
 // With returns a logger with additional context fields.
 func With(keysAndValues ...any) *zap.SugaredLogger {
-	return L.With(keysAndValues...)
+	return l.With(keysAndValues...)
 }
 
-func Debug(args ...any)                       { L.Debug(args...) }
-func Debugf(template string, args ...any)     { L.Debugf(template, args...) }
-func Debugw(msg string, keysAndValues ...any) { L.Debugw(msg, keysAndValues...) }
+// Debug logs at Debug level.
+func Debug(args ...any) { l.Debug(args...) }
 
-func Info(args ...any)                       { L.Info(args...) }
-func Infof(template string, args ...any)     { L.Infof(template, args...) }
-func Infow(msg string, keysAndValues ...any) { L.Infow(msg, keysAndValues...) }
+// Debugf logs a formatted message at Debug level.
+func Debugf(template string, args ...any) { l.Debugf(template, args...) }
 
-func Warn(args ...any)                       { L.Warn(args...) }
-func Warnf(template string, args ...any)     { L.Warnf(template, args...) }
-func Warnw(msg string, keysAndValues ...any) { L.Warnw(msg, keysAndValues...) }
+// Debugw logs a message with key-value pairs at Debug level.
+func Debugw(msg string, keysAndValues ...any) { l.Debugw(msg, keysAndValues...) }
 
-func Error(args ...any)                       { L.Error(args...) }
-func Errorf(template string, args ...any)     { L.Errorf(template, args...) }
-func Errorw(msg string, keysAndValues ...any) { L.Errorw(msg, keysAndValues...) }
+// Info logs at Info level.
+func Info(args ...any) { l.Info(args...) }
 
-func Fatal(args ...any)                       { L.Fatal(args...) }
-func Fatalf(template string, args ...any)     { L.Fatalf(template, args...) }
-func Fatalw(msg string, keysAndValues ...any) { L.Fatalw(msg, keysAndValues...) }
+// Infof logs a formatted message at Info level.
+func Infof(template string, args ...any) { l.Infof(template, args...) }
+
+// Infow logs a message with key-value pairs at Info level.
+func Infow(msg string, keysAndValues ...any) { l.Infow(msg, keysAndValues...) }
+
+// Warn logs at Warn level.
+func Warn(args ...any) { l.Warn(args...) }
+
+// Warnf logs a formatted message at Warn level.
+func Warnf(template string, args ...any) { l.Warnf(template, args...) }
+
+// Warnw logs a message with key-value pairs at Warn level.
+func Warnw(msg string, keysAndValues ...any) { l.Warnw(msg, keysAndValues...) }
+
+// Error logs at Error level.
+func Error(args ...any) { l.Error(args...) }
+
+// Errorf logs a formatted message at Error level.
+func Errorf(template string, args ...any) { l.Errorf(template, args...) }
+
+// Errorw logs a message with key-value pairs at Error level.
+func Errorw(msg string, keysAndValues ...any) { l.Errorw(msg, keysAndValues...) }
+
+// Fatal logs at Fatal level and then exits.
+func Fatal(args ...any) { l.Fatal(args...) }
+
+// Fatalf logs a formatted message at Fatal level and then exits.
+func Fatalf(template string, args ...any) { l.Fatalf(template, args...) }
+
+// Fatalw logs a message with key-value pairs at Fatal level and then exits.
+func Fatalw(msg string, keysAndValues ...any) { l.Fatalw(msg, keysAndValues...) }

@@ -7,57 +7,45 @@ import (
 	"time"
 )
 
-// Default values for TxPolicy fields.
 const (
-	DefaultGasBufferPercent     = 20
-	DefaultMaxFeePerGas         = "100 gwei"
-	DefaultPendingTimeoutBlocks = 10
-	DefaultGasBumpPercent       = 10
-	DefaultMaxRetries           = 3
-	DefaultRetryDelay           = 5 * time.Second
+	defaultGasBufferPercent     = 20
+	defaultMaxFeePerGas         = "100 gwei"
+	defaultPendingTimeoutBlocks = 10
+	defaultGasBumpPercent       = 10
+	defaultMaxRetries           = 3
+	defaultRetryDelay           = 5 * time.Second
 )
 
 // TxPolicy configures transaction submission behavior.
+// Zero values are replaced with defaults via ApplyDefaults().
 type TxPolicy struct {
-	GasBufferPercent     int           `yaml:"gas_buffer_percent"`
-	MaxFeePerGas         string        `yaml:"max_fee_per_gas"` // e.g., "100 gwei"
-	PendingTimeoutBlocks int           `yaml:"pending_timeout_blocks"`
-	GasBumpPercent       int           `yaml:"gas_bump_percent"`
-	MaxRetries           int           `yaml:"max_retries"`
-	RetryDelay           time.Duration `yaml:"retry_delay"`
-}
-
-// DefaultTxPolicy returns a TxPolicy with sensible defaults.
-func DefaultTxPolicy() TxPolicy {
-	return TxPolicy{
-		GasBufferPercent:     DefaultGasBufferPercent,
-		MaxFeePerGas:         DefaultMaxFeePerGas,
-		PendingTimeoutBlocks: DefaultPendingTimeoutBlocks,
-		GasBumpPercent:       DefaultGasBumpPercent,
-		MaxRetries:           DefaultMaxRetries,
-		RetryDelay:           DefaultRetryDelay,
-	}
+	GasBufferPercent     int           `yaml:"gas_buffer_percent"`     // Extra % added to gas estimates (0-100)
+	MaxFeePerGas         string        `yaml:"max_fee_per_gas"`        // Hard cap on gas price, e.g. "100 gwei"
+	PendingTimeoutBlocks int           `yaml:"pending_timeout_blocks"` // Blocks before bumping gas on pending tx
+	GasBumpPercent       int           `yaml:"gas_bump_percent"`       // Gas price bump per attempt (min 10%)
+	MaxRetries           int           `yaml:"max_retries"`            // Max submission attempts
+	RetryDelay           time.Duration `yaml:"retry_delay"`            // Delay after RPC error before retry
 }
 
 // ApplyDefaults fills in zero values with sensible defaults.
 func (p *TxPolicy) ApplyDefaults() {
 	if p.GasBufferPercent == 0 {
-		p.GasBufferPercent = DefaultGasBufferPercent
+		p.GasBufferPercent = defaultGasBufferPercent
 	}
 	if p.MaxFeePerGas == "" {
-		p.MaxFeePerGas = DefaultMaxFeePerGas
+		p.MaxFeePerGas = defaultMaxFeePerGas
 	}
 	if p.PendingTimeoutBlocks == 0 {
-		p.PendingTimeoutBlocks = DefaultPendingTimeoutBlocks
+		p.PendingTimeoutBlocks = defaultPendingTimeoutBlocks
 	}
 	if p.GasBumpPercent == 0 {
-		p.GasBumpPercent = DefaultGasBumpPercent
+		p.GasBumpPercent = defaultGasBumpPercent
 	}
 	if p.MaxRetries == 0 {
-		p.MaxRetries = DefaultMaxRetries
+		p.MaxRetries = defaultMaxRetries
 	}
 	if p.RetryDelay == 0 {
-		p.RetryDelay = DefaultRetryDelay
+		p.RetryDelay = defaultRetryDelay
 	}
 }
 

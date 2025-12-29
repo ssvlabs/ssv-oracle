@@ -19,9 +19,9 @@ const testAddress = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 func TestEnvSigner(t *testing.T) {
 	t.Setenv("TEST_PRIVATE_KEY", testPrivateKeyHex)
 
-	signer, err := NewEnvSigner("TEST_PRIVATE_KEY")
+	signer, err := newEnvSigner("TEST_PRIVATE_KEY")
 	if err != nil {
-		t.Fatalf("NewEnvSigner failed: %v", err)
+		t.Fatalf("newEnvSigner failed: %v", err)
 	}
 	defer func() { _ = signer.Close() }()
 
@@ -54,14 +54,14 @@ func TestEnvSigner(t *testing.T) {
 func TestEnvSigner_MissingEnvVar(t *testing.T) {
 	_ = os.Unsetenv("NONEXISTENT_KEY")
 
-	_, err := NewEnvSigner("NONEXISTENT_KEY")
+	_, err := newEnvSigner("NONEXISTENT_KEY")
 	if err == nil {
 		t.Error("Expected error for missing env var, got nil")
 	}
 }
 
 func TestEnvSigner_EmptyEnvVarName(t *testing.T) {
-	_, err := NewEnvSigner("")
+	_, err := newEnvSigner("")
 	if err == nil {
 		t.Error("Expected error for empty env var name, got nil")
 	}
@@ -70,7 +70,7 @@ func TestEnvSigner_EmptyEnvVarName(t *testing.T) {
 func TestEnvSigner_InvalidPrivateKey(t *testing.T) {
 	t.Setenv("TEST_INVALID_KEY", "not-a-valid-key")
 
-	_, err := NewEnvSigner("TEST_INVALID_KEY")
+	_, err := newEnvSigner("TEST_INVALID_KEY")
 	if err == nil {
 		t.Error("Expected error for invalid private key, got nil")
 	}
@@ -104,9 +104,9 @@ func TestKeystoreSigner(t *testing.T) {
 
 	t.Setenv("TEST_KEYSTORE_PASSWORD", password)
 
-	signer, err := NewKeystoreSigner(keystorePath, "TEST_KEYSTORE_PASSWORD", "")
+	signer, err := newKeystoreSigner(keystorePath, "TEST_KEYSTORE_PASSWORD", "")
 	if err != nil {
-		t.Fatalf("NewKeystoreSigner failed: %v", err)
+		t.Fatalf("newKeystoreSigner failed: %v", err)
 	}
 	defer func() { _ = signer.Close() }()
 
@@ -162,14 +162,14 @@ func TestKeystoreSigner_PasswordFromFile(t *testing.T) {
 
 	// Create password file
 	passwordFile := filepath.Join(tmpDir, "password.txt")
-	if err := os.WriteFile(passwordFile, []byte(password+"\n"), 0600); err != nil {
+	if err := os.WriteFile(passwordFile, []byte(password+"\n"), 0o600); err != nil {
 		t.Fatalf("Failed to write password file: %v", err)
 	}
 
 	// Test with password from file
-	signer, err := NewKeystoreSigner(keystorePath, "", passwordFile)
+	signer, err := newKeystoreSigner(keystorePath, "", passwordFile)
 	if err != nil {
-		t.Fatalf("NewKeystoreSigner with password file failed: %v", err)
+		t.Fatalf("newKeystoreSigner with password file failed: %v", err)
 	}
 	defer func() { _ = signer.Close() }()
 
@@ -203,7 +203,7 @@ func TestKeystoreSigner_WrongPassword(t *testing.T) {
 
 	t.Setenv("TEST_WRONG_PASSWORD", "wrongpassword")
 
-	_, err = NewKeystoreSigner(files[0], "TEST_WRONG_PASSWORD", "")
+	_, err = newKeystoreSigner(files[0], "TEST_WRONG_PASSWORD", "")
 	if err == nil {
 		t.Error("Expected error for wrong password, got nil")
 	}
@@ -220,23 +220,23 @@ func TestFactory(t *testing.T) {
 		{
 			name: "env signer",
 			cfg: &Config{
-				Type:          TypeEnv,
+				Type:          typeEnv,
 				PrivateKeyEnv: "TEST_FACTORY_KEY",
 			},
 			wantErr: false,
 		},
 		{
-			name: "env signer (default type)",
+			name: "missing type",
 			cfg: &Config{
 				Type:          "",
 				PrivateKeyEnv: "TEST_FACTORY_KEY",
 			},
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name: "env signer missing key",
 			cfg: &Config{
-				Type:          TypeEnv,
+				Type:          typeEnv,
 				PrivateKeyEnv: "",
 			},
 			wantErr: true,
@@ -244,14 +244,14 @@ func TestFactory(t *testing.T) {
 		{
 			name: "keystore missing path",
 			cfg: &Config{
-				Type: TypeKeystore,
+				Type: typeKeystore,
 			},
 			wantErr: true,
 		},
 		{
 			name: "keystore missing password",
 			cfg: &Config{
-				Type:         TypeKeystore,
+				Type:         typeKeystore,
 				KeystorePath: "/path/to/keystore.json",
 			},
 			wantErr: true,
@@ -287,9 +287,9 @@ func TestFactory(t *testing.T) {
 func TestSignerClose(t *testing.T) {
 	t.Setenv("TEST_CLOSE_KEY", testPrivateKeyHex)
 
-	signer, err := NewEnvSigner("TEST_CLOSE_KEY")
+	signer, err := newEnvSigner("TEST_CLOSE_KEY")
 	if err != nil {
-		t.Fatalf("NewEnvSigner failed: %v", err)
+		t.Fatalf("newEnvSigner failed: %v", err)
 	}
 
 	// Close should not error

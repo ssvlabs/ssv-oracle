@@ -33,6 +33,16 @@ type ClientConfig struct {
 	RetryConfig        *eth.RetryConfig // nil uses DefaultRetryConfig()
 }
 
+// BlockLogs represents logs from a single block.
+type BlockLogs struct {
+	BlockNumber uint64
+	BlockTime   time.Time
+	Logs        []types.Log
+}
+
+// FetchLogsCallback is called for each batch of logs.
+type FetchLogsCallback func(batchEnd uint64, logs []BlockLogs) error
+
 // New creates a new execution client.
 func New(cfg ClientConfig) (*Client, error) {
 	rpcClient, err := rpc.Dial(cfg.URL)
@@ -92,30 +102,6 @@ func (c *Client) GetHeadBlock(ctx context.Context) (uint64, error) {
 	return result.Number.Uint64(), nil
 }
 
-// GetBlockByNumber returns a block header by number.
-func (c *Client) GetBlockByNumber(ctx context.Context, number uint64) (*types.Header, error) {
-	var result *types.Header
-	err := eth.WithRetry(ctx, c.retryConfig, func() error {
-		var err error
-		result, err = c.client.HeaderByNumber(ctx, new(big.Int).SetUint64(number))
-		return err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get block %d: %w", number, err)
-	}
-	return result, nil
-}
-
-// BlockLogs represents logs from a single block.
-type BlockLogs struct {
-	BlockNumber uint64
-	BlockTime   time.Time
-	Logs        []types.Log
-}
-
-// FetchLogsCallback is called for each batch of logs.
-type FetchLogsCallback func(batchEnd uint64, logs []BlockLogs) error
-
 // FetchLogs fetches logs in batches, calling the callback after each batch.
 func (c *Client) FetchLogs(
 	ctx context.Context,
@@ -126,31 +112,25 @@ func (c *Client) FetchLogs(
 	currentBlock := fromBlock
 
 	for currentBlock <= toBlock {
-		// Calculate batch end (use smaller batches for faster progress)
 		batchEnd := currentBlock + c.fetchLogsBatchSize - 1
 		if batchEnd > toBlock {
 			batchEnd = toBlock
 		}
 
-		// Fetch logs for this batch
 		logs, err := c.fetchLogsBatch(ctx, address, currentBlock, batchEnd)
 		if err != nil {
 			return err
 		}
 
-		// Pack logs by block (only blocks with events)
-		// Also fetches block timestamps for each unique block
 		batchLogs, err := c.packLogs(ctx, logs)
 		if err != nil {
 			return err
 		}
 
-		// Call callback with batch results
 		if err := callback(batchEnd, batchLogs); err != nil {
 			return err
 		}
 
-		// Check context
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -167,15 +147,18 @@ func (c *Client) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, e
 		return nil, nil
 	}
 
-	// Sort logs by block number, then tx index
+	// Sort logs by block number, tx index, then log index.
+	// Log index is critical: multiple events in the same tx must be processed in order.
 	sort.Slice(logs, func(i, j int) bool {
-		if logs[i].BlockNumber == logs[j].BlockNumber {
+		if logs[i].BlockNumber != logs[j].BlockNumber {
+			return logs[i].BlockNumber < logs[j].BlockNumber
+		}
+		if logs[i].TxIndex != logs[j].TxIndex {
 			return logs[i].TxIndex < logs[j].TxIndex
 		}
-		return logs[i].BlockNumber < logs[j].BlockNumber
+		return logs[i].Index < logs[j].Index
 	})
 
-	// Collect unique block numbers
 	uniqueBlocks := make([]uint64, 0)
 	blockSet := make(map[uint64]bool)
 	for _, log := range logs {
@@ -185,16 +168,13 @@ func (c *Client) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, e
 		}
 	}
 
-	// Fetch all block timestamps in a single batch RPC call
 	blockTimes, err := c.getBlockTimestampsBatch(ctx, uniqueBlocks)
 	if err != nil {
 		return nil, fmt.Errorf("fetch block timestamps: %w", err)
 	}
 
-	// Group logs by block
 	var result []BlockLogs
 	for _, log := range logs {
-		// Create new BlockLogs if needed
 		if len(result) == 0 || result[len(result)-1].BlockNumber != log.BlockNumber {
 			blockTime, ok := blockTimes[log.BlockNumber]
 			if !ok {
@@ -206,7 +186,6 @@ func (c *Client) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, e
 				BlockTime:   blockTime,
 			})
 		}
-		// Append log to current block
 		result[len(result)-1].Logs = append(result[len(result)-1].Logs, log)
 	}
 
@@ -219,7 +198,6 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 		return make(map[uint64]time.Time), nil
 	}
 
-	// Prepare batch elements
 	batch := make([]rpc.BatchElem, len(blockNumbers))
 	results := make([]*types.Header, len(blockNumbers))
 
@@ -232,7 +210,6 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 		}
 	}
 
-	// Execute batch with retries
 	err := eth.WithRetry(ctx, c.retryConfig, func() error {
 		return c.rpcClient.BatchCallContext(ctx, batch)
 	})
@@ -240,7 +217,6 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 		return nil, fmt.Errorf("batch RPC: %w", err)
 	}
 
-	// Process results
 	blockTimes := make(map[uint64]time.Time)
 	for i, elem := range batch {
 		if elem.Error != nil {
@@ -255,7 +231,6 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 	return blockTimes, nil
 }
 
-// fetchLogsBatch fetches logs for a single batch with retries.
 func (c *Client) fetchLogsBatch(
 	ctx context.Context,
 	address common.Address,

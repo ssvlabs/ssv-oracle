@@ -4,21 +4,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Build-time version info populated by main.
 var (
-	Version   string
+	// Version is the build version.
+	Version string
+	// GitCommit is the git commit hash.
 	GitCommit string
+	// BuildTime is the build timestamp.
 	BuildTime string
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "ssv-oracle",
 	Short: "SSV Oracle Client",
-	Long: `SSV Oracle Client - An offchain oracle that periodically publishes
-Merkle roots of SSV cluster effective balances to an onchain oracle contract.`,
+	Long: `SSV Oracle Client - Publishes Merkle roots of SSV cluster effective
+balances to the SSV Network contract, with optional cluster balance updates.`,
+	SilenceErrors: true,
 }
 
-// Execute runs the root command
+// Execute runs the root command.
 func Execute() error {
 	return rootCmd.Execute()
 }

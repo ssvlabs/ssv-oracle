@@ -18,8 +18,15 @@ type Leaf struct {
 // Tree holds the structure for root computation and proof generation.
 type Tree struct {
 	Root   [32]byte
-	Leaves []Leaf
+	leaves []Leaf
 	layers [][][32]byte
+}
+
+// Leaves returns a copy of the tree leaves.
+func (t *Tree) Leaves() []Leaf {
+	result := make([]Leaf, len(t.leaves))
+	copy(result, t.leaves)
+	return result
 }
 
 // NewTree builds a merkle tree from cluster balances.
@@ -36,13 +43,13 @@ func NewTree(clusters map[[32]byte]uint32) *Tree {
 	})
 
 	if len(leaves) == 1 {
-		return &Tree{Root: leaves[0].Hash, Leaves: leaves}
+		return &Tree{Root: leaves[0].Hash, leaves: leaves}
 	}
 
 	layers := buildLayers(leaves)
 	return &Tree{
 		Root:   layers[len(layers)-1][0],
-		Leaves: leaves,
+		leaves: leaves,
 		layers: layers,
 	}
 }
@@ -66,7 +73,7 @@ func (t *Tree) GetProof(clusterID [32]byte) ([][32]byte, error) {
 }
 
 func (t *Tree) findLeaf(clusterID [32]byte) int {
-	for i, leaf := range t.Leaves {
+	for i, leaf := range t.leaves {
 		if leaf.ClusterID == clusterID {
 			return i
 		}
