@@ -193,7 +193,7 @@ Automatic transaction management with gas bumping, retries, and cancellation:
 ```yaml
 tx_policy:
   gas_buffer_percent: 20        # Extra % added to gas estimates (0-100)
-  max_fee_per_gas: "100 gwei"   # Hard cap on gas price
+  max_fee_per_gas_gwei: 420     # Hard cap on gas price (in Gwei)
   pending_timeout_blocks: 10    # Blocks before bumping gas on pending tx
   gas_bump_percent: 10          # Gas price bump per attempt (min 10%)
   max_retries: 3                # Max submission attempts

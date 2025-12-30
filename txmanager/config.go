@@ -3,13 +3,14 @@ package txmanager
 import (
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/params"
 )
 
 const (
 	defaultGasBufferPercent     = 20
-	defaultMaxFeePerGas         = "100 gwei"
+	defaultMaxFeePerGasGwei     = 420
 	defaultPendingTimeoutBlocks = 10
 	defaultGasBumpPercent       = 10
 	defaultMaxRetries           = 3
@@ -20,7 +21,7 @@ const (
 // Zero values are replaced with defaults via ApplyDefaults().
 type TxPolicy struct {
 	GasBufferPercent     int           `yaml:"gas_buffer_percent"`     // Extra % added to gas estimates (0-100)
-	MaxFeePerGas         string        `yaml:"max_fee_per_gas"`        // Hard cap on gas price, e.g. "100 gwei"
+	MaxFeePerGasGwei     uint64        `yaml:"max_fee_per_gas_gwei"`   // Hard cap on gas price in Gwei
 	PendingTimeoutBlocks int           `yaml:"pending_timeout_blocks"` // Blocks before bumping gas on pending tx
 	GasBumpPercent       int           `yaml:"gas_bump_percent"`       // Gas price bump per attempt (min 10%)
 	MaxRetries           int           `yaml:"max_retries"`            // Max submission attempts
@@ -32,8 +33,8 @@ func (p *TxPolicy) ApplyDefaults() {
 	if p.GasBufferPercent == 0 {
 		p.GasBufferPercent = defaultGasBufferPercent
 	}
-	if p.MaxFeePerGas == "" {
-		p.MaxFeePerGas = defaultMaxFeePerGas
+	if p.MaxFeePerGasGwei == 0 {
+		p.MaxFeePerGasGwei = defaultMaxFeePerGasGwei
 	}
 	if p.PendingTimeoutBlocks == 0 {
 		p.PendingTimeoutBlocks = defaultPendingTimeoutBlocks
@@ -49,38 +50,10 @@ func (p *TxPolicy) ApplyDefaults() {
 	}
 }
 
-// ParseMaxFeePerGas parses MaxFeePerGas string (e.g., "100 gwei") into wei.
-func (p *TxPolicy) ParseMaxFeePerGas() (*big.Int, error) {
-	var value float64
-	var unit string
-	_, err := fmt.Sscanf(p.MaxFeePerGas, "%f %s", &value, &unit)
-	if err != nil {
-		// Try parsing as plain number (wei)
-		fee := new(big.Int)
-		if _, ok := fee.SetString(p.MaxFeePerGas, 10); ok {
-			return fee, nil
-		}
-		return nil, fmt.Errorf("invalid max_fee_per_gas format: %s", p.MaxFeePerGas)
-	}
-
-	var multiplier *big.Int
-	switch strings.ToLower(unit) {
-	case "wei":
-		multiplier = big.NewInt(1)
-	case "gwei":
-		multiplier = big.NewInt(1e9)
-	case "ether", "eth":
-		multiplier = big.NewInt(1e18)
-	default:
-		return nil, fmt.Errorf("unknown unit: %s", unit)
-	}
-
-	valueWei := new(big.Float).SetFloat64(value)
-	valueWei.Mul(valueWei, new(big.Float).SetInt(multiplier))
-
-	result := new(big.Int)
-	valueWei.Int(result)
-	return result, nil
+// MaxFeePerGasWei returns MaxFeePerGasGwei converted to Wei.
+func (p *TxPolicy) MaxFeePerGasWei() *big.Int {
+	gwei := new(big.Int).SetUint64(p.MaxFeePerGasGwei)
+	return gwei.Mul(gwei, big.NewInt(params.GWei))
 }
 
 // Validate checks that all fields are within valid ranges.
@@ -101,19 +74,8 @@ func (p *TxPolicy) Validate() error {
 	if p.RetryDelay < 0 {
 		return fmt.Errorf("retry_delay cannot be negative")
 	}
-	if p.MaxFeePerGas == "" {
-		return fmt.Errorf("max_fee_per_gas is required")
+	if p.MaxFeePerGasGwei < 1 {
+		return fmt.Errorf("max_fee_per_gas_gwei must be at least 1, got %d", p.MaxFeePerGasGwei)
 	}
-
-	fee, err := p.ParseMaxFeePerGas()
-	if err != nil {
-		return err
-	}
-
-	minFee := big.NewInt(1e9) // 1 gwei
-	if fee.Cmp(minFee) < 0 {
-		return fmt.Errorf("max_fee_per_gas must be at least 1 gwei, got %s", p.MaxFeePerGas)
-	}
-
 	return nil
 }

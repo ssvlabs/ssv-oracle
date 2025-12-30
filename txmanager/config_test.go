@@ -3,6 +3,9 @@ package txmanager
 import (
 	"testing"
 	"time"
+
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTxPolicy_Validate(t *testing.T) {
@@ -15,7 +18,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "valid policy",
 			policy: &TxPolicy{
 				GasBufferPercent:     20,
-				MaxFeePerGas:         "100 gwei",
+				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
 				MaxRetries:           3,
@@ -27,7 +30,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "gas bump too low",
 			policy: &TxPolicy{
 				GasBufferPercent:     20,
-				MaxFeePerGas:         "100 gwei",
+				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       5, // Must be >= 10 for EIP-1559
 				MaxRetries:           3,
@@ -39,7 +42,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "zero retries",
 			policy: &TxPolicy{
 				GasBufferPercent:     20,
-				MaxFeePerGas:         "100 gwei",
+				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
 				MaxRetries:           0,
@@ -51,6 +54,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "missing max fee",
 			policy: &TxPolicy{
 				GasBufferPercent:     20,
+				MaxFeePerGasGwei:     0, // Required
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
 				MaxRetries:           3,
@@ -61,7 +65,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "gas buffer too high",
 			policy: &TxPolicy{
 				GasBufferPercent:     150, // Max is 100
-				MaxFeePerGas:         "100 gwei",
+				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
 				MaxRetries:           3,
@@ -72,7 +76,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "negative gas buffer",
 			policy: &TxPolicy{
 				GasBufferPercent:     -10,
-				MaxFeePerGas:         "100 gwei",
+				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
 				MaxRetries:           3,
@@ -83,7 +87,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "zero pending timeout",
 			policy: &TxPolicy{
 				GasBufferPercent:     20,
-				MaxFeePerGas:         "100 gwei",
+				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 0,
 				GasBumpPercent:       10,
 				MaxRetries:           3,
@@ -94,22 +98,11 @@ func TestTxPolicy_Validate(t *testing.T) {
 			name: "negative retry delay",
 			policy: &TxPolicy{
 				GasBufferPercent:     20,
-				MaxFeePerGas:         "100 gwei",
+				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
 				MaxRetries:           3,
 				RetryDelay:           -1 * time.Second,
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid max fee format",
-			policy: &TxPolicy{
-				GasBufferPercent:     20,
-				MaxFeePerGas:         "invalid",
-				PendingTimeoutBlocks: 10,
-				GasBumpPercent:       10,
-				MaxRetries:           3,
 			},
 			wantErr: true,
 		},
@@ -137,7 +130,7 @@ func TestTxPolicy_ApplyDefaults(t *testing.T) {
 	// Explicit values should not be overwritten
 	policy2 := &TxPolicy{
 		GasBufferPercent: 50,
-		MaxFeePerGas:     "200 gwei",
+		MaxFeePerGasGwei: 200,
 		MaxRetries:       5,
 	}
 	policy2.ApplyDefaults()
@@ -145,8 +138,8 @@ func TestTxPolicy_ApplyDefaults(t *testing.T) {
 	if policy2.GasBufferPercent != 50 {
 		t.Errorf("GasBufferPercent should remain 50, got %d", policy2.GasBufferPercent)
 	}
-	if policy2.MaxFeePerGas != "200 gwei" {
-		t.Errorf("MaxFeePerGas should remain '200 gwei', got %s", policy2.MaxFeePerGas)
+	if policy2.MaxFeePerGasGwei != 200 {
+		t.Errorf("MaxFeePerGasGwei should remain 200, got %d", policy2.MaxFeePerGasGwei)
 	}
 	if policy2.MaxRetries != 5 {
 		t.Errorf("MaxRetries should remain 5, got %d", policy2.MaxRetries)
@@ -157,46 +150,22 @@ func TestTxPolicy_ApplyDefaults(t *testing.T) {
 	}
 }
 
-func TestTxPolicy_ParseMaxFeePerGas(t *testing.T) {
+func TestTxPolicy_MaxFeePerGasWei(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    string
+		gwei     uint64
 		expected int64 // in wei
-		wantErr  bool
-		wantNil  bool
 	}{
-		{"100 gwei", "100 gwei", 100_000_000_000, false, false},
-		{"1 gwei", "1 gwei", 1_000_000_000, false, false},
-		{"0.5 gwei", "0.5 gwei", 500_000_000, false, false},
-		{"1 wei", "1 wei", 1, false, false},
-		{"plain number as wei", "1000000000", 1_000_000_000, false, false},
-		{"empty string errors", "", 0, true, false},
-		{"invalid format", "invalid", 0, true, false},
-		{"unknown unit", "100 foo", 0, true, false},
-		{"1 ether", "1 ether", 1_000_000_000_000_000_000, false, false},
-		{"1 eth", "1 eth", 1_000_000_000_000_000_000, false, false},
-		{"case insensitive GWEI", "100 GWEI", 100_000_000_000, false, false},
-		{"case insensitive Gwei", "50 Gwei", 50_000_000_000, false, false},
-		{"case insensitive WEI", "1000 WEI", 1000, false, false},
+		{"100 gwei", 100, 100 * params.GWei},
+		{"1 gwei", 1, params.GWei},
+		{"50 gwei", 50, 50 * params.GWei},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			policy := &TxPolicy{MaxFeePerGas: tt.input}
-			got, err := policy.ParseMaxFeePerGas()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseMaxFeePerGas() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantNil {
-				if got != nil {
-					t.Errorf("ParseMaxFeePerGas() = %v, want nil", got)
-				}
-				return
-			}
-			if !tt.wantErr && got != nil && got.Int64() != tt.expected {
-				t.Errorf("ParseMaxFeePerGas() = %d, want %d", got.Int64(), tt.expected)
-			}
+			policy := &TxPolicy{MaxFeePerGasGwei: tt.gwei}
+			got := policy.MaxFeePerGasWei()
+			require.Equal(t, tt.expected, got.Int64())
 		})
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"ssv-oracle/eth"
+	"ssv-oracle/logger"
 )
 
 const defaultFetchLogsBatchSize = 200
@@ -44,13 +45,19 @@ type BlockLogs struct {
 type FetchLogsCallback func(batchEnd uint64, logs []BlockLogs) error
 
 // New creates a new execution client.
-func New(cfg ClientConfig) (*Client, error) {
+func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	rpcClient, err := rpc.Dial(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("dial RPC: %w", err)
 	}
 
 	client := ethclient.NewClient(rpcClient)
+
+	version := "unknown"
+	if err := rpcClient.CallContext(ctx, &version, "web3_clientVersion"); err != nil {
+		version = "unknown"
+	}
+	logger.Infow("Execution client connected", "version", version, "url", cfg.URL)
 
 	if cfg.FetchLogsBatchSize == 0 {
 		cfg.FetchLogsBatchSize = defaultFetchLogsBatchSize

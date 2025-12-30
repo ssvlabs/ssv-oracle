@@ -22,7 +22,8 @@ import (
 const (
 	defaultBeaconTimeout = 30 * time.Second
 	validatorBatchSize   = 1000 // Max validators per beacon API request
-	maxParallelRequests  = 5
+	validatorMaxParallel = 5
+	stateWaitInterval    = time.Second
 )
 
 type beaconAPI interface {
@@ -59,6 +60,14 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("beacon node %s: %w", cfg.URL, err)
 	}
+
+	version := "unknown"
+	if vp, ok := client.(eth2client.NodeVersionProvider); ok {
+		if resp, err := vp.NodeVersion(ctx, &api.NodeVersionOpts{}); err == nil {
+			version = resp.Data
+		}
+	}
+	logger.Infow("Beacon client connected", "version", version, "url", cfg.URL)
 
 	retryConfig := eth.DefaultRetryConfig()
 	if cfg.RetryConfig != nil {
@@ -120,7 +129,7 @@ func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoi
 }
 
 // GetValidatorBalances returns effective balances in Gwei for the given validators.
-func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
+func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot phase0.Root, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
 		return make(map[phase0.BLSPubKey]uint64), nil
 	}
@@ -140,7 +149,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pub
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(maxParallelRequests)
+	g.SetLimit(validatorMaxParallel)
 
 	var mu sync.Mutex
 	merged := make(map[phase0.BLSPubKey]uint64, len(pubkeys))
@@ -149,7 +158,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pub
 		g.Go(func() error {
 			return eth.WithRetry(ctx, c.retryConfig, func() error {
 				resp, err := c.beacon.Validators(ctx, &api.ValidatorsOpts{
-					State:   stateRoot,
+					State:   stateRoot.String(),
 					PubKeys: batch,
 				})
 				if err != nil {
@@ -171,6 +180,35 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot string, pub
 	}
 
 	return merged, nil
+}
+
+// WaitForFinalizedState waits for the beacon's finalized state root to match the expected state root.
+// This handles the race condition where SSE events arrive before the REST API updates.
+func (c *Client) WaitForFinalizedState(ctx context.Context, expected phase0.Root) error {
+	ctx, cancel := context.WithTimeout(ctx, defaultBeaconTimeout)
+	defer cancel()
+
+	for {
+		checkpoint, err := c.GetFinalizedCheckpoint(ctx)
+		if err != nil {
+			return fmt.Errorf("get finalized checkpoint: %w", err)
+		}
+
+		if checkpoint.StateRoot == expected {
+			return nil
+		}
+
+		logger.Debugw("Waiting for finalized state",
+			"current", checkpoint.StateRoot.String(),
+			"expected", expected.String())
+
+		select {
+		case <-time.After(stateWaitInterval):
+			// retry
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for finalized state %s", expected.String())
+		}
+	}
 }
 
 // SubscribeFinalizedCheckpoints starts an SSE subscription for finalized checkpoints.
@@ -195,6 +233,7 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 				logger.Debugw("Finalized checkpoint event",
 					"checkpointEpoch", checkpoint.Epoch,
 					"fullyFinalized", checkpoint.Epoch-1,
+					"stateRoot", checkpoint.StateRoot.String(),
 					"referenceBlock", checkpoint.BlockNum)
 			default:
 				logger.Warnw("Dropped finalized checkpoint (consumer slow)",

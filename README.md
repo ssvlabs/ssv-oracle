@@ -1,297 +1,82 @@
 # SSV Oracle
 
-Off-chain oracle client that publishes Merkle roots of SSV cluster effective balances to an on-chain oracle contract.
+Off-chain oracle that publishes Merkle roots of SSV cluster effective balances to the SSV Network contract.
 
 ## Features
 
-- **Event-sourced architecture** - Syncs SSV contract events to SQLite for point-in-time queries
-- **Epoch-aligned timing** - Waits for epoch finalization before committing roots
-- **OpenZeppelin-compatible Merkle trees** - Deterministic root computation with standardized sibling ordering
-- **Beacon chain integration** - Fetches validator effective balances directly from consensus layer
-- **Unified contract** - Uses the SSV Network contract itself (no separate oracle contract),
-  with oracle functionality integrated directly
-- **Single binary deployment** - SQLite database requires no external services
+- **Event-sourced** - Syncs SSV contract events to SQLite for point-in-time queries
+- **Epoch-aligned** - Commits only after beacon chain finalization
+- **OpenZeppelin-compatible** - StandardMerkleTree format with deterministic ordering
+- **Single binary** - Embedded SQLite database
 
 ## Quick Start
 
-### Prerequisites
-
-- Go 1.25+
-- Ethereum execution client (HTTP RPC, WebSocket for `--updater`)
-- Beacon node (REST API endpoint)
-
-### Installation
+**Prerequisites:** Go 1.25+, Ethereum execution client, Beacon node, funded wallet
 
 ```bash
-# Copy configuration templates
-cp .env.example .env
-cp config.yaml.example config.yaml
+# Setup
+cp .env.example .env && cp config.yaml.example config.yaml
+# Edit config.yaml with your endpoints and contract addresses
 
-# Edit config.yaml with your endpoints
-# - eth_rpc: Execution layer HTTP RPC
-# - eth_ws_rpc: Execution layer WebSocket (required for --updater)
-# - beacon_rpc: Beacon node API
-# - ssv_contract: SSV Network contract address (includes oracle functionality)
-# - ssv_views_contract: SSV Network Views contract (required for --updater)
-
-# Load environment variables
-source .env
-
-# Start with fresh database
-make fresh
+# Run
+make fresh      # Fresh start (clears DB)
+make fresh-all  # Fresh start with updater
+make run        # Oracle only
+make run-all    # Oracle + cluster updater
 ```
 
-## Usage
-
+**CLI:**
 ```bash
-make              # Show available targets
-make run          # Run oracle
-make run-all      # Run oracle + cluster updater
-make fresh        # Fresh start (reset DB)
-make fresh-all    # Fresh start with updater
-make test         # Run tests
-make lint         # Run linters
-make docker       # Build Docker image
-make docker-run   # Run Docker container
-make docker-stop  # Stop Docker container
-make clean        # Remove build artifacts and database
-make db-reset     # Remove SQLite database files
+make build
+./ssv-oracle run --config config.yaml                    # Oracle only
+./ssv-oracle run --config config.yaml --updater          # With cluster updater
+./ssv-oracle run --config config.yaml --fresh            # Clear DB first
+./ssv-oracle run --config config.yaml --fresh --updater  # Both
 ```
 
-**CLI flags:**
-```bash
-./ssv-oracle run --config config.yaml            # Oracle only
-./ssv-oracle run --config config.yaml --updater  # Oracle + updater
-./ssv-oracle run --config config.yaml --fresh    # Clear DB and start fresh
-```
+## How It Works
 
-## Configuration
-
-Edit `config.yaml`:
-
-```yaml
-# Logging
-log_level: "info"  # debug, info, warn, error
-
-# Network
-eth_rpc: "http://localhost:8545"
-eth_ws_rpc: "ws://localhost:8546"  # Required for --updater
-beacon_rpc: "http://localhost:5052"
-
-# Contract
-ssv_contract: "0x..."
-ssv_views_contract: "0x..."  # Required for --updater (SSV Network Views contract)
-
-# Syncing
-ssv_contract_deploy_block: 17507487  # Mainnet example
-sync_batch_size: 200
-
-# Database (SQLite)
-db_path: "./data/oracle.db"  # For Docker: "/data/oracle.db"
-
-# Wallet
-wallet:
-  type: "env"  # env | keystore
-  private_key_env: "PRIVATE_KEY"
-```
-
-### Wallet Configuration
-
-The oracle supports multiple signing backends:
-
-| Type | Description | Use Case |
-|------|-------------|----------|
-| `env` | Private key from environment variable | Development |
-| `keystore` | Encrypted keystore file | Production |
-
-**Keystore example:**
-```yaml
-wallet:
-  type: "keystore"
-  keystore_path: "/path/to/UTC--...--keystore.json"
-  password_env: "KEYSTORE_PASSWORD"   # or
-  password_file: "/path/to/password.txt"
-```
-
-### Transaction Policy
-
-The oracle includes automatic transaction management with gas optimization, retries, and cancellation:
-
-```yaml
-tx_policy:
-  gas_buffer_percent: 20        # Extra % added to gas estimates (0-100)
-  max_fee_per_gas: "100 gwei"   # Hard cap on gas price
-  pending_timeout_blocks: 10    # Blocks before bumping gas on pending tx
-  gas_bump_percent: 10          # Gas price bump per attempt (min 10%)
-  max_retries: 3                # Max submission attempts
-  retry_delay: 5s               # Delay after RPC error before retry
-```
-
-| Setting | Description |
-|---------|-------------|
-| `gas_buffer_percent` | Extra % added to gas estimates to prevent out-of-gas errors |
-| `max_fee_per_gas` | Hard cap on gas price (supports "wei", "gwei", "eth"/"ether") |
-| `pending_timeout_blocks` | Blocks to wait before bumping gas on a pending transaction |
-| `gas_bump_percent` | Gas price increase per attempt (EIP-1559 requires ≥10%) |
-| `max_retries` | Maximum submission attempts before cancelling |
-| `retry_delay` | Delay after RPC/submission error before retry |
-
-**Automatic cancellation:** When max retries are exhausted or max gas price is reached, the oracle sends a 0-value self-transfer to free the nonce and prevent stuck transactions.
-
-## Oracle Cycle
+### Oracle
 
 The oracle is event-driven, reacting to beacon chain finalization:
 
-1. **Subscribe** - Connect to beacon node SSE for finalized checkpoint events
-2. **On finalization** - When a new epoch finalizes, check if a target epoch is ready
-3. **Sync events** - Fetch SSV contract events up to the finalized block
-4. **Fetch balances** - Query beacon chain for validator effective balances
-5. **Build Merkle tree** - Aggregate balances by cluster, construct tree
-6. **Commit root** - Submit transaction with Merkle root and reference block
+1. Subscribe to beacon node finalized checkpoint events (SSE)
+2. Sync SSV contract events up to the finalized block
+3. Fetch validator effective balances from beacon chain
+4. Build Merkle tree aggregated by cluster
+5. Submit root to SSV Network contract
 
-### Beacon Chain Finalization
+**Finalization:** When beacon reports `checkpoint.Epoch = N`, epoch `N-1` is fully finalized. The oracle uses this to determine which targets can be committed.
 
-Understanding Ethereum's finalization is critical for this codebase:
+### Cluster Updater
 
-- **Finalized checkpoint epoch** = the epoch boundary checkpoint
-  (slot = epoch × SLOTS_PER_EPOCH, even if the slot was missed)
-- **Fully finalized epoch** = `checkpoint.Epoch - 1` (all slots in that epoch are finalized)
+Runs alongside the oracle (`--updater` flag) to update individual cluster balances on-chain:
 
-When the beacon node reports `checkpoint.Epoch = 100`, it means epoch 99 is fully finalized. The oracle uses `checkpoint.Epoch - 1` to determine which target epochs can be committed.
+1. Listen for `RootCommitted` events
+2. Rebuild Merkle tree from stored balances
+3. For each cluster with changed balance, submit proof via `UpdateClusterBalance`
 
-```
-Checkpoint epoch: 100  →  Fully finalized: 99  →  Can commit targets ≤ 99
-```
-
-## Cluster Updater
-
-The updater runs alongside the oracle (enabled with `--updater` flag) and updates individual cluster balances on-chain:
-
-1. **Listen for commits** - Subscribes to RootCommitted events from SSV Network contract
-2. **Rebuild merkle tree** - Reconstructs tree from stored cluster balances
-3. **Validate root** - Ensures computed root matches the committed root
-4. **Check balances** - Reads current on-chain balance for each cluster (skips unchanged)
-5. **Submit proofs** - Calls `UpdateClusterBalance` with merkle proof for each changed cluster
-
-**Gas optimization:** The updater checks each cluster's current on-chain balance before submitting. Clusters with unchanged balances are skipped, saving gas.
-
-**Fail-fast behavior:** If either the oracle or updater encounters a fatal error, both stop
-to avoid partial updates and inconsistent Merkle state. Other oracle instances in the network
-can safely continue processing commits.
-
-## Merkle Tree Specification
-
-The oracle builds an OpenZeppelin StandardMerkleTree-compatible Merkle tree:
-
-**Leaf encoding (double-hashed for second preimage resistance):**
-```solidity
-leaf = keccak256(keccak256(abi.encode(clusterId, effectiveBalance)))
-```
-
-**Tree construction:**
-- Sort leaves by leaf hash (ascending byte order)
-- Duplicate last leaf if odd count
-- Sort sibling pairs before hashing: `parent = keccak256(min(left, right) || max(left, right))`
-
-**Cluster ID computation:**
-```solidity
-clusterId = keccak256(abi.encodePacked(owner, uint256(op1), uint256(op2), ...))
-```
-where operator IDs are sorted ascending.
+Clusters with unchanged balances are skipped to save gas.
 
 ## Database
 
-SQLite database at `./data/oracle.db` with WAL mode for better concurrency.
-
-**Tables:**
-- `sync_progress` - Sync state and chain ID validation
-- `contract_events` - Raw SSV contract events (audit log)
-- `clusters` - Current cluster state
-- `validators` - Validator membership (cluster_id, pubkey)
-- `oracle_commits` - History of committed roots with cluster balances
-
-**Database files (WAL mode):**
-- `oracle.db` - Main database
-- `oracle.db-wal` - Write-ahead log
-- `oracle.db-shm` - Shared memory
+SQLite at `./data/oracle.db`. Reset with `make db-reset`, `make fresh`, or `make fresh-all`.
 
 **Backup:**
 ```bash
-# When DB is idle
-cp data/oracle.db data/oracle.db.backup
-
-# Online backup (safe)
 sqlite3 data/oracle.db ".backup data/oracle.db.backup"
-```
-
-## Project Structure
-
-```
-ssv-oracle/
-├── cmd/oracle/         CLI application (Cobra)
-├── contract/           Ethereum client & contract ABI
-├── eth/                Ethereum-related packages
-│   ├── beacon/         Beacon chain client (finality, validators)
-│   ├── execution/      Execution layer client (logs, blocks)
-│   └── syncer/         Event syncing & parsing
-├── logger/             Zap-based structured logging
-├── merkle/             Merkle tree construction & encoding
-├── oracle/             Oracle cycle logic
-├── storage/            SQLite storage layer
-├── txmanager/          Transaction lifecycle (gas, retries)
-├── updater/            Cluster balance updater
-├── wallet/             Transaction signing (env, keystore)
-└── data/               SQLite database files (gitignored)
-```
-
-## Logging
-
-The oracle uses structured logging (zap):
-
-| Setting | Source | Description |
-|---------|--------|-------------|
-| `log_level` | Config file | Log level: debug, info, warn, error (default: info) |
-| `DEV` | Environment | Development mode: colored output, human-readable timestamps |
-
-**Examples:**
-```bash
-# Production (JSON logs, level from config)
-./ssv-oracle run
-
-# Development (colored console)
-DEV=true ./ssv-oracle run
 ```
 
 ## Development
 
-```bash
-make build    # Build binary
-make test     # Run tests
-make lint     # Run linters (vet, fmt, golangci-lint)
+Run `make` to see all available targets.
 
-# Run specific test
-go test -run TestMerkleTree ./merkle
-```
+Set `DEV=true` env for colored console output.
 
 ## Troubleshooting
 
-**Database errors**
-```bash
-make db-reset  # Remove SQLite files and start fresh
-make fresh     # Reset and restart
-```
-
-**Execution client connection failed**
-- Verify `eth_rpc` endpoint is accessible
-- Check chain ID matches expected network
-
-**Beacon node sync incomplete**
-```bash
-curl <beacon_rpc>/eth/v1/node/syncing
-# Wait for "is_syncing": false
-```
-
-**Initial sync is slow**
-- Normal behavior (depends on block range)
-- Adjust `sync_batch_size` in config (default: 200)
-- Subsequent runs use incremental sync
+| Issue | Solution |
+|-------|----------|
+| Database errors | `make fresh` or `make fresh-all` to reset |
+| Connection failed | Verify RPC endpoints are accessible |
+| Beacon not synced | Wait for `curl <beacon_rpc>/eth/v1/node/syncing` to show `is_syncing: false` |

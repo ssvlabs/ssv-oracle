@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
+
+	"ssv-oracle/logger"
 )
 
 const (
@@ -53,6 +55,12 @@ func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 				jitter := time.Duration(rand.Int63n(max(int64(delay)/4, 1)))
 				delay += jitter
 			}
+
+			logger.Debugw("Retrying after error",
+				"attempt", attempt+1,
+				"maxAttempts", cfg.MaxRetries+1,
+				"delay", delay.Round(time.Millisecond),
+				"error", err)
 
 			select {
 			case <-time.After(delay):

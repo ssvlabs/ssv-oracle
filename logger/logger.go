@@ -43,9 +43,7 @@ func Init(level string) {
 	// Set log level from parameter
 	if level != "" {
 		var lvl zapcore.Level
-		if err := lvl.UnmarshalText([]byte(strings.ToLower(level))); err != nil {
-			l.Warnw("Invalid log level, using default", "level", level, "error", err)
-		} else {
+		if err := lvl.UnmarshalText([]byte(strings.ToLower(level))); err == nil {
 			config.Level = zap.NewAtomicLevelAt(lvl)
 		}
 	}

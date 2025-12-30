@@ -130,9 +130,9 @@ func (o *Oracle) Run(ctx context.Context) error {
 
 			if err := o.commit(ctx, checkpoint, o.nextTarget); err != nil {
 				logger.Errorw("Commit failed", "target", o.nextTarget, "error", err)
-				continue
 			}
 
+			// Always advance to next target - we can't retry past epochs
 			o.nextTarget = o.schedule.NextTarget(fullyFinalized)
 			logger.Infow("Waiting for finalization", "nextTarget", o.nextTarget)
 		}
@@ -144,13 +144,18 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 
 	log.Infow("Committing",
 		"fullyFinalized", checkpoint.Epoch-1,
+		"stateRoot", checkpoint.StateRoot.String(),
 		"referenceBlock", checkpoint.BlockNum)
 
 	if err := o.syncer.SyncToBlock(ctx, checkpoint.BlockNum); err != nil {
 		return fmt.Errorf("sync to block %d: %w", checkpoint.BlockNum, err)
 	}
 
-	clusterBalances, err := o.fetchClusterBalances(ctx, checkpoint.StateRoot.String())
+	if err := o.beaconClient.WaitForFinalizedState(ctx, checkpoint.StateRoot); err != nil {
+		return fmt.Errorf("wait for finalized state: %w", err)
+	}
+
+	clusterBalances, err := o.fetchClusterBalances(ctx, checkpoint.StateRoot)
 	if err != nil {
 		return fmt.Errorf("fetch balances: %w", err)
 	}
@@ -187,7 +192,7 @@ func (o *Oracle) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree
 	return merkle.NewTree(clusterMap)
 }
 
-func (o *Oracle) fetchClusterBalances(ctx context.Context, stateRoot string) ([]storage.ClusterBalance, error) {
+func (o *Oracle) fetchClusterBalances(ctx context.Context, stateRoot phase0.Root) ([]storage.ClusterBalance, error) {
 	validators, err := o.storage.GetActiveValidators(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get active validators: %w", err)
@@ -284,7 +289,8 @@ func (o *Oracle) handleCommitError(
 	if revertErr, ok := txmanager.IsRevertError(err); ok {
 		log.Errorw("Commit reverted, skipping",
 			"reason", revertErr.Reason,
-			"simulated", revertErr.Simulated)
+			"simulated", revertErr.Simulated,
+			"error", err)
 		return nil
 	}
 

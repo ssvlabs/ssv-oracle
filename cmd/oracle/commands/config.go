@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 
 	"ssv-oracle/oracle"
@@ -45,6 +46,12 @@ func (c *config) validate(withUpdater bool) error {
 	c.LogLevel = strings.TrimSpace(c.LogLevel)
 
 	var errs []error
+	if c.LogLevel != "" {
+		var lvl zapcore.Level
+		if err := lvl.UnmarshalText([]byte(strings.ToLower(c.LogLevel))); err != nil {
+			errs = append(errs, fmt.Errorf("invalid log_level %q: must be debug, info, warn, or error", c.LogLevel))
+		}
+	}
 	if err := validateURL(c.EthRPC, "eth_rpc", "http", "https"); err != nil {
 		errs = append(errs, err)
 	}

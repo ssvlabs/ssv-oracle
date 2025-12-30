@@ -74,7 +74,6 @@ type TxManager struct {
 	signer         wallet.Signer
 	chainID        *big.Int
 	policy         *TxPolicy
-	maxFeePerGas   *big.Int
 	errorSelectors map[string]string
 }
 
@@ -88,26 +87,14 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 		return nil, fmt.Errorf("invalid tx policy: %w", err)
 	}
 
-	maxFee, err := policy.ParseMaxFeePerGas()
-	if err != nil {
-		return nil, fmt.Errorf("parse max_fee_per_gas: %w", err)
-	}
-
-	logger.Infow("Transaction policy",
-		"gasBufferPercent", policy.GasBufferPercent,
-		"maxFeePerGas", policy.MaxFeePerGas,
-		"pendingTimeoutBlocks", policy.PendingTimeoutBlocks,
-		"gasBumpPercent", policy.GasBumpPercent,
-		"maxRetries", policy.MaxRetries,
-		"retryDelay", policy.RetryDelay,
-	)
+	logger.Infow("Transaction manager initialized",
+		"policy", policy)
 
 	return &TxManager{
 		client:         client,
 		signer:         signer,
 		chainID:        chainID,
 		policy:         policy,
-		maxFeePerGas:   maxFee,
 		errorSelectors: make(map[string]string),
 	}, nil
 }
@@ -227,7 +214,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		if shouldCancel {
 			logger.Warnw("Max gas reached, cancelling",
 				"nonce", nonce,
-				"maxFeePerGas", m.maxFeePerGas,
+				"maxFeePerGas", m.policy.MaxFeePerGasWei(),
 				"currentFeeCap", currentFeeCap)
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 				logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
@@ -280,7 +267,7 @@ func (m *TxManager) bumpGas(currentTip, currentFeeCap *big.Int) (*big.Int, *big.
 	newTip := m.applyBumpPercent(currentTip)
 	newFeeCap := m.applyBumpPercent(currentFeeCap)
 
-	if newFeeCap.Cmp(m.maxFeePerGas) > 0 {
+	if newFeeCap.Cmp(m.policy.MaxFeePerGasWei()) > 0 {
 		return nil, nil, true
 	}
 
@@ -297,12 +284,13 @@ func (m *TxManager) applyBumpPercent(value *big.Int) *big.Int {
 // cancelTx sends a zero-value self-transfer to free the nonce.
 func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *big.Int) error {
 	from := m.signer.Address()
+	maxFee := m.policy.MaxFeePerGasWei()
 
 	gasFeeCap := m.applyBumpPercent(prevGasFeeCap)
 
 	// Cap at maxFeePerGas to respect configured limit.
-	if gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
-		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
+	if gasFeeCap.Cmp(maxFee) > 0 {
+		gasFeeCap = new(big.Int).Set(maxFee)
 	}
 
 	tx := types.NewTx(&types.DynamicFeeTx{
@@ -410,6 +398,8 @@ func (m *TxManager) replayForRevertReason(ctx context.Context, opts *TxOpts, blo
 // suggestGasFees returns suggested tip and fee cap, capped at maxFeePerGas.
 // Returns errBaseFeeExceedsMax if current base fee exceeds the configured maximum.
 func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, error) {
+	maxFee := m.policy.MaxFeePerGasWei()
+
 	gasTipCap, err := m.client.SuggestGasTipCap(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get gas tip cap: %w", err)
@@ -421,17 +411,17 @@ func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, err
 	}
 
 	// Check if base fee already exceeds our cap - tx would be rejected as underpriced
-	if header.BaseFee.Cmp(m.maxFeePerGas) > 0 {
+	if header.BaseFee.Cmp(maxFee) > 0 {
 		return nil, nil, fmt.Errorf("%w: base fee %s > max %s",
-			errBaseFeeExceedsMax, header.BaseFee, m.maxFeePerGas)
+			errBaseFeeExceedsMax, header.BaseFee, maxFee)
 	}
 
 	// EIP-1559: gasFeeCap = 2*baseFee + gasTipCap
 	gasFeeCap := new(big.Int).Mul(header.BaseFee, big.NewInt(2))
 	gasFeeCap.Add(gasFeeCap, gasTipCap)
 
-	if gasFeeCap.Cmp(m.maxFeePerGas) > 0 {
-		gasFeeCap = new(big.Int).Set(m.maxFeePerGas)
+	if gasFeeCap.Cmp(maxFee) > 0 {
+		gasFeeCap = new(big.Int).Set(maxFee)
 		if gasTipCap.Cmp(gasFeeCap) > 0 {
 			gasTipCap = new(big.Int).Set(gasFeeCap)
 		}

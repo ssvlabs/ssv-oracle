@@ -92,7 +92,7 @@ func run(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	execClient, err := execution.New(execution.ClientConfig{
+	execClient, err := execution.New(ctx, execution.ClientConfig{
 		URL:                cfg.EthRPC,
 		FetchLogsBatchSize: cfg.SyncBatchSize,
 	})
@@ -126,10 +126,12 @@ func run(_ *cobra.Command, _ []string) error {
 		Signer:          signer,
 		TxPolicy:        &cfg.TxPolicy,
 	}
+
 	if withUpdater {
 		contractCfg.WSRPCURL = cfg.EthWSRPC
 		contractCfg.ViewsContractAddress = cfg.SSVViewsContract
 	}
+
 	ethClient, err := contract.NewClient(contractCfg)
 	if err != nil {
 		return fmt.Errorf("create contract client: %w", err)
