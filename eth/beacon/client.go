@@ -10,7 +10,6 @@ import (
 	"github.com/attestantio/go-eth2-client/api"
 	apiv1 "github.com/attestantio/go-eth2-client/api/v1"
 	"github.com/attestantio/go-eth2-client/http"
-	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
@@ -82,9 +81,8 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 
 // FinalizedCheckpoint contains the finalized epoch and corresponding execution block.
 type FinalizedCheckpoint struct {
-	Epoch     uint64
-	BlockNum  uint64
-	StateRoot phase0.Root
+	Epoch    uint64
+	BlockNum uint64
 }
 
 // GetFinalizedCheckpoint returns the latest finalized checkpoint.
@@ -98,38 +96,38 @@ func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoi
 			return fmt.Errorf("get finality: %w", err)
 		}
 
-		epoch := uint64(finalityResp.Data.Finalized.Epoch)
-		root := finalityResp.Data.Finalized.Root
-
-		blockResp, err := c.beacon.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
-			Block: root.String(),
-		})
-		if err != nil {
-			return fmt.Errorf("get beacon block: %w", err)
-		}
-
-		blockNum, err := blockResp.Data.ExecutionBlockNumber()
-		if err != nil {
-			return fmt.Errorf("get execution block number: %w", err)
-		}
-
-		stateRoot, err := blockResp.Data.StateRoot()
-		if err != nil {
-			return fmt.Errorf("get state root: %w", err)
-		}
-
-		checkpoint = &FinalizedCheckpoint{
-			Epoch:     epoch,
-			BlockNum:  blockNum,
-			StateRoot: stateRoot,
-		}
-		return nil
+		checkpoint, err = c.fetchCheckpoint(
+			ctx,
+			uint64(finalityResp.Data.Finalized.Epoch),
+			finalityResp.Data.Finalized.Root,
+		)
+		return err
 	})
 	return checkpoint, err
 }
 
-// GetValidatorBalances returns effective balances in Gwei for the given validators.
-func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot phase0.Root, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
+func (c *Client) fetchCheckpoint(ctx context.Context, epoch uint64, blockRoot phase0.Root) (*FinalizedCheckpoint, error) {
+	blockResp, err := c.beacon.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
+		Block: blockRoot.String(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get beacon block: %w", err)
+	}
+
+	blockNum, err := blockResp.Data.ExecutionBlockNumber()
+	if err != nil {
+		return nil, fmt.Errorf("get execution block number: %w", err)
+	}
+
+	return &FinalizedCheckpoint{
+		Epoch:    epoch,
+		BlockNum: blockNum,
+	}, nil
+}
+
+// GetValidatorBalances returns effective balances in Gwei for the given validators
+// at the finalized state.
+func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
 		return make(map[phase0.BLSPubKey]uint64), nil
 	}
@@ -158,7 +156,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot phase0.Root
 		g.Go(func() error {
 			return eth.WithRetry(ctx, c.retryConfig, func() error {
 				resp, err := c.beacon.Validators(ctx, &api.ValidatorsOpts{
-					State:   stateRoot.String(),
+					State:   "finalized",
 					PubKeys: batch,
 				})
 				if err != nil {
@@ -182,9 +180,9 @@ func (c *Client) GetValidatorBalances(ctx context.Context, stateRoot phase0.Root
 	return merged, nil
 }
 
-// WaitForFinalizedState waits for the beacon's finalized state root to match the expected state root.
+// WaitForCheckpointReady waits for the beacon REST API to reflect the finalized checkpoint.
 // This handles the race condition where SSE events arrive before the REST API updates.
-func (c *Client) WaitForFinalizedState(ctx context.Context, expected phase0.Root) error {
+func (c *Client) WaitForCheckpointReady(ctx context.Context, expectedEpoch uint64) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultBeaconTimeout)
 	defer cancel()
 
@@ -194,19 +192,20 @@ func (c *Client) WaitForFinalizedState(ctx context.Context, expected phase0.Root
 			return fmt.Errorf("get finalized checkpoint: %w", err)
 		}
 
-		if checkpoint.StateRoot == expected {
+		if checkpoint.Epoch >= expectedEpoch {
+			logger.Debugw("Checkpoint ready", "epoch", checkpoint.Epoch)
 			return nil
 		}
 
-		logger.Debugw("Waiting for finalized state",
-			"current", checkpoint.StateRoot.String(),
-			"expected", expected.String())
+		logger.Debugw("Waiting for checkpoint",
+			"apiEpoch", checkpoint.Epoch,
+			"expectedEpoch", expectedEpoch)
 
 		select {
 		case <-time.After(stateWaitInterval):
 			// retry
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for finalized state %s", expected.String())
+			return fmt.Errorf("timeout waiting for checkpoint epoch %d", expectedEpoch)
 		}
 	}
 }
@@ -220,10 +219,16 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 	err := c.beacon.Events(ctx, &api.EventsOpts{
 		Topics: []string{"finalized_checkpoint"},
 		FinalizedCheckpointHandler: func(_ context.Context, event *apiv1.FinalizedCheckpointEvent) {
-			checkpoint, err := c.handleFinalizedEvent(ctx, event)
+			var checkpoint *FinalizedCheckpoint
+			err := eth.WithRetry(ctx, c.retryConfig, func() error {
+				var fetchErr error
+				checkpoint, fetchErr = c.fetchCheckpoint(ctx, uint64(event.Epoch), event.Block)
+				return fetchErr
+			})
 			if err != nil {
-				logger.Errorw("Failed to process finalized checkpoint event",
+				logger.Errorw("Failed to fetch checkpoint",
 					"epoch", event.Epoch,
+					"block", event.Block.String(),
 					"error", err)
 				return
 			}
@@ -231,10 +236,9 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 			select {
 			case ch <- checkpoint:
 				logger.Debugw("Finalized checkpoint event",
-					"checkpointEpoch", checkpoint.Epoch,
+					"epoch", checkpoint.Epoch,
 					"fullyFinalized", checkpoint.Epoch-1,
-					"stateRoot", checkpoint.StateRoot.String(),
-					"referenceBlock", checkpoint.BlockNum)
+					"blockNum", checkpoint.BlockNum)
 			default:
 				logger.Warnw("Dropped finalized checkpoint (consumer slow)",
 					"epoch", checkpoint.Epoch)
@@ -252,37 +256,4 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 	}()
 
 	return ch, nil
-}
-
-func (c *Client) handleFinalizedEvent(ctx context.Context, event *apiv1.FinalizedCheckpointEvent) (*FinalizedCheckpoint, error) {
-	var blockResp *api.Response[*spec.VersionedSignedBeaconBlock]
-	err := eth.WithRetry(ctx, c.retryConfig, func() error {
-		var err error
-		blockResp, err = c.beacon.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
-			Block: event.Block.String(),
-		})
-		if err != nil {
-			return fmt.Errorf("get finalized block: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	blockNum, err := blockResp.Data.ExecutionBlockNumber()
-	if err != nil {
-		return nil, fmt.Errorf("get execution block number: %w", err)
-	}
-
-	stateRoot, err := blockResp.Data.StateRoot()
-	if err != nil {
-		return nil, fmt.Errorf("get state root: %w", err)
-	}
-
-	return &FinalizedCheckpoint{
-		Epoch:     uint64(event.Epoch),
-		BlockNum:  blockNum,
-		StateRoot: stateRoot,
-	}, nil
 }
