@@ -129,12 +129,17 @@ func (o *Oracle) Run(ctx context.Context) error {
 			}
 
 			if err := o.commit(ctx, checkpoint, o.nextTarget); err != nil {
-				logger.Errorw("Commit failed", "target", o.nextTarget, "error", err)
+				failed := o.nextTarget
+				o.nextTarget = o.schedule.NextTarget(fullyFinalized)
+				logger.Errorw("Commit failed",
+					"target", failed,
+					"nextTarget", o.nextTarget,
+					"error", err)
+				continue
 			}
 
-			// Always advance to next target - we can't retry past epochs
 			o.nextTarget = o.schedule.NextTarget(fullyFinalized)
-			logger.Infow("Waiting for finalization", "nextTarget", o.nextTarget)
+			logger.Debugw("Next target", "epoch", o.nextTarget)
 		}
 	}
 }
