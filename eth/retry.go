@@ -2,9 +2,12 @@ package eth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
+
+	"github.com/attestantio/go-eth2-client/api"
 
 	"ssv-oracle/logger"
 )
@@ -35,6 +38,7 @@ func DefaultRetryConfig() RetryConfig {
 // Returns nil on success, or the last error after all attempts exhausted.
 // MaxRetries specifies the number of retries after the initial attempt,
 // so MaxRetries=3 means 4 total attempts.
+// Client errors (4xx except 429) are not retried as they indicate permanent failures.
 func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 	if cfg.MaxRetries < 0 {
 		return fn()
@@ -44,6 +48,9 @@ func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
 		if err = fn(); err == nil {
 			return nil
+		}
+		if !isRetriable(err) {
+			return err
 		}
 		if attempt < cfg.MaxRetries {
 			delay := cfg.BaseDelay * time.Duration(1<<attempt)
@@ -70,4 +77,17 @@ func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 		}
 	}
 	return fmt.Errorf("after %d attempts: %w", cfg.MaxRetries+1, err)
+}
+
+// isRetriable returns true if the error is transient and worth retrying.
+// HTTP 4xx errors (except 429 Too Many Requests) are client errors and not retriable.
+func isRetriable(err error) bool {
+	var apiErr *api.Error
+	if errors.As(err, &apiErr) {
+		code := apiErr.StatusCode
+		if code >= 400 && code < 500 && code != 429 {
+			return false
+		}
+	}
+	return true
 }

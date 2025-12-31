@@ -3,9 +3,11 @@ package eth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/attestantio/go-eth2-client/api"
 	"github.com/stretchr/testify/require"
 )
 
@@ -113,4 +115,69 @@ func TestWithRetry_OneRetry(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, testErr)
 	require.Equal(t, 2, calls, "MaxRetries=1 means 2 total attempts (1 initial + 1 retry)")
+}
+
+func TestWithRetry_NonRetriableErrors(t *testing.T) {
+	cfg := RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+
+	tests := []struct {
+		name        string
+		statusCode  int
+		shouldRetry bool
+	}{
+		{"400 Bad Request", 400, false},
+		{"404 Not Found", 404, false},
+		{"414 URI Too Long", 414, false},
+		{"429 Too Many Requests", 429, true},
+		{"500 Internal Server Error", 500, true},
+		{"502 Bad Gateway", 502, true},
+		{"503 Service Unavailable", 503, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			apiErr := api.Error{
+				Method:     "POST",
+				Endpoint:   "/eth/v1/beacon/states/finalized/validators",
+				StatusCode: tt.statusCode,
+				Data:       []byte(fmt.Sprintf(`{"code":%d,"message":"test error"}`, tt.statusCode)),
+			}
+
+			err := WithRetry(context.Background(), cfg, func() error {
+				calls++
+				return &apiErr
+			})
+
+			require.Error(t, err)
+			if tt.shouldRetry {
+				require.Equal(t, 4, calls, "retriable errors should exhaust all attempts")
+				require.Contains(t, err.Error(), "after 4 attempts")
+			} else {
+				require.Equal(t, 1, calls, "non-retriable errors should fail immediately")
+				require.NotContains(t, err.Error(), "after")
+			}
+		})
+	}
+}
+
+func TestWithRetry_WrappedNonRetriableError(t *testing.T) {
+	cfg := RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	calls := 0
+
+	apiErr := &api.Error{
+		Method:     "POST",
+		Endpoint:   "/eth/v1/beacon/states/finalized/validators",
+		StatusCode: 404,
+		Data:       []byte(`{"code":404,"message":"State not found"}`),
+	}
+	wrappedErr := fmt.Errorf("get validators: %w", apiErr)
+
+	err := WithRetry(context.Background(), cfg, func() error {
+		calls++
+		return wrappedErr
+	})
+
+	require.Error(t, err)
+	require.Equal(t, 1, calls, "wrapped non-retriable errors should fail immediately")
 }
