@@ -29,6 +29,17 @@ func (t *Tree) Leaves() []Leaf {
 	return result
 }
 
+// InnerLayers returns the inner layers of the tree (excluding leaf hashes).
+// For a single-leaf tree, returns empty slice.
+// layers[0] is the first inner layer (parents of leaves), layers[len-1] contains the root.
+func (t *Tree) InnerLayers() [][][32]byte {
+	if len(t.layers) <= 1 {
+		return nil
+	}
+	// Skip layers[0] which contains leaf hashes
+	return t.layers[1:]
+}
+
 // NewTree builds a merkle tree from cluster balances.
 // Implements OpenZeppelin StandardMerkleTree: double-hashed leaves, sorted by hash,
 // with sibling pairs sorted before hashing.

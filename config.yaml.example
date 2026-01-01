@@ -30,6 +30,14 @@ db_path: "./data/oracle.db"            # SQLite database file (local)
                                        # For Docker: use "/data/oracle.db"
 
 # ============================================================================
+# API Server
+# ============================================================================
+
+api_address: "127.0.0.1:8080"          # HTTP API server address
+                                       # Default binds to localhost only (secure)
+                                       # Use "0.0.0.0:8080" to expose externally
+
+# ============================================================================
 # Event Syncing
 # ============================================================================
 

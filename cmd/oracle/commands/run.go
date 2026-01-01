@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
+	"ssv-oracle/api"
 	"ssv-oracle/contract"
 	"ssv-oracle/eth/beacon"
 	"ssv-oracle/eth/execution"
@@ -66,6 +67,7 @@ func run(_ *cobra.Command, _ []string) error {
 		"version", Version,
 		"updater", withUpdater,
 		"DBPath", cfg.DBPath,
+		"apiAddress", cfg.APIAddress,
 		"ethRPC", cfg.EthRPC,
 		"beaconRPC", cfg.BeaconRPC,
 		"contract", cfg.SSVContract,
@@ -197,6 +199,12 @@ func runServices(
 	})
 
 	g, gCtx := errgroup.WithContext(ctx)
+
+	// Start API server
+	apiServer := api.New(store, cfg.APIAddress)
+	g.Go(func() error {
+		return apiServer.Run(gCtx)
+	})
 
 	g.Go(func() error {
 		return oracleInstance.Run(gCtx)

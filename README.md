@@ -8,6 +8,7 @@ Off-chain oracle that publishes Merkle roots of SSV cluster effective balances t
 - **Epoch-aligned** - Commits only after beacon chain finalization
 - **OpenZeppelin-compatible** - StandardMerkleTree format with deterministic ordering
 - **Single binary** - Embedded SQLite database
+- **HTTP API** - Query committed data and generate merkle proofs
 
 ## Quick Start
 
@@ -65,6 +66,38 @@ SQLite at `./data/oracle.db`. Reset with `make db-reset`, `make fresh`, or `make
 **Backup:**
 ```bash
 sqlite3 data/oracle.db ".backup data/oracle.db.backup"
+```
+
+## API
+
+The oracle exposes an HTTP API for querying committed data and generating merkle proofs.
+
+**Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/commit` | Latest confirmed commit metadata |
+| GET | `/api/v1/commit?full=true` | Include clusters and tree layers |
+| GET | `/api/v1/proof/{clusterId}` | Merkle proof for a cluster |
+| GET | `/` | Tree visualization UI |
+
+**Configuration:**
+```yaml
+api_address: "127.0.0.1:8080"  # Default: localhost only
+```
+
+To expose externally, use `0.0.0.0:8080` (ensure firewall/proxy protection).
+
+**Example:**
+```bash
+# Get latest commit
+curl http://127.0.0.1:8080/api/v1/commit
+
+# Get merkle proof for a cluster
+curl http://127.0.0.1:8080/api/v1/proof/0x1234...
+
+# Open tree visualization
+open http://127.0.0.1:8080
 ```
 
 ## Development

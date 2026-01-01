@@ -344,6 +344,35 @@ func (s *Storage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*Oracl
 	return &c, nil
 }
 
+// GetLatestCommit returns the most recent confirmed commit with cluster balances.
+// Returns nil if no confirmed commit exists or if cluster_balances is missing.
+func (s *Storage) GetLatestCommit(ctx context.Context) (*OracleCommit, error) {
+	query := `
+		SELECT target_epoch, merkle_root, reference_block, cluster_balances, status, tx_hash
+		FROM oracle_commits
+		WHERE status = ? AND cluster_balances IS NOT NULL
+		ORDER BY target_epoch DESC
+		LIMIT 1
+	`
+	var c OracleCommit
+	var balancesJSON []byte
+	var status string
+	err := s.db.QueryRowContext(ctx, query, CommitStatusConfirmed).Scan(
+		&c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON, &status, &c.TxHash,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get latest commit: %w", err)
+	}
+	c.Status = CommitStatus(status)
+	if err := json.Unmarshal(balancesJSON, &c.ClusterBalances); err != nil {
+		return nil, fmt.Errorf("unmarshal cluster balances: %w", err)
+	}
+	return &c, nil
+}
+
 // ClearAllState removes all data and resets sync progress.
 func (s *Storage) ClearAllState(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)

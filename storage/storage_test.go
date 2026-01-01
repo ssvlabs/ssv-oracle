@@ -484,6 +484,118 @@ func TestStorage_GetCommitByBlock_NotFound(t *testing.T) {
 	}
 }
 
+func TestStorage_GetLatestCommit_NoCommits(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	commit, err := storage.GetLatestCommit(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if commit != nil {
+		t.Error("Expected nil for empty database")
+	}
+}
+
+func TestStorage_GetLatestCommit_OnlyPending(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	// Insert a pending commit (not confirmed)
+	clusterBalances := []ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+	}
+	clusterBalances[0].ClusterID[0] = 0x01
+
+	err := storage.InsertPendingCommit(ctx, 100, make([]byte, 32), 500000, clusterBalances)
+	if err != nil {
+		t.Fatalf("Failed to insert pending commit: %v", err)
+	}
+
+	// GetLatestCommit should return nil (only returns confirmed)
+	commit, err := storage.GetLatestCommit(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if commit != nil {
+		t.Error("Expected nil when only pending commits exist")
+	}
+}
+
+func TestStorage_GetLatestCommit_ReturnsLatestConfirmed(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	// Insert two commits at different epochs
+	clusterBalances1 := []ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+	}
+	clusterBalances1[0].ClusterID[0] = 0x01
+
+	clusterBalances2 := []ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 128},
+	}
+	clusterBalances2[0].ClusterID[0] = 0x02
+	clusterBalances2[1].ClusterID[0] = 0x03
+
+	merkleRoot1 := make([]byte, 32)
+	merkleRoot1[0] = 0xaa
+	merkleRoot2 := make([]byte, 32)
+	merkleRoot2[0] = 0xbb
+
+	// Insert older commit
+	err := storage.InsertPendingCommit(ctx, 100, merkleRoot1, 500000, clusterBalances1)
+	if err != nil {
+		t.Fatalf("Failed to insert first commit: %v", err)
+	}
+	txHash1 := make([]byte, 32)
+	txHash1[0] = 0x11
+	err = storage.UpdateCommitStatus(ctx, 100, CommitStatusConfirmed, txHash1)
+	if err != nil {
+		t.Fatalf("Failed to confirm first commit: %v", err)
+	}
+
+	// Insert newer commit
+	err = storage.InsertPendingCommit(ctx, 200, merkleRoot2, 600000, clusterBalances2)
+	if err != nil {
+		t.Fatalf("Failed to insert second commit: %v", err)
+	}
+	txHash2 := make([]byte, 32)
+	txHash2[0] = 0x22
+	err = storage.UpdateCommitStatus(ctx, 200, CommitStatusConfirmed, txHash2)
+	if err != nil {
+		t.Fatalf("Failed to confirm second commit: %v", err)
+	}
+
+	// GetLatestCommit should return the newer one (epoch 200)
+	commit, err := storage.GetLatestCommit(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if commit == nil {
+		t.Fatal("Expected commit, got nil")
+	}
+	if commit.TargetEpoch != 200 {
+		t.Errorf("Expected epoch 200, got %d", commit.TargetEpoch)
+	}
+	if commit.ReferenceBlock != 600000 {
+		t.Errorf("Expected reference block 600000, got %d", commit.ReferenceBlock)
+	}
+	if commit.MerkleRoot[0] != 0xbb {
+		t.Errorf("Expected merkle root starting with 0xbb, got 0x%x", commit.MerkleRoot[0])
+	}
+	if commit.TxHash[0] != 0x22 {
+		t.Errorf("Expected tx hash starting with 0x22, got 0x%x", commit.TxHash[0])
+	}
+	if len(commit.ClusterBalances) != 2 {
+		t.Errorf("Expected 2 cluster balances, got %d", len(commit.ClusterBalances))
+	}
+	if commit.Status != CommitStatusConfirmed {
+		t.Errorf("Expected status %s, got %s", CommitStatusConfirmed, commit.Status)
+	}
+}
+
 func TestStorage_ClearAllState(t *testing.T) {
 	storage := setupTestStorage(t)
 	ctx := context.Background()

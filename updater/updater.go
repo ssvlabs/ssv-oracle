@@ -172,7 +172,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		return nil
 	}
 
-	tree := u.buildMerkleTree(commit.ClusterBalances)
+	tree := u.buildTree(commit.ClusterBalances)
 	log.Infow("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", tree.Root),
 		"clusters", len(commit.ClusterBalances))
@@ -216,7 +216,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 	return nil
 }
 
-func (u *Updater) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree {
+func (u *Updater) buildTree(balances []storage.ClusterBalance) *merkle.Tree {
 	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte

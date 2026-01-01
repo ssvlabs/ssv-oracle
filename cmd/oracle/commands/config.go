@@ -17,7 +17,10 @@ import (
 	"ssv-oracle/wallet"
 )
 
-const defaultDBPath = "./data/oracle.db"
+const (
+	defaultDBPath     = "./data/oracle.db"
+	defaultAPIAddress = "127.0.0.1:8080"
+)
 
 type config struct {
 	LogLevel string `yaml:"log_level"` // debug, info, warn, error (default: info)
@@ -32,7 +35,8 @@ type config struct {
 	SSVContractDeployBlock uint64 `yaml:"ssv_contract_deploy_block"`
 	SyncBatchSize          uint64 `yaml:"sync_batch_size"`
 
-	DBPath string `yaml:"db_path"`
+	DBPath     string `yaml:"db_path"`
+	APIAddress string `yaml:"api_address"`
 
 	Wallet   wallet.Config         `yaml:"wallet"`
 	TxPolicy txmanager.TxPolicy    `yaml:"tx_policy"`
@@ -120,7 +124,8 @@ func validateURL(value, name string, schemes ...string) error {
 
 func loadConfig(path string, withUpdater bool) (*config, error) {
 	cfg := &config{
-		DBPath: defaultDBPath,
+		DBPath:     defaultDBPath,
+		APIAddress: defaultAPIAddress,
 	}
 
 	data, err := os.ReadFile(path)
