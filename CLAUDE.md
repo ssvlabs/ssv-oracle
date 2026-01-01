@@ -24,6 +24,7 @@ make clean      # Remove build artifacts and database
 
 ```
 ssv-oracle/
+├── api/                # HTTP API server with merkle tree UI
 ├── cmd/oracle/         # CLI entry point (cobra)
 ├── contract/           # Ethereum client & contract interaction
 ├── eth/                # Ethereum-related packages
@@ -96,6 +97,12 @@ Listens for RootCommitted events and updates cluster balances on-chain:
 4. Generate merkle proof for each cluster
 5. Call UpdateClusterBalance on contract with proof
 
+### API Server (api/)
+Optional HTTP API for querying oracle state:
+- `GET /api/v1/commit` - Latest commit with merkle root and block number
+- `GET /api/v1/proof/{clusterId}` - Merkle proof for a specific cluster
+- Embedded UI at `/` for merkle tree visualization
+
 ### Merkle Tree (merkle/)
 OpenZeppelin StandardMerkleTree-compatible implementation:
 - Leaf: `keccak256(keccak256(abi.encode(clusterId, effectiveBalance)))` (double-hashed)
@@ -161,6 +168,7 @@ beacon_rpc: "http://localhost:5052"   # Beacon node RPC
 ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
 ssv_views_contract: "0x..."           # Required for --updater (SSV Network Views contract)
 db_path: "./data/oracle.db"           # SQLite database path
+api_address: "127.0.0.1:8080"         # API server address (default)
 ```
 
 - Chain ID is auto-detected from RPC

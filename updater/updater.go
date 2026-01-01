@@ -311,6 +311,11 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		return false, nil
 	}
 
+	logger.Infow("Effective balance changed, updating",
+		"clusterID", clusterID,
+		"previousEffectiveBalance", currentBalance,
+		"newEffectiveBalance", leaf.EffectiveBalance)
+
 	receipt, err := u.contractClient.UpdateClusterBalance(
 		ctx,
 		blockNum,
