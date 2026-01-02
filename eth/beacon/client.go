@@ -191,19 +191,11 @@ func (c *Client) WaitForCheckpointReady(ctx context.Context, expectedEpoch uint6
 		if err != nil {
 			return fmt.Errorf("get finalized checkpoint: %w", err)
 		}
-
 		if checkpoint.Epoch >= expectedEpoch {
-			logger.Debugw("Checkpoint ready", "epoch", checkpoint.Epoch)
 			return nil
 		}
-
-		logger.Debugw("Waiting for checkpoint",
-			"apiEpoch", checkpoint.Epoch,
-			"expectedEpoch", expectedEpoch)
-
 		select {
 		case <-time.After(checkpointPollInterval):
-			// retry
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for checkpoint epoch %d", expectedEpoch)
 		}

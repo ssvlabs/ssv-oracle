@@ -152,7 +152,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 		if err := m.client.SendTransaction(ctx, signedTx); err != nil {
 			if isTxAlreadyKnown(err) {
-				logger.Infow("Tx already in mempool",
+				logger.Debugw("Tx already in mempool",
 					"hash", signedTx.Hash().Hex(),
 					"nonce", nonce)
 				publishedTxs = append(publishedTxs, signedTx)
@@ -172,8 +172,9 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 				return nil, fmt.Errorf("%w: %w", errInsufficientFunds, err)
 			}
 			if attempt < m.policy.MaxRetries {
-				logger.Warnw("Tx submission failed, retrying",
+				logger.Warnw("Tx submission failed",
 					"attempt", attempt+1,
+					"maxAttempts", m.policy.MaxRetries+1,
 					"error", err)
 				select {
 				case <-ctx.Done():
@@ -186,7 +187,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		}
 
 		publishedTxs = append(publishedTxs, signedTx)
-		logger.Infow("Tx submitted",
+		logger.Debugw("Tx submitted",
 			"hash", signedTx.Hash().Hex(),
 			"nonce", nonce,
 			"gasTipCap", currentTip,
@@ -204,25 +205,28 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		}
 
 		if attempt >= m.policy.MaxRetries {
-			logger.Warnw("Tx receipt wait failed on final attempt",
+			logger.Warnw("Tx receipt wait failed",
 				"hash", signedTx.Hash().Hex(),
+				"attempt", attempt+1,
+				"willRetry", false,
 				"error", err)
 			break
 		}
 
 		newTip, newFeeCap, shouldCancel := m.bumpGas(currentTip, currentFeeCap)
 		if shouldCancel {
-			logger.Warnw("Max gas reached, cancelling",
+			logger.Warnw("Max gas reached",
 				"nonce", nonce,
 				"maxFeePerGas", m.policy.MaxFeePerGasWei(),
-				"currentFeeCap", currentFeeCap)
+				"currentFeeCap", currentFeeCap,
+				"willRetry", false)
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 				logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
 			}
 			return nil, errMaxGasReached
 		}
 
-		logger.Warnw("Tx pending timeout, bumping gas",
+		logger.Warnw("Tx pending timeout",
 			"hash", signedTx.Hash().Hex(),
 			"attempt", attempt+1,
 			"oldFeeCap", currentFeeCap,
@@ -232,9 +236,11 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		currentFeeCap = newFeeCap
 	}
 
-	logger.Warnw("Max retries exhausted, cancelling",
+	logger.Warnw("Max retries exhausted",
 		"hash", lastTx.Hash().Hex(),
-		"nonce", nonce)
+		"nonce", nonce,
+		"attempts", m.policy.MaxRetries+1,
+		"willRetry", false)
 	if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 		logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
 	}
@@ -312,7 +318,7 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 		return fmt.Errorf("send cancel tx: %w", err)
 	}
 
-	logger.Infow("Cancel tx submitted",
+	logger.Debugw("Cancel tx submitted",
 		"hash", signedTx.Hash().Hex(),
 		"nonce", nonce)
 
@@ -321,7 +327,7 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 		return fmt.Errorf("cancel tx not confirmed: %w", err)
 	}
 
-	logger.Infow("Nonce freed",
+	logger.Debugw("Nonce freed",
 		"nonce", nonce,
 		"block", receipt.BlockNumber.Uint64())
 

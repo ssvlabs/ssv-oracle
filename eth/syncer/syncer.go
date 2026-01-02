@@ -59,11 +59,10 @@ func (s *EventSyncer) SyncToFinalized(ctx context.Context, deployBlock uint64) e
 	}
 
 	if lastSynced == 0 {
-		logger.Infow("First run: setting initial sync position", "block", deployBlock-1)
-		err = s.storage.UpdateLastSyncedBlock(ctx, deployBlock-1)
-		if err != nil {
+		if err = s.storage.UpdateLastSyncedBlock(ctx, deployBlock-1); err != nil {
 			return fmt.Errorf("set initial sync block: %w", err)
 		}
+		logger.Infow("Initial sync position set", "block", deployBlock-1)
 	}
 
 	return s.syncOnce(ctx)
@@ -96,19 +95,11 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 		return nil
 	}
 
+	start := time.Now()
 	totalBlocks := int(targetBlock - fromBlock)
-
-	// Enable bulk sync mode for large syncs
 	if totalBlocks > bulkSyncThreshold {
-		logger.Infow("Enabling bulk sync mode", "blocksToSync", totalBlocks)
-		if err := s.storage.SetSyncMode(true); err != nil {
-			logger.Warnw("Failed to enable bulk sync mode", "error", err)
-		} else {
-			defer func() {
-				if err := s.storage.SetSyncMode(false); err != nil {
-					logger.Warnw("Failed to disable bulk sync mode", "error", err)
-				}
-			}()
+		if s.storage.SetSyncMode(true) == nil {
+			defer func() { _ = s.storage.SetSyncMode(false) }()
 		}
 	}
 
@@ -176,7 +167,8 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	}
 
 	_ = bar.Finish()
-	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "newEvents", knownEvents)
+
+	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
@@ -441,12 +433,8 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 		return nil
 	}
 
-	logger.Debugw("Syncing clusters to head",
-		"fromBlock", fromBlock+1,
-		"headBlock", headBlock)
-
 	topics := EventTopics() // Filter by handled event signatures
-	return s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock, topics,
+	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock, topics,
 		func(batchEnd uint64, logs []execution.BlockLogs) error {
 			for _, blockLogs := range logs {
 				if err := s.applyClusterUpdates(ctx, blockLogs); err != nil {
@@ -455,6 +443,12 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 			}
 			return nil
 		})
+	if err != nil {
+		return err
+	}
+
+	logger.Debugw("Clusters synced to head", "from", fromBlock+1, "to", headBlock)
+	return nil
 }
 
 func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) error {

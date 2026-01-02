@@ -82,8 +82,7 @@ func (c *Client) processRootCommittedLogs(
 				return
 			}
 			if vLog.Removed {
-				// Skip reorged events
-				logger.Debugw("Skipping reorged RootCommitted event",
+				logger.Debugw("Reorged RootCommitted event",
 					"txHash", vLog.TxHash.Hex(),
 					"blockNumber", vLog.BlockNumber)
 				continue

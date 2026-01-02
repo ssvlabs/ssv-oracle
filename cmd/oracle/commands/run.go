@@ -88,7 +88,6 @@ func run(_ *cobra.Command, _ []string) error {
 	defer func() { _ = store.Close() }()
 
 	if freshStart {
-		logger.Info("Fresh start: clearing database")
 		if err := store.ClearAllState(ctx); err != nil {
 			return fmt.Errorf("clear database: %w", err)
 		}
@@ -146,7 +145,6 @@ func run(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	logger.Info("Shutdown complete")
 	return nil
 }
 
@@ -166,7 +164,6 @@ func validateChainID(ctx context.Context, store *storage.Storage, execClient *ex
 		if err := store.SetChainID(ctx, chainID.Uint64()); err != nil {
 			return nil, fmt.Errorf("store chain ID: %w", err)
 		}
-		logger.Infow("Stored chain ID", "chainID", chainID)
 		return chainID, nil
 	}
 
@@ -185,7 +182,6 @@ func runServices(
 	eventSyncer *syncer.EventSyncer,
 	beaconClient *beacon.Client,
 ) error {
-	logger.Info("Syncing SSV contract events")
 	if err := eventSyncer.SyncToFinalized(ctx, cfg.SSVContractDeployBlock); err != nil {
 		return fmt.Errorf("initial sync: %w", err)
 	}

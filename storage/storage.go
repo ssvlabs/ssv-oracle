@@ -298,7 +298,7 @@ func (s *Storage) InsertPendingCommit(ctx context.Context, targetEpoch uint64, m
 		return fmt.Errorf("insert oracle commit: %w", err)
 	}
 	if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
-		logger.Warnw("Duplicate target_epoch, commit ignored", "targetEpoch", targetEpoch)
+		logger.Warnw("Duplicate commit ignored", "targetEpoch", targetEpoch)
 	}
 	return nil
 }

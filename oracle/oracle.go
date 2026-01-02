@@ -146,10 +146,9 @@ func (o *Oracle) Run(ctx context.Context) error {
 
 func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpoint, target uint64) error {
 	log := logger.With("target", target)
+	fetchStart := time.Now()
 
-	log.Infow("Committing",
-		"fullyFinalized", checkpoint.Epoch-1,
-		"referenceBlock", checkpoint.BlockNum)
+	log.Infow("Committing", "refBlock", checkpoint.BlockNum)
 
 	if err := o.syncer.SyncToBlock(ctx, checkpoint.BlockNum); err != nil {
 		return fmt.Errorf("sync to block %d: %w", checkpoint.BlockNum, err)
@@ -159,13 +158,13 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("wait for checkpoint: %w", err)
 	}
 
-	clusterBalances, err := o.fetchClusterBalances(ctx)
+	clusterBalances, validatorCount, err := o.fetchClusterBalances(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch balances: %w", err)
 	}
 
 	merkleRoot := o.buildMerkleTree(clusterBalances).Root
-	log.Infow("Merkle tree built",
+	log.Debugw("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", merkleRoot),
 		"clusters", len(clusterBalances))
 
@@ -175,14 +174,20 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 
 	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum)
 	if err != nil {
-		return o.handleCommitError(ctx, log, target, receipt, err)
+		return o.handleCommitError(ctx, log, target, merkleRoot, receipt, err)
 	}
 
 	if err := o.storage.UpdateCommitStatus(ctx, target, storage.CommitStatusConfirmed, receipt.TxHash.Bytes()); err != nil {
 		log.Warnw("Failed to update commit status", "error", err)
 	}
 
-	log.Infow("Committed", "txHash", receipt.TxHash.Hex())
+	log.Infow("Committed",
+		"txHash", receipt.TxHash.Hex(),
+		"root", fmt.Sprintf("0x%x", merkleRoot),
+		"refBlock", checkpoint.BlockNum,
+		"validators", validatorCount,
+		"clusters", len(clusterBalances),
+		"took", time.Since(fetchStart).Round(time.Millisecond))
 	return nil
 }
 
@@ -196,15 +201,15 @@ func (o *Oracle) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree
 	return merkle.NewTree(clusterMap)
 }
 
-func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBalance, error) {
+func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBalance, int, error) {
 	validators, err := o.storage.GetActiveValidators(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get active validators: %w", err)
+		return nil, 0, fmt.Errorf("get active validators: %w", err)
 	}
 
 	if len(validators) == 0 {
-		logger.Info("No active validators")
-		return nil, nil
+		logger.Debug("No active validators")
+		return nil, 0, nil
 	}
 
 	pubkeys := o.deduplicatePubkeys(validators)
@@ -212,19 +217,19 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBal
 	start := time.Now()
 	balanceMap, err := o.beaconClient.GetValidatorBalances(ctx, pubkeys)
 	if err != nil {
-		return nil, fmt.Errorf("fetch validator balances: %w", err)
+		return nil, 0, fmt.Errorf("fetch validator balances: %w", err)
 	}
 
 	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
 
-	logger.Infow("Balances fetched",
+	logger.Debugw("Balances fetched",
 		"validators", len(validators),
 		"fromBeacon", len(balanceMap),
 		"notOnBeacon", notOnBeacon,
 		"clusters", len(result),
 		"took", time.Since(start).Round(time.Millisecond))
 
-	return result, nil
+	return result, len(validators), nil
 }
 
 func (o *Oracle) deduplicatePubkeys(validators []storage.ActiveValidator) [][]byte {
@@ -279,6 +284,7 @@ func (o *Oracle) handleCommitError(
 	ctx context.Context,
 	log logger.Logger,
 	target uint64,
+	merkleRoot [32]byte,
 	receipt *types.Receipt,
 	err error,
 ) error {
@@ -291,10 +297,10 @@ func (o *Oracle) handleCommitError(
 	}
 
 	if revertErr, ok := txmanager.IsRevertError(err); ok {
-		log.Errorw("Commit reverted, skipping",
-			"reason", revertErr.Reason,
+		log.Warnw("Commit reverted",
+			"root", fmt.Sprintf("0x%x", merkleRoot),
 			"simulated", revertErr.Simulated,
-			"error", err)
+			"reason", revertErr.Reason)
 		return nil
 	}
 
