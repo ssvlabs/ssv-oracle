@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS sync_progress (
 
 INSERT OR IGNORE INTO sync_progress (id, last_synced_block) VALUES (1, 0);
 
--- Raw SSV contract events (append-only audit log)
+-- SSV contract events (append-only audit log)
 CREATE TABLE IF NOT EXISTS contract_events (
     block_number INTEGER NOT NULL,
     log_index INTEGER NOT NULL,
@@ -17,8 +17,6 @@ CREATE TABLE IF NOT EXISTS contract_events (
     block_time TEXT NOT NULL,
     transaction_hash BLOB NOT NULL,
     transaction_index INTEGER NOT NULL,
-    raw_log TEXT NOT NULL,
-    raw_event TEXT NOT NULL,
     error TEXT,
     PRIMARY KEY (block_number, log_index)
 );

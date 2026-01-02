@@ -18,11 +18,10 @@ import (
 	"ssv-oracle/logger"
 )
 
-// SQLite configuration constants.
 const (
-	sqliteBusyTimeoutMs = 5000  // Wait up to 5s for locks
-	sqliteCacheSizeKB   = 64000 // 64MB page cache
-	maxIdleConns        = 2
+	sqliteBusyTimeoutMs = 5000      // Wait up to 5s for locks
+	sqliteCacheSizeKB   = 64000     // 64MB page cache
+	sqliteMmapSize      = 256 << 20 // 256MB memory-mapped I/O for bulk sync
 )
 
 //go:embed schema.sql
@@ -55,8 +54,6 @@ type ContractEvent struct {
 	TransactionHash  []byte
 	TransactionIndex uint32
 	LogIndex         uint32
-	RawLog           json.RawMessage
-	RawEvent         json.RawMessage
 	Error            *string
 }
 
@@ -145,8 +142,8 @@ func New(dbPath string) (*Storage, error) {
 		}
 	}
 
-	db.SetMaxIdleConns(maxIdleConns)
-	db.SetConnMaxLifetime(time.Hour)
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -459,14 +456,14 @@ func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 	query := `
 		INSERT INTO contract_events (
 			block_number, log_index, event_type, block_hash, block_time,
-			transaction_hash, transaction_index, raw_log, raw_event, error
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			transaction_hash, transaction_index, error
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
 	_, err := e.ExecContext(ctx, query,
 		event.BlockNumber, event.LogIndex, event.EventType,
 		event.BlockHash, event.BlockTime.Format(time.RFC3339), event.TransactionHash, event.TransactionIndex,
-		string(event.RawLog), string(event.RawEvent), event.Error,
+		event.Error,
 	)
 	if err != nil {
 		return fmt.Errorf("insert event: %w", err)
@@ -571,6 +568,22 @@ func decodeOperatorIDs(data string) ([]uint64, error) {
 		return nil, fmt.Errorf("decode operator IDs: %w", err)
 	}
 	return ids, nil
+}
+
+// SetSyncMode configures SQLite for bulk writes or normal operation.
+func (s *Storage) SetSyncMode(bulk bool) error {
+	if bulk {
+		_, err := s.db.Exec(fmt.Sprintf(`
+			PRAGMA temp_store = MEMORY;
+			PRAGMA mmap_size = %d;
+		`, sqliteMmapSize))
+		return err
+	}
+	_, err := s.db.Exec(`
+		PRAGMA temp_store = DEFAULT;
+		PRAGMA mmap_size = 0;
+	`)
+	return err
 }
 
 // UpdateClusterIfExists updates cluster data only if the cluster exists.

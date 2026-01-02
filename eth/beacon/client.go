@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	defaultBeaconTimeout = 30 * time.Second
-	validatorBatchSize   = 1000 // Max validators per beacon API request
-	validatorMaxParallel = 5
-	stateWaitInterval    = time.Second
+	defaultBeaconTimeout    = 30 * time.Second
+	balanceFetchBatchSize   = 2000
+	balanceFetchConcurrency = 10
+	checkpointPollInterval  = time.Second
 )
 
 type beaconAPI interface {
@@ -138,8 +138,8 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 	}
 
 	var batches [][]phase0.BLSPubKey
-	for i := 0; i < len(blsPubkeys); i += validatorBatchSize {
-		end := i + validatorBatchSize
+	for i := 0; i < len(blsPubkeys); i += balanceFetchBatchSize {
+		end := i + balanceFetchBatchSize
 		if end > len(blsPubkeys) {
 			end = len(blsPubkeys)
 		}
@@ -147,7 +147,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(validatorMaxParallel)
+	g.SetLimit(balanceFetchConcurrency)
 
 	var mu sync.Mutex
 	merged := make(map[phase0.BLSPubKey]uint64, len(pubkeys))
@@ -202,7 +202,7 @@ func (c *Client) WaitForCheckpointReady(ctx context.Context, expectedEpoch uint6
 			"expectedEpoch", expectedEpoch)
 
 		select {
-		case <-time.After(stateWaitInterval):
+		case <-time.After(checkpointPollInterval):
 			// retry
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for checkpoint epoch %d", expectedEpoch)

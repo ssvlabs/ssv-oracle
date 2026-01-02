@@ -42,7 +42,7 @@ api_address: "127.0.0.1:8080"          # HTTP API server address
 # ============================================================================
 
 ssv_contract_deploy_block: 17507487    # Block when SSV contract was deployed (mainnet example)
-sync_batch_size: 200                   # Blocks per batch when fetching logs
+# max_sync_batch_size: 10000           # Max blocks per eth_getLogs (default: 10000, auto-adapts)
 
 # ============================================================================
 # Wallet

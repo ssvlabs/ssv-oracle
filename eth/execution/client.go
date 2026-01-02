@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -17,21 +18,20 @@ import (
 	"ssv-oracle/logger"
 )
 
-const defaultFetchLogsBatchSize = 200
-
 // Client wraps an Ethereum execution client for fetching logs and blocks.
 type Client struct {
-	client             *ethclient.Client
-	rpcClient          *rpc.Client
-	fetchLogsBatchSize uint64
-	retryConfig        eth.RetryConfig
+	client      *ethclient.Client
+	rpcClient   *rpc.Client
+	batchSize   *AdaptiveBatchSize
+	retryConfig eth.RetryConfig
 }
 
 // ClientConfig holds configuration for the execution client.
 type ClientConfig struct {
-	URL                string
-	FetchLogsBatchSize uint64
-	RetryConfig        *eth.RetryConfig // nil uses DefaultRetryConfig()
+	URL          string
+	MinBatchSize uint64
+	MaxBatchSize uint64
+	RetryConfig  *eth.RetryConfig
 }
 
 // BlockLogs represents logs from a single block.
@@ -43,6 +43,17 @@ type BlockLogs struct {
 
 // FetchLogsCallback is called for each batch of logs.
 type FetchLogsCallback func(batchEnd uint64, logs []BlockLogs) error
+
+// batchErrorCategory represents why a batch request failed.
+type batchErrorCategory string
+
+const (
+	errCategoryNone            batchErrorCategory = ""
+	errCategoryBlockRange      batchErrorCategory = "block_range_too_large"
+	errCategoryRateLimit       batchErrorCategory = "rate_limited"
+	errCategoryPayloadTooLarge batchErrorCategory = "payload_too_large"
+	errCategoryTimeout         batchErrorCategory = "timeout"
+)
 
 // New creates a new execution client.
 func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
@@ -59,9 +70,10 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	}
 	logger.Infow("Execution client connected", "version", version, "url", cfg.URL)
 
-	if cfg.FetchLogsBatchSize == 0 {
-		cfg.FetchLogsBatchSize = defaultFetchLogsBatchSize
-	}
+	batchSize := NewAdaptiveBatchSize(cfg.MinBatchSize, cfg.MaxBatchSize)
+	logger.Infow("Adaptive batch sizing enabled",
+		"min", batchSize.min,
+		"max", batchSize.max)
 
 	retryConfig := eth.DefaultRetryConfig()
 	if cfg.RetryConfig != nil {
@@ -69,10 +81,10 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	}
 
 	return &Client{
-		client:             client,
-		rpcClient:          rpcClient,
-		fetchLogsBatchSize: cfg.FetchLogsBatchSize,
-		retryConfig:        retryConfig,
+		client:      client,
+		rpcClient:   rpcClient,
+		batchSize:   batchSize,
+		retryConfig: retryConfig,
 	}, nil
 }
 
@@ -110,24 +122,43 @@ func (c *Client) GetHeadBlock(ctx context.Context) (uint64, error) {
 }
 
 // FetchLogs fetches logs in batches, calling the callback after each batch.
+// Uses adaptive batch sizing: decreases on errors, increases on success.
+// If topics is non-empty, only logs matching one of the topic0 hashes are returned.
 func (c *Client) FetchLogs(
 	ctx context.Context,
 	address common.Address,
 	fromBlock, toBlock uint64,
+	topics []common.Hash,
 	callback FetchLogsCallback,
 ) error {
 	currentBlock := fromBlock
 
 	for currentBlock <= toBlock {
-		batchEnd := currentBlock + c.fetchLogsBatchSize - 1
+		batchSize := c.batchSize.Get()
+		batchEnd := currentBlock + batchSize - 1
 		if batchEnd > toBlock {
 			batchEnd = toBlock
 		}
 
-		logs, err := c.fetchLogsBatch(ctx, address, currentBlock, batchEnd)
+		logs, err := c.fetchLogsBatch(ctx, address, currentBlock, batchEnd, topics)
 		if err != nil {
+			if category := categorizeBatchError(err); category != errCategoryNone {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				newSize := c.batchSize.Decrease()
+				logger.Warnw("Reducing batch size",
+					"reason", string(category),
+					"from", currentBlock,
+					"to", batchEnd,
+					"newBatchSize", newSize,
+					"error", err)
+				continue // retry with smaller batch
+			}
 			return err
 		}
+
+		c.batchSize.Increase()
 
 		batchLogs, err := c.packLogs(ctx, logs)
 		if err != nil {
@@ -146,6 +177,52 @@ func (c *Client) FetchLogs(
 	}
 
 	return nil
+}
+
+// categorizeBatchError checks if the error suggests the batch size should be reduced.
+// Returns the error category, or empty string if the error is not batch-size related.
+func categorizeBatchError(err error) batchErrorCategory {
+	if err == nil {
+		return errCategoryNone
+	}
+	msg := strings.ToLower(err.Error())
+
+	// Block range errors (RPC limit on block span)
+	if strings.Contains(msg, "block range") ||
+		strings.Contains(msg, "exceed") ||
+		strings.Contains(msg, "query returned more than") {
+		return errCategoryBlockRange
+	}
+
+	// Rate limiting (429)
+	if strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "too many requests") ||
+		strings.Contains(msg, "429") {
+		return errCategoryRateLimit
+	}
+
+	// Payload too large (413)
+	if strings.Contains(msg, "payload too large") ||
+		strings.Contains(msg, "request entity too large") ||
+		strings.Contains(msg, "413") ||
+		strings.Contains(msg, "too large") {
+		return errCategoryPayloadTooLarge
+	}
+
+	// Timeout (query took too long, likely too much data)
+	if strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "context deadline") {
+		return errCategoryTimeout
+	}
+
+	// Generic limit errors
+	if strings.Contains(msg, "limit") ||
+		strings.Contains(msg, "too many") {
+		return errCategoryBlockRange
+	}
+
+	return errCategoryNone
 }
 
 // packLogs groups logs by block number and fetches timestamps via batch RPC.
@@ -242,11 +319,17 @@ func (c *Client) fetchLogsBatch(
 	ctx context.Context,
 	address common.Address,
 	fromBlock, toBlock uint64,
+	topics []common.Hash,
 ) ([]types.Log, error) {
 	query := ethereum.FilterQuery{
 		FromBlock: new(big.Int).SetUint64(fromBlock),
 		ToBlock:   new(big.Int).SetUint64(toBlock),
 		Addresses: []common.Address{address},
+	}
+
+	// Add topic filter if provided (filters by topic0 = event signature)
+	if len(topics) > 0 {
+		query.Topics = [][]common.Hash{topics}
 	}
 
 	var logs []types.Log

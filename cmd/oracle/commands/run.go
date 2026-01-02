@@ -95,8 +95,8 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 
 	execClient, err := execution.New(ctx, execution.ClientConfig{
-		URL:                cfg.EthRPC,
-		FetchLogsBatchSize: cfg.SyncBatchSize,
+		URL:          cfg.EthRPC,
+		MaxBatchSize: cfg.MaxSyncBatchSize,
 	})
 	if err != nil {
 		return fmt.Errorf("create execution client: %w", err)

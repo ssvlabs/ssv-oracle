@@ -1,7 +1,6 @@
 package syncer
 
 import (
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -61,105 +60,6 @@ func TestParseLog_MissingOwnerTopic(t *testing.T) {
 	_, _, err := parser.parseLog(log)
 	if err == nil {
 		t.Error("parseLog() should error on missing owner topic")
-	}
-}
-
-func TestEncodeLogToJSON(t *testing.T) {
-	log := &types.Log{
-		Address: common.HexToAddress("0x1234567890123456789012345678901234567890"),
-		Topics: []common.Hash{
-			common.HexToHash("0xabc"),
-			common.HexToHash("0xdef"),
-		},
-		Data: []byte{0x01, 0x02, 0x03},
-	}
-
-	result, err := encodeLogToJSON(log)
-	if err != nil {
-		t.Fatalf("encodeLogToJSON() error = %v", err)
-	}
-
-	if len(result) == 0 {
-		t.Error("Expected non-empty JSON")
-	}
-
-	// Verify JSON structure
-	var decoded map[string]any
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal result: %v", err)
-	}
-
-	if decoded["address"] != log.Address.Hex() {
-		t.Errorf("Address mismatch: expected %s, got %v", log.Address.Hex(), decoded["address"])
-	}
-
-	topics, ok := decoded["topics"].([]any)
-	if !ok {
-		t.Fatal("Topics should be an array")
-	}
-	if len(topics) != 2 {
-		t.Errorf("Expected 2 topics, got %d", len(topics))
-	}
-}
-
-func TestEncodeLogToJSON_EmptyLog(t *testing.T) {
-	log := &types.Log{
-		Address: common.Address{},
-		Topics:  []common.Hash{},
-		Data:    []byte{},
-	}
-
-	result, err := encodeLogToJSON(log)
-	if err != nil {
-		t.Fatalf("encodeLogToJSON() error = %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal result: %v", err)
-	}
-
-	topics, ok := decoded["topics"].([]any)
-	if !ok {
-		t.Fatal("Topics should be an array")
-	}
-	if len(topics) != 0 {
-		t.Errorf("Expected 0 topics, got %d", len(topics))
-	}
-}
-
-func TestEncodeEventToJSON(t *testing.T) {
-	event := &validatorAddedEvent{
-		Owner:       common.HexToAddress("0x1234567890123456789012345678901234567890"),
-		OperatorIDs: []uint64{1, 2, 3, 4},
-		PublicKey:   []byte{0xaa, 0xbb, 0xcc},
-	}
-
-	result, err := encodeEventToJSON(event)
-	if err != nil {
-		t.Fatalf("encodeEventToJSON() error = %v", err)
-	}
-
-	if len(result) == 0 {
-		t.Error("Expected non-empty JSON")
-	}
-
-	// Verify it's valid JSON
-	var decoded map[string]any
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal result: %v", err)
-	}
-}
-
-func TestEncodeEventToJSON_NilEvent(t *testing.T) {
-	result, err := encodeEventToJSON(nil)
-	if err != nil {
-		t.Fatalf("encodeEventToJSON(nil) error = %v", err)
-	}
-
-	// Should produce "null"
-	if string(result) != "null" {
-		t.Errorf("Expected 'null', got %s", string(result))
 	}
 }
 

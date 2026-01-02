@@ -51,7 +51,8 @@ Three sub-packages organized by responsibility:
 - Validator effective balance queries
 
 **eth/execution/** - Execution layer client:
-- Log fetching with batching
+- Log fetching with adaptive batch sizing (AIMD algorithm)
+- Auto-adjusts batch size based on RPC responses
 - Block timestamp queries
 - Chain ID and finalized block
 
@@ -169,9 +170,11 @@ ssv_contract: "0x..."                 # SSV Network contract (includes oracle fu
 ssv_views_contract: "0x..."           # Required for --updater (SSV Network Views contract)
 db_path: "./data/oracle.db"           # SQLite database path
 api_address: "127.0.0.1:8080"         # API server address (default)
+max_sync_batch_size: 10000            # Max blocks per eth_getLogs request (default: 10000)
 ```
 
 - Chain ID is auto-detected from RPC
+- Batch size auto-adjusts: halves on RPC errors (block range, rate limit, timeout), grows on success
 - `eth_ws_rpc` is required when running with `--updater` (event subscriptions need WebSocket)
 - `ssv_views_contract` is required when running with `--updater` (for getBalance view call)
 
