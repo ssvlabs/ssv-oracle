@@ -409,6 +409,9 @@ func (m *TxManager) bumpOrResuggest(ctx context.Context, currentTip, currentFeeC
 
 	freshTip, freshFeeCap, err := m.suggestGasFees(ctx)
 	if err != nil {
+		if errors.Is(err, errBaseFeeExceedsMax) {
+			return nil, nil, true
+		}
 		return bumpedTip, bumpedFeeCap, false
 	}
 
