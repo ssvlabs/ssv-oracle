@@ -220,16 +220,17 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			case isUnderpriced(sendErr):
 				newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 				if shouldCancel {
-					logger.Warnw("Max gas reached on underpriced",
+					logger.Warnw("Max gas reached",
 						"nonce", nonce,
 						"maxFeePerGas", m.policy.MaxFeePerGasWei(),
-						"currentFeeCap", currentFeeCap)
+						"currentFeeCap", currentFeeCap,
+						"willRetry", false)
 					if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 						logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
 					}
 					return nil, errMaxGasReached
 				}
-				logger.Warnw("Tx underpriced, bumping fees",
+				logger.Warnw("Tx underpriced",
 					"attempt", attempt,
 					"useMEV", useMEV,
 					"error", sendErr)
@@ -278,6 +279,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			logger.Warnw("Tx receipt wait failed",
 				"hash", signedTx.Hash().Hex(),
 				"attempt", attempt,
+				"willRetry", false,
 				"error", err)
 			break
 		}
@@ -295,14 +297,15 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			logger.Warnw("Max gas reached",
 				"nonce", nonce,
 				"maxFeePerGas", m.policy.MaxFeePerGasWei(),
-				"currentFeeCap", currentFeeCap)
+				"currentFeeCap", currentFeeCap,
+				"willRetry", false)
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 				logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
 			}
 			return nil, errMaxGasReached
 		}
 
-		logger.Warnw("Tx pending timeout, bumping gas",
+		logger.Warnw("Tx pending timeout",
 			"hash", signedTx.Hash().Hex(),
 			"attempt", attempt,
 			"newFeeCap", newFeeCap)
@@ -313,7 +316,8 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	logger.Warnw("Max attempts exhausted",
 		"hash", lastTx.Hash().Hex(),
 		"nonce", nonce,
-		"attempts", m.policy.MaxAttempts)
+		"attempts", m.policy.MaxAttempts,
+		"willRetry", false)
 	if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 		logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
 	}
