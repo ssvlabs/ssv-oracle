@@ -278,6 +278,31 @@ func TestIsTxAlreadyKnown(t *testing.T) {
 	}
 }
 
+func TestIsUnderpriced(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"replacement underpriced", fmt.Errorf("replacement transaction underpriced"), true},
+		{"max fee too low", fmt.Errorf("max fee per gas less than block base fee"), true},
+		{"generic underpriced", fmt.Errorf("transaction underpriced"), true},
+		{"uppercase", fmt.Errorf("REPLACEMENT TRANSACTION UNDERPRICED"), true},
+		{"unrelated error", fmt.Errorf("nonce too low"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isUnderpriced(tt.err)
+			if got != tt.expected {
+				t.Errorf("isUnderpriced() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestIsContractRevert(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -318,7 +343,7 @@ func TestErrorTypes(t *testing.T) {
 	t.Run("all error types are distinct", func(t *testing.T) {
 		errs := []error{
 			errMaxGasReached,
-			errMaxRetriesExhausted,
+			errMaxAttemptsExhausted,
 			errNonceTooLow,
 			errInsufficientFunds,
 			errBaseFeeExceedsMax,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -21,20 +22,23 @@ import (
 )
 
 var (
-	errMaxGasReached       = errors.New("max gas price reached, tx cancelled")
-	errMaxRetriesExhausted = errors.New("max retries exhausted")
-	errNonceTooLow         = errors.New("nonce too low")
-	errInsufficientFunds   = errors.New("insufficient funds")
-	errBaseFeeExceedsMax   = errors.New("base fee exceeds max_fee_per_gas")
+	errMaxGasReached        = errors.New("max gas price reached, tx cancelled")
+	errMaxAttemptsExhausted = errors.New("max attempts exhausted")
+	errNonceTooLow          = errors.New("nonce too low")
+	errInsufficientFunds    = errors.New("insufficient funds")
+	errBaseFeeExceedsMax    = errors.New("base fee exceeds max_fee_per_gas")
 )
 
 // RPC error detection patterns (case-insensitive).
 const (
-	errPatternNonceTooLow         = "nonce too low"
-	errPatternAlreadyKnown        = "already known"
-	errPatternInsufficientFunds   = "insufficient funds"
-	errPatternInsufficientBalance = "insufficient balance"
-	errPatternExecutionReverted   = "execution reverted:"
+	errPatternNonceTooLow              = "nonce too low"
+	errPatternAlreadyKnown             = "already known"
+	errPatternInsufficientFunds        = "insufficient funds"
+	errPatternInsufficientBalance      = "insufficient balance"
+	errPatternExecutionReverted        = "execution reverted:"
+	errPatternReplacementUnderpriced   = "replacement transaction underpriced"
+	errPatternMaxFeePerGasTooLow       = "max fee per gas less than block base fee"
+	errPatternUnderpricedTxPoolVariant = "underpriced"
 )
 
 const (
@@ -75,6 +79,8 @@ type TxManager struct {
 	chainID        *big.Int
 	policy         *TxPolicy
 	errorSelectors map[string]string
+
+	nonceMu sync.Mutex
 }
 
 // New creates a TxManager.
@@ -127,7 +133,9 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		return nil, err
 	}
 
+	m.nonceMu.Lock()
 	nonce, err := m.client.PendingNonceAt(ctx, from)
+	m.nonceMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("get nonce: %w", err)
 	}
@@ -138,63 +146,82 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	}
 
 	var lastTx *types.Transaction
-	var publishedTxs []*types.Transaction // Track all published txs for receipt lookup
+	var publishedTxs []*types.Transaction
 	currentTip := gasTipCap
 	currentFeeCap := gasFeeCap
 
-	// MaxRetries is the number of retries after initial attempt, so MaxRetries=3 means 4 total attempts
-	for attempt := 0; attempt <= m.policy.MaxRetries; attempt++ {
+	for attempt := 1; attempt <= m.policy.MaxAttempts; attempt++ {
 		signedTx, err := m.buildAndSignTx(opts, nonce, gasLimit, currentTip, currentFeeCap, value)
 		if err != nil {
 			return nil, err
 		}
 		lastTx = signedTx
 
-		if err := m.client.SendTransaction(ctx, signedTx); err != nil {
-			if isTxAlreadyKnown(err) {
+		alreadyKnown := false
+		if sendErr := m.client.SendTransaction(ctx, signedTx); sendErr != nil {
+			switch {
+			case isTxAlreadyKnown(sendErr):
 				logger.Debugw("Tx already in mempool",
 					"hash", signedTx.Hash().Hex(),
 					"nonce", nonce)
-				publishedTxs = append(publishedTxs, signedTx)
-				goto waitForReceipt
-			}
-			if isNonceTooLow(err) {
-				// If we've published before, the tx may have been mined after our timeout.
-				// Check for a receipt before returning error.
+				alreadyKnown = true
+
+			case isNonceTooLow(sendErr):
 				if len(publishedTxs) > 0 {
 					if receipt, recErr := m.findMinedReceipt(ctx, opts, publishedTxs); receipt != nil {
 						return receipt, recErr
 					}
 				}
-				return nil, fmt.Errorf("%w: %w", errNonceTooLow, err)
-			}
-			if isInsufficientFunds(err) {
-				return nil, fmt.Errorf("%w: %w", errInsufficientFunds, err)
-			}
-			if attempt < m.policy.MaxRetries {
-				logger.Warnw("Tx submission failed",
-					"attempt", attempt+1,
-					"maxAttempts", m.policy.MaxRetries+1,
-					"error", err)
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(m.policy.RetryDelay):
+				return nil, fmt.Errorf("%w: %w", errNonceTooLow, sendErr)
+
+			case isInsufficientFunds(sendErr):
+				return nil, fmt.Errorf("%w: %w", errInsufficientFunds, sendErr)
+
+			case isUnderpriced(sendErr):
+				newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
+				if shouldCancel {
+					logger.Warnw("Max gas reached on underpriced",
+						"nonce", nonce,
+						"maxFeePerGas", m.policy.MaxFeePerGasWei(),
+						"currentFeeCap", currentFeeCap)
+					if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
+						logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
+					}
+					return nil, errMaxGasReached
 				}
+				logger.Warnw("Tx underpriced, bumping fees",
+					"attempt", attempt,
+					"error", sendErr)
+				currentTip, currentFeeCap = newTip, newFeeCap
 				continue
+
+			default:
+				if attempt < m.policy.MaxAttempts {
+					logger.Warnw("Tx submission failed",
+						"attempt", attempt,
+						"maxAttempts", m.policy.MaxAttempts,
+						"error", sendErr)
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-time.After(m.policy.RetryDelay):
+					}
+					continue
+				}
+				return nil, fmt.Errorf("send tx: %w", sendErr)
 			}
-			return nil, fmt.Errorf("send tx: %w", err)
 		}
 
 		publishedTxs = append(publishedTxs, signedTx)
-		logger.Debugw("Tx submitted",
-			"hash", signedTx.Hash().Hex(),
-			"nonce", nonce,
-			"gasTipCap", currentTip,
-			"gasFeeCap", currentFeeCap,
-			"attempt", attempt+1)
+		if !alreadyKnown {
+			logger.Debugw("Tx submitted",
+				"hash", signedTx.Hash().Hex(),
+				"nonce", nonce,
+				"gasTipCap", currentTip,
+				"gasFeeCap", currentFeeCap,
+				"attempt", attempt)
+		}
 
-	waitForReceipt:
 		receipt, err := m.waitForReceipt(ctx, signedTx)
 		if err == nil {
 			return m.handleReceipt(ctx, opts, signedTx, receipt)
@@ -204,48 +231,42 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			return nil, ctx.Err()
 		}
 
-		if attempt >= m.policy.MaxRetries {
+		if attempt >= m.policy.MaxAttempts {
 			logger.Warnw("Tx receipt wait failed",
 				"hash", signedTx.Hash().Hex(),
-				"attempt", attempt+1,
-				"willRetry", false,
+				"attempt", attempt,
 				"error", err)
 			break
 		}
 
-		newTip, newFeeCap, shouldCancel := m.bumpGas(currentTip, currentFeeCap)
+		newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 		if shouldCancel {
 			logger.Warnw("Max gas reached",
 				"nonce", nonce,
 				"maxFeePerGas", m.policy.MaxFeePerGasWei(),
-				"currentFeeCap", currentFeeCap,
-				"willRetry", false)
+				"currentFeeCap", currentFeeCap)
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-				logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
+				logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
 			}
 			return nil, errMaxGasReached
 		}
 
-		logger.Warnw("Tx pending timeout",
+		logger.Warnw("Tx pending timeout, bumping gas",
 			"hash", signedTx.Hash().Hex(),
-			"attempt", attempt+1,
-			"oldFeeCap", currentFeeCap,
+			"attempt", attempt,
 			"newFeeCap", newFeeCap)
-
-		currentTip = newTip
-		currentFeeCap = newFeeCap
+		currentTip, currentFeeCap = newTip, newFeeCap
 	}
 
-	logger.Warnw("Max retries exhausted",
+	logger.Warnw("Max attempts exhausted",
 		"hash", lastTx.Hash().Hex(),
 		"nonce", nonce,
-		"attempts", m.policy.MaxRetries+1,
-		"willRetry", false)
+		"attempts", m.policy.MaxAttempts)
 	if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-		logger.Warnw("Failed to cancel tx", "nonce", nonce, "error", err)
+		logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
 	}
 
-	return nil, errMaxRetriesExhausted
+	return nil, errMaxAttemptsExhausted
 }
 
 // buildAndSignTx creates and signs a transaction.
@@ -267,24 +288,37 @@ func (m *TxManager) buildAndSignTx(opts *TxOpts, nonce, gasLimit uint64, gasTipC
 	return signedTx, nil
 }
 
-// bumpGas increases gas fees by the configured percentage.
-// Returns (newTip, newFeeCap, shouldCancel).
-func (m *TxManager) bumpGas(currentTip, currentFeeCap *big.Int) (*big.Int, *big.Int, bool) {
-	newTip := m.applyBumpPercent(currentTip)
-	newFeeCap := m.applyBumpPercent(currentFeeCap)
-
-	if newFeeCap.Cmp(m.policy.MaxFeePerGasWei()) > 0 {
-		return nil, nil, true
-	}
-
-	return newTip, newFeeCap, false
-}
-
-// applyBumpPercent increases a value by the configured gas bump percentage.
 func (m *TxManager) applyBumpPercent(value *big.Int) *big.Int {
 	bumpFactor := big.NewInt(int64(percentBase + m.policy.GasBumpPercent))
 	result := new(big.Int).Mul(value, bumpFactor)
 	return result.Div(result, big.NewInt(percentBase))
+}
+
+// bumpOrResuggest returns the higher of bumped fees or freshly suggested fees,
+// capped at max_fee_per_gas. Returns shouldCancel=true if fees would exceed cap.
+func (m *TxManager) bumpOrResuggest(ctx context.Context, currentTip, currentFeeCap *big.Int) (newTip, newFeeCap *big.Int, shouldCancel bool) {
+	maxFee := m.policy.MaxFeePerGasWei()
+	bumpedTip := m.applyBumpPercent(currentTip)
+	bumpedFeeCap := m.applyBumpPercent(currentFeeCap)
+
+	// Check cap before proceeding
+	if bumpedFeeCap.Cmp(maxFee) > 0 {
+		return nil, nil, true
+	}
+
+	freshTip, freshFeeCap, err := m.suggestGasFees(ctx)
+	if err != nil {
+		return bumpedTip, bumpedFeeCap, false
+	}
+
+	if freshTip.Cmp(bumpedTip) > 0 {
+		bumpedTip = freshTip
+	}
+	if freshFeeCap.Cmp(bumpedFeeCap) > 0 {
+		bumpedFeeCap = freshFeeCap
+	}
+
+	return bumpedTip, bumpedFeeCap, false
 }
 
 // cancelTx sends a zero-value self-transfer to free the nonce.
@@ -293,8 +327,6 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 	maxFee := m.policy.MaxFeePerGasWei()
 
 	gasFeeCap := m.applyBumpPercent(prevGasFeeCap)
-
-	// Cap at maxFeePerGas to respect configured limit.
 	if gasFeeCap.Cmp(maxFee) > 0 {
 		gasFeeCap = new(big.Int).Set(maxFee)
 	}
@@ -555,4 +587,14 @@ func isInsufficientFunds(err error) bool {
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, errPatternInsufficientFunds) ||
 		strings.Contains(s, errPatternInsufficientBalance)
+}
+
+func isUnderpriced(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, errPatternReplacementUnderpriced) ||
+		strings.Contains(s, errPatternMaxFeePerGasTooLow) ||
+		strings.Contains(s, errPatternUnderpricedTxPoolVariant)
 }

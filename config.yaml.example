@@ -71,7 +71,7 @@ tx_policy:
   max_fee_per_gas_gwei: 420            # Hard cap on gas price (in Gwei)
   pending_timeout_blocks: 10           # Blocks before bumping gas on pending tx
   gas_bump_percent: 10                 # Gas price bump per attempt (min 10%)
-  max_retries: 3                       # Max submission attempts
+  max_attempts: 3                      # Total submission attempts
   retry_delay: 5s                      # Delay after RPC error before retry
 
 # ============================================================================
