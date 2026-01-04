@@ -1,7 +1,6 @@
 package syncer
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -271,31 +270,4 @@ func (p *eventParser) parseClusterBalanceUpdated(log *types.Log) (*clusterBalanc
 	event.Cluster = result.Cluster
 
 	return event, nil
-}
-
-func encodeEventToJSON(event any) (json.RawMessage, error) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return nil, fmt.Errorf("marshal event: %w", err)
-	}
-	return data, nil
-}
-
-func encodeLogToJSON(log *types.Log) (json.RawMessage, error) {
-	logData := map[string]any{
-		"address": log.Address.Hex(),
-		"topics":  make([]string, len(log.Topics)),
-		"data":    common.Bytes2Hex(log.Data),
-	}
-
-	for i, topic := range log.Topics {
-		logData["topics"].([]string)[i] = topic.Hex()
-	}
-
-	data, err := json.Marshal(logData)
-	if err != nil {
-		return nil, fmt.Errorf("marshal log: %w", err)
-	}
-
-	return data, nil
 }

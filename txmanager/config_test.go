@@ -21,7 +21,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
-				MaxRetries:           3,
+				MaxAttempts:          3,
 				RetryDelay:           5 * time.Second,
 			},
 			wantErr: false,
@@ -33,19 +33,19 @@ func TestTxPolicy_Validate(t *testing.T) {
 				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       5, // Must be >= 10 for EIP-1559
-				MaxRetries:           3,
+				MaxAttempts:          3,
 				RetryDelay:           5 * time.Second,
 			},
 			wantErr: true,
 		},
 		{
-			name: "zero retries",
+			name: "zero attempts",
 			policy: &TxPolicy{
 				GasBufferPercent:     20,
 				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
-				MaxRetries:           0,
+				MaxAttempts:          0,
 				RetryDelay:           5 * time.Second,
 			},
 			wantErr: true,
@@ -57,7 +57,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 				MaxFeePerGasGwei:     0, // Required
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
-				MaxRetries:           3,
+				MaxAttempts:          3,
 			},
 			wantErr: true,
 		},
@@ -68,7 +68,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
-				MaxRetries:           3,
+				MaxAttempts:          3,
 			},
 			wantErr: true,
 		},
@@ -79,7 +79,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
-				MaxRetries:           3,
+				MaxAttempts:          3,
 			},
 			wantErr: true,
 		},
@@ -90,7 +90,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 0,
 				GasBumpPercent:       10,
-				MaxRetries:           3,
+				MaxAttempts:          3,
 			},
 			wantErr: true,
 		},
@@ -101,7 +101,7 @@ func TestTxPolicy_Validate(t *testing.T) {
 				MaxFeePerGasGwei:     100,
 				PendingTimeoutBlocks: 10,
 				GasBumpPercent:       10,
-				MaxRetries:           3,
+				MaxAttempts:          3,
 				RetryDelay:           -1 * time.Second,
 			},
 			wantErr: true,
@@ -131,7 +131,7 @@ func TestTxPolicy_ApplyDefaults(t *testing.T) {
 	policy2 := &TxPolicy{
 		GasBufferPercent: 50,
 		MaxFeePerGasGwei: 200,
-		MaxRetries:       5,
+		MaxAttempts:      5,
 	}
 	policy2.ApplyDefaults()
 
@@ -141,8 +141,8 @@ func TestTxPolicy_ApplyDefaults(t *testing.T) {
 	if policy2.MaxFeePerGasGwei != 200 {
 		t.Errorf("MaxFeePerGasGwei should remain 200, got %d", policy2.MaxFeePerGasGwei)
 	}
-	if policy2.MaxRetries != 5 {
-		t.Errorf("MaxRetries should remain 5, got %d", policy2.MaxRetries)
+	if policy2.MaxAttempts != 5 {
+		t.Errorf("MaxAttempts should remain 5, got %d", policy2.MaxAttempts)
 	}
 	// Other fields should get defaults
 	if policy2.PendingTimeoutBlocks != defaultPendingTimeoutBlocks {

@@ -2,6 +2,7 @@ package beacon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -19,10 +20,10 @@ import (
 )
 
 const (
-	defaultBeaconTimeout = 30 * time.Second
-	validatorBatchSize   = 1000 // Max validators per beacon API request
-	validatorMaxParallel = 5
-	stateWaitInterval    = time.Second
+	defaultBeaconTimeout    = 30 * time.Second
+	balanceFetchBatchSize   = 2000
+	balanceFetchConcurrency = 10
+	checkpointPollInterval  = time.Second
 )
 
 type beaconAPI interface {
@@ -30,6 +31,7 @@ type beaconAPI interface {
 	eth2client.SignedBeaconBlockProvider
 	eth2client.ValidatorsProvider
 	eth2client.EventsProvider
+	eth2client.BeaconStateRootProvider
 }
 
 // Client wraps a beacon node client for fetching chain data.
@@ -79,36 +81,32 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
-// FinalizedCheckpoint contains the finalized epoch and corresponding execution block.
+// FinalizedCheckpoint represents a finalized beacon chain checkpoint.
 type FinalizedCheckpoint struct {
-	Epoch    uint64
-	BlockNum uint64
+	Epoch     uint64
+	BlockNum  uint64
+	StateRoot phase0.Root
 }
 
-// GetFinalizedCheckpoint returns the latest finalized checkpoint.
-func (c *Client) GetFinalizedCheckpoint(ctx context.Context) (*FinalizedCheckpoint, error) {
-	var checkpoint *FinalizedCheckpoint
+// GetFinalizedEpoch returns the latest finalized checkpoint epoch.
+func (c *Client) GetFinalizedEpoch(ctx context.Context) (uint64, error) {
+	var epoch uint64
 	err := eth.WithRetry(ctx, c.retryConfig, func() error {
-		finalityResp, err := c.beacon.Finality(ctx, &api.FinalityOpts{
+		resp, err := c.beacon.Finality(ctx, &api.FinalityOpts{
 			State: "head",
 		})
 		if err != nil {
 			return fmt.Errorf("get finality: %w", err)
 		}
-
-		checkpoint, err = c.fetchCheckpoint(
-			ctx,
-			uint64(finalityResp.Data.Finalized.Epoch),
-			finalityResp.Data.Finalized.Root,
-		)
-		return err
+		epoch = uint64(resp.Data.Finalized.Epoch)
+		return nil
 	})
-	return checkpoint, err
+	return epoch, err
 }
 
-func (c *Client) fetchCheckpoint(ctx context.Context, epoch uint64, blockRoot phase0.Root) (*FinalizedCheckpoint, error) {
+func (c *Client) fetchCheckpoint(ctx context.Context, event *apiv1.FinalizedCheckpointEvent) (*FinalizedCheckpoint, error) {
 	blockResp, err := c.beacon.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{
-		Block: blockRoot.String(),
+		Block: event.Block.String(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("get beacon block: %w", err)
@@ -120,14 +118,15 @@ func (c *Client) fetchCheckpoint(ctx context.Context, epoch uint64, blockRoot ph
 	}
 
 	return &FinalizedCheckpoint{
-		Epoch:    epoch,
-		BlockNum: blockNum,
+		Epoch:     uint64(event.Epoch),
+		BlockNum:  blockNum,
+		StateRoot: event.State,
 	}, nil
 }
 
-// GetValidatorBalances returns effective balances in Gwei for the given validators
-// at the finalized state.
-func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
+// GetValidatorBalancesAt returns effective balances in Gwei for the given validators
+// at the specified state (can be state root hex string, slot, or alias like "finalized").
+func (c *Client) GetValidatorBalancesAt(ctx context.Context, stateID string, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
 		return make(map[phase0.BLSPubKey]uint64), nil
 	}
@@ -138,8 +137,8 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 	}
 
 	var batches [][]phase0.BLSPubKey
-	for i := 0; i < len(blsPubkeys); i += validatorBatchSize {
-		end := i + validatorBatchSize
+	for i := 0; i < len(blsPubkeys); i += balanceFetchBatchSize {
+		end := i + balanceFetchBatchSize
 		if end > len(blsPubkeys) {
 			end = len(blsPubkeys)
 		}
@@ -147,7 +146,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(validatorMaxParallel)
+	g.SetLimit(balanceFetchConcurrency)
 
 	var mu sync.Mutex
 	merged := make(map[phase0.BLSPubKey]uint64, len(pubkeys))
@@ -156,7 +155,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 		g.Go(func() error {
 			return eth.WithRetry(ctx, c.retryConfig, func() error {
 				resp, err := c.beacon.Validators(ctx, &api.ValidatorsOpts{
-					State:   "finalized",
+					State:   stateID,
 					PubKeys: batch,
 				})
 				if err != nil {
@@ -180,33 +179,34 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 	return merged, nil
 }
 
-// WaitForCheckpointReady waits for the beacon REST API to reflect the finalized checkpoint.
-// This handles the race condition where SSE events arrive before the REST API updates.
-func (c *Client) WaitForCheckpointReady(ctx context.Context, expectedEpoch uint64) error {
+// WaitForStateReady waits for the beacon node to have the given state available.
+// stateID should be a hex-encoded state root (e.g., "0x...").
+// Returns nil when state is ready, or error if state is unsupported/timeout.
+func (c *Client) WaitForStateReady(ctx context.Context, stateID string) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultBeaconTimeout)
 	defer cancel()
 
 	for {
-		checkpoint, err := c.GetFinalizedCheckpoint(ctx)
-		if err != nil {
-			return fmt.Errorf("get finalized checkpoint: %w", err)
-		}
-
-		if checkpoint.Epoch >= expectedEpoch {
-			logger.Debugw("Checkpoint ready", "epoch", checkpoint.Epoch)
+		_, err := c.beacon.BeaconStateRoot(ctx, &api.BeaconStateRootOpts{
+			State: stateID,
+		})
+		if err == nil {
 			return nil
 		}
 
-		logger.Debugw("Waiting for checkpoint",
-			"apiEpoch", checkpoint.Epoch,
-			"expectedEpoch", expectedEpoch)
-
-		select {
-		case <-time.After(stateWaitInterval):
-			// retry
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for checkpoint epoch %d", expectedEpoch)
+		// 404 means state not indexed yet - retry
+		// Any other error (400, 5xx) - fail immediately
+		var apiErr *api.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
+			select {
+			case <-time.After(checkpointPollInterval):
+				continue
+			case <-ctx.Done():
+				return fmt.Errorf("timeout waiting for state %s", stateID)
+			}
 		}
+
+		return fmt.Errorf("state query failed: %w", err)
 	}
 }
 
@@ -222,7 +222,7 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 			var checkpoint *FinalizedCheckpoint
 			err := eth.WithRetry(ctx, c.retryConfig, func() error {
 				var fetchErr error
-				checkpoint, fetchErr = c.fetchCheckpoint(ctx, uint64(event.Epoch), event.Block)
+				checkpoint, fetchErr = c.fetchCheckpoint(ctx, event)
 				return fetchErr
 			})
 			if err != nil {

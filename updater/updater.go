@@ -65,7 +65,7 @@ func (u *Updater) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err != nil {
-			logger.Errorw("Subscription failed, reconnecting", "error", err)
+			logger.Errorw("Subscription failed", "willRetry", true, "error", err)
 		}
 
 		select {
@@ -121,12 +121,9 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 
 	// Deduplicate by block number
 	if event.BlockNum <= u.lastProcessedBlock {
-		log.Debugw("Skipping duplicate RootCommitted event",
-			"lastProcessed", u.lastProcessedBlock)
+		log.Debugw("Duplicate RootCommitted event", "lastProcessed", u.lastProcessedBlock)
 		return
 	}
-
-	log.Infow("Received RootCommitted", "txHash", event.TxHash.Hex())
 
 	commit, err := u.storage.GetCommitByBlock(ctx, event.BlockNum)
 	if err != nil {
@@ -134,7 +131,6 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 	if commit == nil {
-		log.Debugw("Commit not found, retrying", "delay", commitLookupRetryDelay)
 		select {
 		case <-time.After(commitLookupRetryDelay):
 		case <-ctx.Done():
@@ -152,8 +148,6 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 
-	log.Infow("Found commit", "targetEpoch", commit.TargetEpoch)
-
 	if err := u.processCommit(ctx, commit); err != nil {
 		log.Errorw("Failed to process commit", "error", err)
 		return
@@ -164,8 +158,7 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 
 func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommit) error {
 	log := logger.With("blockNum", commit.ReferenceBlock, "targetEpoch", commit.TargetEpoch)
-	log.Infow("Processing root",
-		"committedRoot", fmt.Sprintf("0x%x", commit.MerkleRoot))
+	start := time.Now()
 
 	if len(commit.ClusterBalances) == 0 {
 		log.Info("No clusters to update")
@@ -173,7 +166,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 	}
 
 	tree := u.buildTree(commit.ClusterBalances)
-	log.Infow("Merkle tree built",
+	log.Debugw("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", tree.Root),
 		"clusters", len(commit.ClusterBalances))
 
@@ -182,12 +175,10 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 			tree.Root, commit.MerkleRoot)
 	}
 
-	log.Info("Root validated, processing clusters")
-
 	stats, staleLeaves := u.processAllClusters(ctx, commit.ReferenceBlock, tree)
 
 	if len(staleLeaves) > 0 {
-		log.Infow("Syncing for stale clusters", "count", len(staleLeaves))
+		log.Debugw("Stale clusters detected", "count", len(staleLeaves))
 		if err := u.syncer.SyncClustersToHead(ctx); err != nil {
 			log.Errorw("Failed to sync", "error", err)
 		} else {
@@ -211,7 +202,11 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		}
 	}
 
-	u.logStats(log, stats)
+	log.Infow("Commit complete",
+		"updated", stats.updated,
+		"skipped", stats.skipped,
+		"failed", stats.failed,
+		"took", time.Since(start).Round(time.Millisecond))
 
 	return nil
 }
@@ -265,13 +260,6 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 	return stats, staleLeaves
 }
 
-func (u *Updater) logStats(log logger.Logger, stats processStats) {
-	log.Infow("Commit complete",
-		"updated", stats.updated,
-		"skipped", stats.skipped,
-		"failed", stats.failed)
-}
-
 func toContractCluster(c *storage.ClusterRow) contract.Cluster {
 	return contract.Cluster{
 		ValidatorCount:  c.ValidatorCount,
@@ -290,7 +278,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		return false, fmt.Errorf("get cluster: %w", err)
 	}
 	if cluster == nil {
-		logger.Debugw("Cluster not found, skipping", "clusterID", clusterID)
+		logger.Debugw("Cluster not found", "clusterID", clusterID)
 		return false, nil
 	}
 
@@ -305,11 +293,14 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		return false, fmt.Errorf("get current balance: %w", err)
 	}
 	if currentBalance == leaf.EffectiveBalance {
-		logger.Debugw("Balance unchanged, skipping",
-			"clusterID", clusterID,
-			"balance", currentBalance)
+		logger.Debugw("Balance unchanged", "clusterID", clusterID, "balance", currentBalance)
 		return false, nil
 	}
+
+	logger.Debugw("Effective balance changed",
+		"clusterID", clusterID,
+		"previousEffectiveBalance", currentBalance,
+		"newEffectiveBalance", leaf.EffectiveBalance)
 
 	receipt, err := u.contractClient.UpdateClusterBalance(
 		ctx,
@@ -324,7 +315,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		return false, err
 	}
 
-	logger.Infow("Tx confirmed",
+	logger.Debugw("Tx confirmed",
 		"clusterID", clusterID,
 		"txHash", receipt.TxHash.Hex(),
 		"effectiveBalance", leaf.EffectiveBalance,

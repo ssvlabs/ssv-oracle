@@ -34,7 +34,7 @@ type config struct {
 	SSVViewsContract string `yaml:"ssv_views_contract"` // Required only with --updater
 
 	SSVContractDeployBlock uint64 `yaml:"ssv_contract_deploy_block"`
-	SyncBatchSize          uint64 `yaml:"sync_batch_size"`
+	MaxSyncBatchSize       uint64 `yaml:"max_sync_batch_size"`
 
 	DBPath     string `yaml:"db_path"`
 	APIAddress string `yaml:"api_address"`

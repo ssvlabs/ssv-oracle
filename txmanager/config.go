@@ -13,7 +13,7 @@ const (
 	defaultMaxFeePerGasGwei     = 420
 	defaultPendingTimeoutBlocks = 10
 	defaultGasBumpPercent       = 10
-	defaultMaxRetries           = 3
+	defaultMaxAttempts          = 3
 	defaultRetryDelay           = 5 * time.Second
 )
 
@@ -24,7 +24,7 @@ type TxPolicy struct {
 	MaxFeePerGasGwei     uint64        `yaml:"max_fee_per_gas_gwei"`   // Hard cap on gas price in Gwei
 	PendingTimeoutBlocks int           `yaml:"pending_timeout_blocks"` // Blocks before bumping gas on pending tx
 	GasBumpPercent       int           `yaml:"gas_bump_percent"`       // Gas price bump per attempt (min 10%)
-	MaxRetries           int           `yaml:"max_retries"`            // Max submission attempts
+	MaxAttempts          int           `yaml:"max_attempts"`           // Total submission attempts
 	RetryDelay           time.Duration `yaml:"retry_delay"`            // Delay after RPC error before retry
 }
 
@@ -42,8 +42,8 @@ func (p *TxPolicy) ApplyDefaults() {
 	if p.GasBumpPercent == 0 {
 		p.GasBumpPercent = defaultGasBumpPercent
 	}
-	if p.MaxRetries == 0 {
-		p.MaxRetries = defaultMaxRetries
+	if p.MaxAttempts == 0 {
+		p.MaxAttempts = defaultMaxAttempts
 	}
 	if p.RetryDelay == 0 {
 		p.RetryDelay = defaultRetryDelay
@@ -68,8 +68,8 @@ func (p *TxPolicy) Validate() error {
 	if p.PendingTimeoutBlocks < 1 {
 		return fmt.Errorf("pending_timeout_blocks must be at least 1, got %d", p.PendingTimeoutBlocks)
 	}
-	if p.MaxRetries < 1 {
-		return fmt.Errorf("max_retries must be at least 1, got %d", p.MaxRetries)
+	if p.MaxAttempts < 1 {
+		return fmt.Errorf("max_attempts must be at least 1, got %d", p.MaxAttempts)
 	}
 	if p.RetryDelay < 0 {
 		return fmt.Errorf("retry_delay cannot be negative")

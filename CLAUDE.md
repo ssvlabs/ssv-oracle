@@ -24,6 +24,7 @@ make clean      # Remove build artifacts and database
 
 ```
 ssv-oracle/
+├── api/                # HTTP API server with merkle tree UI
 ├── cmd/oracle/         # CLI entry point (cobra)
 ├── contract/           # Ethereum client & contract interaction
 ├── eth/                # Ethereum-related packages
@@ -50,7 +51,8 @@ Three sub-packages organized by responsibility:
 - Validator effective balance queries
 
 **eth/execution/** - Execution layer client:
-- Log fetching with batching
+- Log fetching with adaptive batch sizing (AIMD algorithm)
+- Auto-adjusts batch size based on RPC responses
 - Block timestamp queries
 - Chain ID and finalized block
 
@@ -95,6 +97,12 @@ Listens for RootCommitted events and updates cluster balances on-chain:
 3. Validate computed root matches committed root
 4. Generate merkle proof for each cluster
 5. Call UpdateClusterBalance on contract with proof
+
+### API Server (api/)
+Optional HTTP API for querying oracle state:
+- `GET /api/v1/commit` - Latest commit with merkle root and block number
+- `GET /api/v1/proof/{clusterId}` - Merkle proof for a specific cluster
+- Embedded UI at `/` for merkle tree visualization
 
 ### Merkle Tree (merkle/)
 OpenZeppelin StandardMerkleTree-compatible implementation:
@@ -162,9 +170,12 @@ mev_rpc: "https://rpc.flashbots.net/fast,https://rpc.titanbuilder.xyz"  # MEV pr
 ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
 ssv_views_contract: "0x..."           # Required for --updater (SSV Network Views contract)
 db_path: "./data/oracle.db"           # SQLite database path
+api_address: "127.0.0.1:8080"         # API server address (default)
+max_sync_batch_size: 10000            # Max blocks per eth_getLogs request (default: 10000)
 ```
 
 - Chain ID is auto-detected from RPC
+- Batch size auto-adjusts: halves on RPC errors (block range, rate limit, timeout), grows on success
 - `eth_ws_rpc` is required when running with `--updater` (event subscriptions need WebSocket)
 - `ssv_views_contract` is required when running with `--updater` (for getBalance view call)
 - `mev_rpc` is optional; only used with `--updater`
@@ -198,7 +209,7 @@ tx_policy:
   max_fee_per_gas_gwei: 420     # Hard cap on gas price (in Gwei)
   pending_timeout_blocks: 10    # Blocks before bumping gas on pending tx
   gas_bump_percent: 10          # Gas price bump per attempt (min 10%)
-  max_retries: 3                # Max submission attempts
+  max_attempts: 3               # Total submission attempts
   retry_delay: 5s               # Delay after RPC error before retry
 ```
 

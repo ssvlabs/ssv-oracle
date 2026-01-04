@@ -390,8 +390,6 @@ func TestStorage_InsertEvent(t *testing.T) {
 		TransactionHash:  []byte{0x03, 0x04},
 		TransactionIndex: 0,
 		LogIndex:         1,
-		RawLog:           []byte(`{"topics":[],"data":"0x"}`),
-		RawEvent:         []byte(`{"owner":"0x1234","operatorIds":[1,2,3,4]}`),
 		Error:            nil,
 	}
 

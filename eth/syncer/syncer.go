@@ -23,6 +23,7 @@ type Storage interface {
 	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
 	BeginTx(ctx context.Context) (storage.Tx, error)
 	UpdateClusterIfExists(ctx context.Context, cluster *storage.ClusterRow) error
+	SetSyncMode(bulk bool) error
 }
 
 // EventSyncer continuously syncs SSV contract events to the database.
@@ -58,17 +59,31 @@ func (s *EventSyncer) SyncToFinalized(ctx context.Context, deployBlock uint64) e
 	}
 
 	if lastSynced == 0 {
-		logger.Infow("First run: setting initial sync position", "block", deployBlock-1)
-		err = s.storage.UpdateLastSyncedBlock(ctx, deployBlock-1)
-		if err != nil {
+		if err = s.storage.UpdateLastSyncedBlock(ctx, deployBlock-1); err != nil {
 			return fmt.Errorf("set initial sync block: %w", err)
 		}
+		logger.Infow("Initial sync position set", "block", deployBlock-1)
 	}
 
 	return s.syncOnce(ctx)
 }
 
+// batchResult holds a fetched batch ready for processing.
+type batchResult struct {
+	batchEnd uint64
+	logs     []execution.BlockLogs
+	err      error
+}
+
+// prefetchBuffer is the number of batches to prefetch ahead of processing.
+const prefetchBuffer = 2
+
+// bulkSyncThreshold is the minimum block gap to enable bulk sync mode.
+const bulkSyncThreshold = 100000
+
 // SyncToBlock syncs events from last synced block to the target block.
+// Uses pipelined fetching: fetcher goroutine prefetches batches while
+// the main goroutine processes them sequentially.
 func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error {
 	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
@@ -80,7 +95,14 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 		return nil
 	}
 
+	start := time.Now()
 	totalBlocks := int(targetBlock - fromBlock)
+	if totalBlocks > bulkSyncThreshold {
+		if s.storage.SetSyncMode(true) == nil {
+			defer func() { _ = s.storage.SetSyncMode(false) }()
+		}
+	}
+
 	isTTY := term.IsTerminal(int(os.Stderr.Fd()))
 
 	barOpts := []progressbar.Option{
@@ -105,36 +127,73 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	}
 	bar := progressbar.NewOptions(totalBlocks, barOpts...)
 
+	// Cancellable context allows stopping fetcher if processing fails
+	fetchCtx, cancelFetch := context.WithCancel(ctx)
+	defer cancelFetch()
+
+	batchCh := make(chan batchResult, prefetchBuffer)
+	go s.runFetcher(fetchCtx, fromBlock+1, targetBlock, batchCh)
+
 	knownEvents := 0
-	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, targetBlock, func(batchEnd uint64, logs []execution.BlockLogs) error {
-		for _, blockLogs := range logs {
-			count, err := s.processBlockLogs(ctx, blockLogs)
-			if err != nil {
-				return fmt.Errorf("process block %d: %w", blockLogs.BlockNumber, err)
+	var processErr error
+	for batch := range batchCh {
+		if batch.err != nil {
+			processErr = batch.err
+			break
+		}
+
+		count, err := s.processBatch(ctx, batch.batchEnd, batch.logs)
+		if err != nil {
+			processErr = err
+			break
+		}
+		knownEvents += count
+
+		_ = bar.Set(int(batch.batchEnd - fromBlock))
+	}
+
+	// Drain channel to unblock fetcher goroutine
+	if processErr != nil {
+		go func() {
+			for range batchCh {
 			}
-			knownEvents += count
-		}
+		}()
+		return processErr
+	}
 
-		_ = bar.Set(int(batchEnd - fromBlock))
-
-		// Advance sync progress to batch end.
-		// This is needed for batches with no events (or sparse events) to ensure
-		// we don't re-scan empty block ranges on restart.
-		// Note: Per-block tx already updates progress for blocks WITH events.
-		if err := s.storage.UpdateLastSyncedBlock(ctx, batchEnd); err != nil {
-			return fmt.Errorf("update sync progress: %w", err)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("fetch logs: %w", err)
+	// Check if sync was aborted by context cancellation
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	_ = bar.Finish()
-	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "newEvents", knownEvents)
+
+	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond))
 	return nil
+}
+
+// runFetcher fetches logs and sends batches to the channel.
+// Closes the channel when done or on error.
+func (s *EventSyncer) runFetcher(ctx context.Context, fromBlock, toBlock uint64, batchCh chan<- batchResult) {
+	defer close(batchCh)
+
+	topics := EventTopics() // Filter by handled event signatures
+	err := s.client.FetchLogs(ctx, s.ssvContract, fromBlock, toBlock, topics,
+		func(batchEnd uint64, logs []execution.BlockLogs) error {
+			select {
+			case batchCh <- batchResult{batchEnd: batchEnd, logs: logs}:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+
+	if err != nil {
+		select {
+		case batchCh <- batchResult{err: err}:
+		case <-ctx.Done():
+		}
+	}
 }
 
 func (s *EventSyncer) syncOnce(ctx context.Context) error {
@@ -145,7 +204,15 @@ func (s *EventSyncer) syncOnce(ctx context.Context) error {
 	return s.SyncToBlock(ctx, finalizedBlock)
 }
 
-func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
+// processBatch processes all blocks in a batch within a single transaction.
+func (s *EventSyncer) processBatch(ctx context.Context, batchEnd uint64, logs []execution.BlockLogs) (int, error) {
+	if len(logs) == 0 {
+		if err := s.storage.UpdateLastSyncedBlock(ctx, batchEnd); err != nil {
+			return 0, fmt.Errorf("update sync progress: %w", err)
+		}
+		return 0, nil
+	}
+
 	tx, err := s.storage.BeginTx(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
@@ -159,23 +226,25 @@ func (s *EventSyncer) processBlockLogs(ctx context.Context, blockLogs execution.
 	}()
 
 	knownEvents := 0
-	for _, log := range blockLogs.Logs {
-		known, err := s.processLog(ctx, tx, &log, blockLogs)
-		if err != nil {
-			return 0, fmt.Errorf("process log at index %d: %w", log.Index, err)
-		}
-		if known {
-			knownEvents++
+	for _, blockLogs := range logs {
+		for _, log := range blockLogs.Logs {
+			known, err := s.processLog(ctx, tx, &log, blockLogs)
+			if err != nil {
+				return 0, fmt.Errorf("process block %d log %d: %w",
+					blockLogs.BlockNumber, log.Index, err)
+			}
+			if known {
+				knownEvents++
+			}
 		}
 	}
 
-	// Update sync progress atomically with events
-	if err := tx.UpdateLastSyncedBlock(ctx, blockLogs.BlockNumber); err != nil {
+	if err := tx.UpdateLastSyncedBlock(ctx, batchEnd); err != nil {
 		return 0, fmt.Errorf("update sync progress: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit tx: %w", err)
+		return 0, fmt.Errorf("commit batch: %w", err)
 	}
 	committed = true
 
@@ -188,16 +257,6 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 		return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
 	}
 
-	rawLog, err := encodeLogToJSON(log)
-	if err != nil {
-		return false, fmt.Errorf("encode raw log: %w", err)
-	}
-
-	rawEvent, err := encodeEventToJSON(eventData)
-	if err != nil {
-		return false, fmt.Errorf("encode event: %w", err)
-	}
-
 	contractEvent := &storage.ContractEvent{
 		EventType:        eventType,
 		BlockNumber:      blockLogs.BlockNumber,
@@ -206,8 +265,6 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 		TransactionHash:  log.TxHash.Bytes(),
 		TransactionIndex: uint32(log.TxIndex),
 		LogIndex:         uint32(log.Index),
-		RawLog:           rawLog,
-		RawEvent:         rawEvent,
 	}
 
 	if err := tx.InsertEvent(ctx, contractEvent); err != nil {
@@ -230,11 +287,6 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *typ
 			"error", parseErr)
 	}
 
-	rawLog, err := encodeLogToJSON(log)
-	if err != nil {
-		return fmt.Errorf("encode raw log: %w", err)
-	}
-
 	errMsg := parseErr.Error()
 	contractEvent := &storage.ContractEvent{
 		EventType:        "Unknown",
@@ -244,8 +296,6 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *typ
 		TransactionHash:  log.TxHash.Bytes(),
 		TransactionIndex: uint32(log.TxIndex),
 		LogIndex:         uint32(log.Index),
-		RawLog:           rawLog,
-		RawEvent:         []byte("{}"),
 		Error:            &errMsg,
 	}
 
@@ -383,11 +433,8 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 		return nil
 	}
 
-	logger.Debugw("Syncing clusters to head",
-		"fromBlock", fromBlock+1,
-		"headBlock", headBlock)
-
-	return s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock,
+	topics := EventTopics() // Filter by handled event signatures
+	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock, topics,
 		func(batchEnd uint64, logs []execution.BlockLogs) error {
 			for _, blockLogs := range logs {
 				if err := s.applyClusterUpdates(ctx, blockLogs); err != nil {
@@ -396,6 +443,12 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 			}
 			return nil
 		})
+	if err != nil {
+		return err
+	}
+
+	logger.Debugw("Clusters synced to head", "from", fromBlock+1, "to", headBlock)
+	return nil
 }
 
 func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) error {
