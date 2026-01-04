@@ -138,7 +138,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	var processErr error
 	for batch := range batchCh {
 		if batch.err != nil {
-			processErr = fmt.Errorf("fetch logs: %w", batch.err)
+			processErr = batch.err
 			break
 		}
 
