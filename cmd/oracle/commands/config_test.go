@@ -13,6 +13,7 @@ func validConfig() *config {
 		EthRPC:                 "http://localhost:8545",
 		BeaconRPC:              "http://localhost:5052",
 		SSVContract:            "0x1234567890123456789012345678901234567890",
+		SSVViewsContract:       "0x1234567890123456789012345678901234567890",
 		SSVContractDeployBlock: 17507487,
 		Schedule:               oracle.CommitSchedule{{StartEpoch: 0, Interval: 225}},
 	}
@@ -81,33 +82,25 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: "invalid commit_phases",
 		},
 		{
+			name:    "missing ssv_views_contract",
+			modify:  func(c *config) { c.SSVViewsContract = "" },
+			wantErr: "ssv_views_contract is required",
+		},
+		{
+			name:    "invalid ssv_views_contract address",
+			modify:  func(c *config) { c.SSVViewsContract = "not-an-address" },
+			wantErr: "invalid ssv_views_contract address",
+		},
+		{
 			name:        "updater: missing eth_ws_rpc",
 			modify:      func(c *config) {},
 			withUpdater: true,
 			wantErr:     "eth_ws_rpc is required",
 		},
 		{
-			name: "updater: missing ssv_views_contract",
-			modify: func(c *config) {
-				c.EthWSRPC = "ws://localhost:8546"
-			},
-			withUpdater: true,
-			wantErr:     "ssv_views_contract is required",
-		},
-		{
-			name: "updater: invalid ssv_views_contract address",
-			modify: func(c *config) {
-				c.EthWSRPC = "ws://localhost:8546"
-				c.SSVViewsContract = "not-an-address"
-			},
-			withUpdater: true,
-			wantErr:     "invalid ssv_views_contract address",
-		},
-		{
 			name: "updater: valid config",
 			modify: func(c *config) {
 				c.EthWSRPC = "ws://localhost:8546"
-				c.SSVViewsContract = "0x1234567890123456789012345678901234567890"
 			},
 			withUpdater: true,
 			wantErr:     "",
@@ -116,7 +109,6 @@ func TestConfig_Validate(t *testing.T) {
 			name: "updater: wrong eth_ws_rpc scheme",
 			modify: func(c *config) {
 				c.EthWSRPC = "http://localhost:8546"
-				c.SSVViewsContract = "0x1234567890123456789012345678901234567890"
 			},
 			withUpdater: true,
 			wantErr:     "invalid eth_ws_rpc scheme",
@@ -185,6 +177,7 @@ func TestConfig_MultipleErrors(t *testing.T) {
 		EthRPC:                 "",
 		BeaconRPC:              "",
 		SSVContract:            "",
+		SSVViewsContract:       "",
 		SSVContractDeployBlock: 0,
 		Schedule:               nil,
 	}
@@ -199,6 +192,7 @@ func TestConfig_MultipleErrors(t *testing.T) {
 		"eth_rpc is required",
 		"beacon_rpc is required",
 		"ssv_contract is required",
+		"ssv_views_contract is required",
 		"ssv_contract_deploy_block is required",
 		"invalid commit_phases",
 	}
@@ -231,6 +225,7 @@ func TestLoadConfig_UnknownField(t *testing.T) {
 eth_rpc: "http://localhost:8545"
 beacon_rpc: "http://localhost:5052"
 ssv_contract: "0x1234567890123456789012345678901234567890"
+ssv_views_contract: "0x1234567890123456789012345678901234567890"
 ssv_contract_deploy_block: 17507487
 unknown_field: "should cause error"
 commit_phases:
@@ -263,6 +258,7 @@ func TestLoadConfig_DefaultDBPath(t *testing.T) {
 eth_rpc: "http://localhost:8545"
 beacon_rpc: "http://localhost:5052"
 ssv_contract: "0x1234567890123456789012345678901234567890"
+ssv_views_contract: "0x1234567890123456789012345678901234567890"
 ssv_contract_deploy_block: 17507487
 commit_phases:
   - start_epoch: 0
@@ -294,6 +290,7 @@ func TestLoadConfig_ExplicitDBPath(t *testing.T) {
 eth_rpc: "http://localhost:8545"
 beacon_rpc: "http://localhost:5052"
 ssv_contract: "0x1234567890123456789012345678901234567890"
+ssv_views_contract: "0x1234567890123456789012345678901234567890"
 ssv_contract_deploy_block: 17507487
 db_path: "/custom/path/oracle.db"
 commit_phases:

@@ -303,15 +303,16 @@ func (s *Storage) InsertPendingCommit(ctx context.Context, targetEpoch uint64, m
 	return nil
 }
 
-// UpdateCommitStatus updates the status and transaction hash of a commit.
+// UpdateCommitStatus updates status only if current status is 'pending'.
+// Already-finalized rows (confirmed/failed) are silently skipped to prevent clobbering.
 func (s *Storage) UpdateCommitStatus(ctx context.Context, targetEpoch uint64, status CommitStatus, txHash []byte) error {
-	query := `UPDATE oracle_commits SET status = ?, tx_hash = ? WHERE target_epoch = ?`
-	result, err := s.db.ExecContext(ctx, query, status, txHash, targetEpoch)
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE oracle_commits
+		SET status = ?, tx_hash = COALESCE(?, tx_hash)
+		WHERE target_epoch = ? AND status = 'pending'
+	`, status, txHash, targetEpoch)
 	if err != nil {
 		return fmt.Errorf("update commit status: %w", err)
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return fmt.Errorf("commit not found: target_epoch=%d", targetEpoch)
 	}
 	return nil
 }

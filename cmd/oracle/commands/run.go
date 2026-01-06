@@ -71,12 +71,12 @@ func run(_ *cobra.Command, _ []string) error {
 		"ethRPC", cfg.EthRPC,
 		"beaconRPC", cfg.BeaconRPC,
 		"contract", cfg.SSVContract,
+		"viewsContract", cfg.SSVViewsContract,
 		"signerAddress", signer.Address().Hex(),
 	}
 	if withUpdater {
 		startupFields = append(startupFields,
 			"ethWSRPC", cfg.EthWSRPC,
-			"viewsContract", cfg.SSVViewsContract,
 		)
 	}
 	logger.Infow("SSV Oracle starting", startupFields...)
@@ -121,16 +121,16 @@ func run(_ *cobra.Command, _ []string) error {
 	})
 
 	contractCfg := &contract.Config{
-		RPCURL:          cfg.EthRPC,
-		ContractAddress: cfg.SSVContract,
-		ChainID:         chainID,
-		Signer:          signer,
-		TxPolicy:        &cfg.TxPolicy,
+		RPCURL:               cfg.EthRPC,
+		ContractAddress:      cfg.SSVContract,
+		ViewsContractAddress: cfg.SSVViewsContract,
+		ChainID:              chainID,
+		Signer:               signer,
+		TxPolicy:             &cfg.TxPolicy,
 	}
 
 	if withUpdater {
 		contractCfg.WSRPCURL = cfg.EthWSRPC
-		contractCfg.ViewsContractAddress = cfg.SSVViewsContract
 	}
 
 	ethClient, err := contract.NewClient(contractCfg)

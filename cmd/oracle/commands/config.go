@@ -30,7 +30,7 @@ type config struct {
 	BeaconRPC string `yaml:"beacon_rpc"`
 
 	SSVContract      string `yaml:"ssv_contract"`
-	SSVViewsContract string `yaml:"ssv_views_contract"` // Required only with --updater
+	SSVViewsContract string `yaml:"ssv_views_contract"`
 
 	SSVContractDeployBlock uint64 `yaml:"ssv_contract_deploy_block"`
 	MaxSyncBatchSize       uint64 `yaml:"max_sync_batch_size"`
@@ -65,6 +65,9 @@ func (c *config) validate(withUpdater bool) error {
 	if err := validateAddress(c.SSVContract, "ssv_contract"); err != nil {
 		errs = append(errs, err)
 	}
+	if err := validateAddress(c.SSVViewsContract, "ssv_views_contract"); err != nil {
+		errs = append(errs, err)
+	}
 	if c.SSVContractDeployBlock == 0 {
 		errs = append(errs, errors.New("ssv_contract_deploy_block is required"))
 	}
@@ -73,9 +76,6 @@ func (c *config) validate(withUpdater bool) error {
 	}
 	if withUpdater {
 		if err := validateURL(c.EthWSRPC, "eth_ws_rpc", "ws", "wss"); err != nil {
-			errs = append(errs, err)
-		}
-		if err := validateAddress(c.SSVViewsContract, "ssv_views_contract"); err != nil {
 			errs = append(errs, err)
 		}
 	}

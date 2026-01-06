@@ -111,6 +111,29 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum u
 	})
 }
 
+// GetCommittedRoot returns the committed merkle root for a block, or zero if not committed.
+func (c *Client) GetCommittedRoot(ctx context.Context, blockNum uint64) ([32]byte, error) {
+	data, err := ssvNetworkViewsABI.Pack("getCommittedRoot", blockNum)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("pack getCommittedRoot: %w", err)
+	}
+
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{
+		To:   &c.viewsContractAddress,
+		Data: data,
+	}, nil)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("call getCommittedRoot: %w", err)
+	}
+
+	var root [32]byte
+	if err := ssvNetworkViewsABI.UnpackIntoInterface(&root, "getCommittedRoot", result); err != nil {
+		return [32]byte{}, fmt.Errorf("unpack getCommittedRoot: %w", err)
+	}
+
+	return root, nil
+}
+
 // GetClusterEffectiveBalance returns the effective balance for a cluster.
 func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster Cluster) (uint32, error) {
 	data, err := ssvNetworkViewsABI.Pack("getEffectiveBalance", owner, operatorIDs, cluster)

@@ -173,6 +173,30 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("store pending commit: %w", err)
 	}
 
+	// Check on-chain IMMEDIATELY before sending to minimize race window
+	committedRoot, err := o.contractClient.GetCommittedRoot(ctx, checkpoint.BlockNum)
+	if err != nil {
+		log.Warnw("Failed to check committed root, proceeding with commit", "error", err)
+	} else if committedRoot != [32]byte{} {
+		if committedRoot == merkleRoot {
+			log.Infow("Block already confirmed with matching root, skipping commit",
+				"blockNum", checkpoint.BlockNum,
+				"root", fmt.Sprintf("0x%x", merkleRoot))
+			if err := o.storage.UpdateCommitStatus(ctx, target, storage.CommitStatusConfirmed, nil); err != nil {
+				log.Warnw("Failed to update commit status", "error", err)
+			}
+		} else {
+			log.Warnw("Block already confirmed with different root, skipping commit",
+				"blockNum", checkpoint.BlockNum,
+				"ourRoot", fmt.Sprintf("0x%x", merkleRoot),
+				"committedRoot", fmt.Sprintf("0x%x", committedRoot))
+			if err := o.storage.UpdateCommitStatus(ctx, target, storage.CommitStatusFailed, nil); err != nil {
+				log.Warnw("Failed to update commit status", "error", err)
+			}
+		}
+		return nil
+	}
+
 	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum)
 	if err != nil {
 		return o.handleCommitError(ctx, log, target, merkleRoot, receipt, err)
