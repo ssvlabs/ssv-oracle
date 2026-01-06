@@ -54,6 +54,7 @@ type ContractEvent struct {
 	TransactionHash  []byte
 	TransactionIndex uint32
 	LogIndex         uint32
+	ClusterID        []byte
 	Error            *string
 }
 
@@ -456,13 +457,13 @@ func (t *storageTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) 
 func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 	query := `
 		INSERT INTO contract_events (
-			block_number, log_index, event_type, block_hash, block_time,
-			transaction_hash, transaction_index, error
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			block_number, log_index, event_type, cluster_id,
+			block_hash, block_time, transaction_hash, transaction_index, error
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
 	_, err := e.ExecContext(ctx, query,
-		event.BlockNumber, event.LogIndex, event.EventType,
+		event.BlockNumber, event.LogIndex, event.EventType, event.ClusterID,
 		event.BlockHash, event.BlockTime.Format(time.RFC3339), event.TransactionHash, event.TransactionIndex,
 		event.Error,
 	)
