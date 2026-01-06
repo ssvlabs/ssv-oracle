@@ -168,7 +168,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	_ = bar.Finish()
 
-	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond))
+	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond).String())
 	return nil
 }
 

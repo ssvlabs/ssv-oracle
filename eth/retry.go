@@ -66,7 +66,7 @@ func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 			logger.Debugw("Retrying after error",
 				"attempt", attempt+1,
 				"maxAttempts", cfg.MaxRetries+1,
-				"delay", delay.Round(time.Millisecond),
+				"delay", delay.Round(time.Millisecond).String(),
 				"error", err)
 
 			select {

@@ -212,7 +212,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		"refBlock", checkpoint.BlockNum,
 		"validators", validatorCount,
 		"clusters", len(clusterBalances),
-		"took", time.Since(fetchStart).Round(time.Millisecond))
+		"took", time.Since(fetchStart).Round(time.Millisecond).String())
 	return nil
 }
 
@@ -252,7 +252,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, stateID string) ([]st
 		"fromBeacon", len(balanceMap),
 		"notOnBeacon", notOnBeacon,
 		"clusters", len(result),
-		"took", time.Since(start).Round(time.Millisecond))
+		"took", time.Since(start).Round(time.Millisecond).String())
 
 	return result, len(validators), nil
 }

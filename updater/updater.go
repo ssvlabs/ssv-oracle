@@ -206,7 +206,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		"updated", stats.updated,
 		"skipped", stats.skipped,
 		"failed", stats.failed,
-		"took", time.Since(start).Round(time.Millisecond))
+		"took", time.Since(start).Round(time.Millisecond).String())
 
 	return nil
 }
