@@ -186,6 +186,7 @@ func (c *Client) WaitForStateReady(ctx context.Context, stateID string) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultBeaconTimeout)
 	defer cancel()
 
+	var lastErr error
 	for {
 		_, err := c.beacon.BeaconStateRoot(ctx, &api.BeaconStateRootOpts{
 			State: stateID,
@@ -194,19 +195,32 @@ func (c *Client) WaitForStateReady(ctx context.Context, stateID string) error {
 			return nil
 		}
 
-		// 404 means state not indexed yet - retry
-		// Any other error (400, 5xx) - fail immediately
+		// Return context errors immediately.
+		if ctx.Err() != nil {
+			return fmt.Errorf("wait for state %s: %w", stateID, ctx.Err())
+		}
+
+		// Retry transient errors:
+		// - 404: state not indexed yet
+		// - 5xx: server errors (e.g., state reconstruction in progress)
+		// - Non-API errors: network blips (misconfigs surface after 30s timeout)
+		// Fail immediately on 4xx client errors (except 404).
 		var apiErr *api.Error
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
-			select {
-			case <-time.After(checkpointPollInterval):
-				continue
-			case <-ctx.Done():
-				return fmt.Errorf("timeout waiting for state %s", stateID)
+		if errors.As(err, &apiErr) {
+			code := apiErr.StatusCode
+			if code >= 400 && code < 500 && code != 404 {
+				return fmt.Errorf("state query failed: %w", err)
 			}
 		}
 
-		return fmt.Errorf("state query failed: %w", err)
+		lastErr = err
+
+		select {
+		case <-time.After(checkpointPollInterval):
+			continue
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for state %s: %w", stateID, lastErr)
+		}
 	}
 }
 
