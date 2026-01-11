@@ -168,7 +168,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	_ = bar.Finish()
 
-	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond))
+	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond).String())
 	return nil
 }
 
@@ -257,6 +257,8 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 		return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
 	}
 
+	clusterID := computeClusterIDFromEvent(eventData)
+
 	contractEvent := &storage.ContractEvent{
 		EventType:        eventType,
 		BlockNumber:      blockLogs.BlockNumber,
@@ -265,13 +267,14 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 		TransactionHash:  log.TxHash.Bytes(),
 		TransactionIndex: uint32(log.TxIndex),
 		LogIndex:         uint32(log.Index),
+		ClusterID:        clusterID,
 	}
 
 	if err := tx.InsertEvent(ctx, contractEvent); err != nil {
 		return false, fmt.Errorf("insert event: %w", err)
 	}
 
-	if err := s.applyEvent(ctx, tx, eventType, eventData); err != nil {
+	if err := s.applyEvent(ctx, tx, eventType, eventData, clusterID); err != nil {
 		return false, fmt.Errorf("apply event: %w", err)
 	}
 
@@ -302,9 +305,7 @@ func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *typ
 	return tx.InsertEvent(ctx, contractEvent)
 }
 
-func (s *EventSyncer) applyEvent(ctx context.Context, tx storage.Tx, eventType string, eventData any) error {
-	clusterID := computeClusterIDFromEvent(eventData)
-
+func (s *EventSyncer) applyEvent(ctx context.Context, tx storage.Tx, eventType string, eventData any, clusterID []byte) error {
 	switch eventType {
 	case eventValidatorAdded:
 		return s.handleValidatorAdded(ctx, tx, eventData.(*validatorAddedEvent), clusterID)
@@ -349,23 +350,7 @@ func (s *EventSyncer) handleValidatorRemoved(ctx context.Context, tx storage.Tx,
 	if err := tx.DeleteValidator(ctx, clusterID, event.PublicKey); err != nil {
 		return err
 	}
-
-	// Delete cluster when last validator is removed
-	if event.Cluster.ValidatorCount == 0 {
-		return tx.DeleteCluster(ctx, clusterID)
-	}
-
-	cluster := &storage.ClusterRow{
-		ClusterID:       clusterID,
-		OwnerAddress:    event.Owner.Bytes(),
-		OperatorIDs:     event.OperatorIDs,
-		ValidatorCount:  event.Cluster.ValidatorCount,
-		NetworkFeeIndex: event.Cluster.NetworkFeeIndex,
-		Index:           event.Cluster.Index,
-		IsActive:        event.Cluster.Active,
-		Balance:         event.Cluster.Balance,
-	}
-	return tx.UpsertCluster(ctx, cluster)
+	return s.upsertClusterFromEvent(ctx, tx, event.Owner, event.OperatorIDs, clusterID, &event.Cluster)
 }
 
 func (s *EventSyncer) handleClusterLiquidated(ctx context.Context, tx storage.Tx, event *clusterLiquidatedEvent, clusterID []byte) error {

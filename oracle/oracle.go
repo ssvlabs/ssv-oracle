@@ -147,7 +147,6 @@ func (o *Oracle) Run(ctx context.Context) error {
 func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpoint, target uint64) error {
 	log := logger.With("target", target)
 	fetchStart := time.Now()
-	stateID := fmt.Sprintf("0x%x", checkpoint.StateRoot[:])
 
 	log.Infow("Committing", "refBlock", checkpoint.BlockNum)
 
@@ -155,11 +154,11 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("sync to block %d: %w", checkpoint.BlockNum, err)
 	}
 
-	if err := o.beaconClient.WaitForStateReady(ctx, stateID); err != nil {
-		return fmt.Errorf("wait for state: %w", err)
+	if err := o.beaconClient.VerifyFinalizedBlockRoot(ctx, checkpoint.BlockRoot); err != nil {
+		return fmt.Errorf("verify finalized block: %w", err)
 	}
 
-	clusterBalances, validatorCount, err := o.fetchClusterBalances(ctx, stateID)
+	clusterBalances, validatorCount, err := o.fetchClusterBalances(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch balances: %w", err)
 	}
@@ -171,6 +170,30 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 
 	if err := o.storage.InsertPendingCommit(ctx, target, merkleRoot[:], checkpoint.BlockNum, clusterBalances); err != nil {
 		return fmt.Errorf("store pending commit: %w", err)
+	}
+
+	// Check on-chain IMMEDIATELY before sending to minimize race window
+	committedRoot, err := o.contractClient.GetCommittedRoot(ctx, checkpoint.BlockNum)
+	if err != nil {
+		log.Warnw("Failed to check committed root, proceeding with commit", "error", err)
+	} else if committedRoot != [32]byte{} {
+		if committedRoot == merkleRoot {
+			log.Infow("Block already confirmed with matching root, skipping commit",
+				"blockNum", checkpoint.BlockNum,
+				"root", fmt.Sprintf("0x%x", merkleRoot))
+			if err := o.storage.UpdateCommitStatus(ctx, target, storage.CommitStatusConfirmed, nil); err != nil {
+				log.Warnw("Failed to update commit status", "error", err)
+			}
+		} else {
+			log.Warnw("Block already confirmed with different root, skipping commit",
+				"blockNum", checkpoint.BlockNum,
+				"ourRoot", fmt.Sprintf("0x%x", merkleRoot),
+				"committedRoot", fmt.Sprintf("0x%x", committedRoot))
+			if err := o.storage.UpdateCommitStatus(ctx, target, storage.CommitStatusFailed, nil); err != nil {
+				log.Warnw("Failed to update commit status", "error", err)
+			}
+		}
+		return nil
 	}
 
 	receipt, err := o.contractClient.CommitRoot(ctx, merkleRoot, checkpoint.BlockNum)
@@ -188,7 +211,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		"refBlock", checkpoint.BlockNum,
 		"validators", validatorCount,
 		"clusters", len(clusterBalances),
-		"took", time.Since(fetchStart).Round(time.Millisecond))
+		"took", time.Since(fetchStart).Round(time.Millisecond).String())
 	return nil
 }
 
@@ -202,7 +225,7 @@ func (o *Oracle) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree
 	return merkle.NewTree(clusterMap)
 }
 
-func (o *Oracle) fetchClusterBalances(ctx context.Context, stateID string) ([]storage.ClusterBalance, int, error) {
+func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBalance, int, error) {
 	validators, err := o.storage.GetActiveValidators(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("get active validators: %w", err)
@@ -216,7 +239,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, stateID string) ([]st
 	pubkeys := o.deduplicatePubkeys(validators)
 
 	start := time.Now()
-	balanceMap, err := o.beaconClient.GetValidatorBalancesAt(ctx, stateID, pubkeys)
+	balanceMap, err := o.beaconClient.GetValidatorBalances(ctx, pubkeys)
 	if err != nil {
 		return nil, 0, fmt.Errorf("fetch validator balances: %w", err)
 	}
@@ -228,7 +251,7 @@ func (o *Oracle) fetchClusterBalances(ctx context.Context, stateID string) ([]st
 		"fromBeacon", len(balanceMap),
 		"notOnBeacon", notOnBeacon,
 		"clusters", len(result),
-		"took", time.Since(start).Round(time.Millisecond))
+		"took", time.Since(start).Round(time.Millisecond).String())
 
 	return result, len(validators), nil
 }

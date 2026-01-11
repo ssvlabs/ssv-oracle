@@ -54,6 +54,7 @@ type ContractEvent struct {
 	TransactionHash  []byte
 	TransactionIndex uint32
 	LogIndex         uint32
+	ClusterID        []byte
 	Error            *string
 }
 
@@ -303,15 +304,16 @@ func (s *Storage) InsertPendingCommit(ctx context.Context, targetEpoch uint64, m
 	return nil
 }
 
-// UpdateCommitStatus updates the status and transaction hash of a commit.
+// UpdateCommitStatus updates status only if current status is 'pending'.
+// Already-finalized rows (confirmed/failed) are silently skipped to prevent clobbering.
 func (s *Storage) UpdateCommitStatus(ctx context.Context, targetEpoch uint64, status CommitStatus, txHash []byte) error {
-	query := `UPDATE oracle_commits SET status = ?, tx_hash = ? WHERE target_epoch = ?`
-	result, err := s.db.ExecContext(ctx, query, status, txHash, targetEpoch)
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE oracle_commits
+		SET status = ?, tx_hash = COALESCE(?, tx_hash)
+		WHERE target_epoch = ? AND status = 'pending'
+	`, status, txHash, targetEpoch)
 	if err != nil {
 		return fmt.Errorf("update commit status: %w", err)
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return fmt.Errorf("commit not found: target_epoch=%d", targetEpoch)
 	}
 	return nil
 }
@@ -455,13 +457,13 @@ func (t *storageTx) UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) 
 func insertEvent(ctx context.Context, e executor, event *ContractEvent) error {
 	query := `
 		INSERT INTO contract_events (
-			block_number, log_index, event_type, block_hash, block_time,
-			transaction_hash, transaction_index, error
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			block_number, log_index, event_type, cluster_id,
+			block_hash, block_time, transaction_hash, transaction_index, error
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (block_number, log_index) DO NOTHING
 	`
 	_, err := e.ExecContext(ctx, query,
-		event.BlockNumber, event.LogIndex, event.EventType,
+		event.BlockNumber, event.LogIndex, event.EventType, event.ClusterID,
 		event.BlockHash, event.BlockTime.Format(time.RFC3339), event.TransactionHash, event.TransactionIndex,
 		event.Error,
 	)

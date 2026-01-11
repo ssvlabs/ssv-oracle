@@ -140,8 +140,8 @@ Single-file database at `./data/oracle.db` with WAL mode enabled.
 
 ### Key Tables
 - `sync_progress` - Chain ID and last synced block
-- `contract_events` - Raw SSV events (append-only)
-- `clusters` - Current cluster state (deleted when validator_count = 0)
+- `contract_events` - Raw SSV events (append-only, indexed by cluster_id)
+- `clusters` - Current cluster state (kept even when validator_count = 0)
 - `validators` - Validator membership (cascade delete with cluster)
 - `oracle_commits` - Commit history with cluster balances for merkle reconstruction
 

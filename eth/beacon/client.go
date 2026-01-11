@@ -2,7 +2,6 @@ package beacon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -23,7 +22,6 @@ const (
 	defaultBeaconTimeout    = 30 * time.Second
 	balanceFetchBatchSize   = 2000
 	balanceFetchConcurrency = 10
-	checkpointPollInterval  = time.Second
 )
 
 type beaconAPI interface {
@@ -31,7 +29,7 @@ type beaconAPI interface {
 	eth2client.SignedBeaconBlockProvider
 	eth2client.ValidatorsProvider
 	eth2client.EventsProvider
-	eth2client.BeaconStateRootProvider
+	eth2client.BeaconBlockHeadersProvider
 }
 
 // Client wraps a beacon node client for fetching chain data.
@@ -85,7 +83,7 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 type FinalizedCheckpoint struct {
 	Epoch     uint64
 	BlockNum  uint64
-	StateRoot phase0.Root
+	BlockRoot phase0.Root
 }
 
 // GetFinalizedEpoch returns the latest finalized checkpoint epoch.
@@ -120,13 +118,32 @@ func (c *Client) fetchCheckpoint(ctx context.Context, event *apiv1.FinalizedChec
 	return &FinalizedCheckpoint{
 		Epoch:     uint64(event.Epoch),
 		BlockNum:  blockNum,
-		StateRoot: event.State,
+		BlockRoot: event.Block,
 	}, nil
 }
 
-// GetValidatorBalancesAt returns effective balances in Gwei for the given validators
-// at the specified state (can be state root hex string, slot, or alias like "finalized").
-func (c *Client) GetValidatorBalancesAt(ctx context.Context, stateID string, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
+// VerifyFinalizedBlockRoot checks that the beacon node's current finalized block
+// matches the expected block root.
+func (c *Client) VerifyFinalizedBlockRoot(ctx context.Context, expectedBlockRoot phase0.Root) error {
+	return eth.WithRetry(ctx, c.retryConfig, func() error {
+		headerResp, err := c.beacon.BeaconBlockHeader(ctx, &api.BeaconBlockHeaderOpts{
+			Block: "finalized",
+		})
+		if err != nil {
+			return fmt.Errorf("get finalized block header: %w", err)
+		}
+
+		if headerResp.Data.Root != expectedBlockRoot {
+			return fmt.Errorf("finalized block root mismatch: expected %#x, got %#x",
+				expectedBlockRoot, headerResp.Data.Root)
+		}
+		return nil
+	})
+}
+
+// GetValidatorBalances returns effective balances in Gwei for the given validators
+// at the finalized state.
+func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
 	if len(pubkeys) == 0 {
 		return make(map[phase0.BLSPubKey]uint64), nil
 	}
@@ -155,7 +172,7 @@ func (c *Client) GetValidatorBalancesAt(ctx context.Context, stateID string, pub
 		g.Go(func() error {
 			return eth.WithRetry(ctx, c.retryConfig, func() error {
 				resp, err := c.beacon.Validators(ctx, &api.ValidatorsOpts{
-					State:   stateID,
+					State:   "finalized",
 					PubKeys: batch,
 				})
 				if err != nil {
@@ -177,37 +194,6 @@ func (c *Client) GetValidatorBalancesAt(ctx context.Context, stateID string, pub
 	}
 
 	return merged, nil
-}
-
-// WaitForStateReady waits for the beacon node to have the given state available.
-// stateID should be a hex-encoded state root (e.g., "0x...").
-// Returns nil when state is ready, or error if state is unsupported/timeout.
-func (c *Client) WaitForStateReady(ctx context.Context, stateID string) error {
-	ctx, cancel := context.WithTimeout(ctx, defaultBeaconTimeout)
-	defer cancel()
-
-	for {
-		_, err := c.beacon.BeaconStateRoot(ctx, &api.BeaconStateRootOpts{
-			State: stateID,
-		})
-		if err == nil {
-			return nil
-		}
-
-		// 404 means state not indexed yet - retry
-		// Any other error (400, 5xx) - fail immediately
-		var apiErr *api.Error
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
-			select {
-			case <-time.After(checkpointPollInterval):
-				continue
-			case <-ctx.Done():
-				return fmt.Errorf("timeout waiting for state %s", stateID)
-			}
-		}
-
-		return fmt.Errorf("state query failed: %w", err)
-	}
 }
 
 // SubscribeFinalizedCheckpoints starts an SSE subscription for finalized checkpoints.

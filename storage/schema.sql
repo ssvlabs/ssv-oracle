@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS contract_events (
     block_number INTEGER NOT NULL,
     log_index INTEGER NOT NULL,
     event_type TEXT NOT NULL,
+    cluster_id BLOB,
     block_hash BLOB NOT NULL,
     block_time TEXT NOT NULL,
     transaction_hash BLOB NOT NULL,
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS contract_events (
     PRIMARY KEY (block_number, log_index)
 );
 
--- Current cluster state (upserted on events, deleted when validator_count = 0)
+CREATE INDEX IF NOT EXISTS idx_contract_events_cluster ON contract_events(cluster_id) WHERE cluster_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS clusters (
     cluster_id BLOB PRIMARY KEY,
     owner_address BLOB NOT NULL,
@@ -35,7 +37,6 @@ CREATE TABLE IF NOT EXISTS clusters (
 
 CREATE INDEX IF NOT EXISTS idx_clusters_active ON clusters(is_active) WHERE is_active = 1;
 
--- Validator membership (cascade delete with cluster)
 CREATE TABLE IF NOT EXISTS validators (
     cluster_id BLOB NOT NULL REFERENCES clusters(cluster_id) ON DELETE CASCADE,
     validator_pubkey BLOB NOT NULL,
@@ -44,7 +45,6 @@ CREATE TABLE IF NOT EXISTS validators (
 
 CREATE INDEX IF NOT EXISTS idx_validators_cluster ON validators(cluster_id);
 
--- Oracle commit history for merkle proof reconstruction
 CREATE TABLE IF NOT EXISTS oracle_commits (
     target_epoch INTEGER PRIMARY KEY,
     merkle_root BLOB NOT NULL,
