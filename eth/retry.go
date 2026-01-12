@@ -9,7 +9,7 @@ import (
 
 	"github.com/attestantio/go-eth2-client/api"
 
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 const (

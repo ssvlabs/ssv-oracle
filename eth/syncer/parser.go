@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
-	"ssv-oracle/contract"
+	"github.com/ssvlabs/ssv-oracle/contract"
 )
 
 // errUnknownEvent is returned when the event signature is not recognized.

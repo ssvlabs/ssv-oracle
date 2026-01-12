@@ -12,16 +12,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
-	"ssv-oracle/api"
-	"ssv-oracle/contract"
-	"ssv-oracle/eth/beacon"
-	"ssv-oracle/eth/execution"
-	"ssv-oracle/eth/syncer"
-	"ssv-oracle/logger"
-	"ssv-oracle/oracle"
-	"ssv-oracle/storage"
-	"ssv-oracle/updater"
-	"ssv-oracle/wallet"
+	"github.com/ssvlabs/ssv-oracle/api"
+	"github.com/ssvlabs/ssv-oracle/contract"
+	"github.com/ssvlabs/ssv-oracle/eth/beacon"
+	"github.com/ssvlabs/ssv-oracle/eth/execution"
+	"github.com/ssvlabs/ssv-oracle/eth/syncer"
+	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/oracle"
+	"github.com/ssvlabs/ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/updater"
+	"github.com/ssvlabs/ssv-oracle/wallet"
 )
 
 var (

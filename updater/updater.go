@@ -8,12 +8,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
-	"ssv-oracle/contract"
-	"ssv-oracle/eth/syncer"
-	"ssv-oracle/logger"
-	"ssv-oracle/merkle"
-	"ssv-oracle/storage"
-	"ssv-oracle/txmanager"
+	"github.com/ssvlabs/ssv-oracle/contract"
+	"github.com/ssvlabs/ssv-oracle/eth/syncer"
+	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/merkle"
+	"github.com/ssvlabs/ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/txmanager"
 )
 
 const (

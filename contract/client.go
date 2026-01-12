@@ -10,9 +10,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"ssv-oracle/logger"
-	"ssv-oracle/txmanager"
-	"ssv-oracle/wallet"
+	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/txmanager"
+	"github.com/ssvlabs/ssv-oracle/wallet"
 )
 
 // Cluster represents the SSV cluster struct as used in the contract.

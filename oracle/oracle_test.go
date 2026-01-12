@@ -6,7 +6,7 @@ import (
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 
-	"ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/storage"
 )
 
 // mockStorage implements the oracleStorage interface for testing.

@@ -15,7 +15,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	_ "modernc.org/sqlite" // register sqlite driver
 
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 const (

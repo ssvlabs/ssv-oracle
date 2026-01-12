@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 func (s *Server) handleGetCommit(w http.ResponseWriter, r *http.Request) {

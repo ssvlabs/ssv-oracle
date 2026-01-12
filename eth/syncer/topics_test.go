@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"ssv-oracle/contract"
+	"github.com/ssvlabs/ssv-oracle/contract"
 )
 
 func TestEventTopics_ReturnsCorrectCount(t *testing.T) {

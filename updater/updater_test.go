@@ -5,8 +5,8 @@ import (
 	"context"
 	"testing"
 
-	"ssv-oracle/merkle"
-	"ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/merkle"
+	"github.com/ssvlabs/ssv-oracle/storage"
 )
 
 // mockStorage implements the updaterStorage interface for testing.

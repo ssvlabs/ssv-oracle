@@ -14,8 +14,8 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
 
-	"ssv-oracle/eth"
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/eth"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 const (

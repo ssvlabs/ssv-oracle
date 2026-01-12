@@ -12,9 +12,9 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/term"
 
-	"ssv-oracle/eth/execution"
-	"ssv-oracle/logger"
-	"ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/eth/execution"
+	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/storage"
 )
 
 // Storage defines the interface the syncer needs for persistence.

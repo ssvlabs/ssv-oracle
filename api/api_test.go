@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"ssv-oracle/merkle"
-	"ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/merkle"
+	"github.com/ssvlabs/ssv-oracle/storage"
 )
 
 type mockStorage struct {

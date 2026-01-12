@@ -14,8 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 
-	"ssv-oracle/eth"
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/eth"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 // Client wraps an Ethereum execution client for fetching logs and blocks.

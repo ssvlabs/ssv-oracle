@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"ssv-oracle/logger"
-	"ssv-oracle/merkle"
-	"ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/merkle"
+	"github.com/ssvlabs/ssv-oracle/storage"
 )
 
 const (
