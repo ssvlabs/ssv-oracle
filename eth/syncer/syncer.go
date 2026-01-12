@@ -65,7 +65,11 @@ func (s *EventSyncer) SyncToFinalized(ctx context.Context, deployBlock uint64) e
 		logger.Infow("Initial sync position set", "block", deployBlock-1)
 	}
 
-	return s.syncOnce(ctx)
+	finalizedBlock, err := s.client.GetFinalizedBlock(ctx)
+	if err != nil {
+		return fmt.Errorf("get finalized block: %w", err)
+	}
+	return s.SyncToBlock(ctx, finalizedBlock)
 }
 
 // batchResult holds a fetched batch ready for processing.
@@ -85,18 +89,18 @@ const bulkSyncThreshold = 100000
 // Uses pipelined fetching: fetcher goroutine prefetches batches while
 // the main goroutine processes them sequentially.
 func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error {
-	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
+	lastSynced, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
 		return fmt.Errorf("get last synced block: %w", err)
 	}
 
-	if fromBlock >= targetBlock {
-		logger.Debugw("Events already synced", "lastSynced", fromBlock, "target", targetBlock)
+	if lastSynced >= targetBlock {
+		logger.Debugw("Events already synced", "lastSynced", lastSynced, "target", targetBlock)
 		return nil
 	}
 
 	start := time.Now()
-	totalBlocks := int(targetBlock - fromBlock)
+	totalBlocks := int(targetBlock - lastSynced)
 	if totalBlocks > bulkSyncThreshold {
 		if s.storage.SetSyncMode(true) == nil {
 			defer func() { _ = s.storage.SetSyncMode(false) }()
@@ -132,7 +136,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	defer cancelFetch()
 
 	batchCh := make(chan batchResult, prefetchBuffer)
-	go s.runFetcher(fetchCtx, fromBlock+1, targetBlock, batchCh)
+	go s.runFetcher(fetchCtx, lastSynced+1, targetBlock, batchCh)
 
 	knownEvents := 0
 	var processErr error
@@ -149,15 +153,10 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 		}
 		knownEvents += count
 
-		_ = bar.Set(int(batch.batchEnd - fromBlock))
+		_ = bar.Set(int(batch.batchEnd - lastSynced))
 	}
 
-	// Drain channel to unblock fetcher goroutine
 	if processErr != nil {
-		go func() {
-			for range batchCh {
-			}
-		}()
 		return processErr
 	}
 
@@ -168,7 +167,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	_ = bar.Finish()
 
-	logger.Infow("Events synced", "from", fromBlock+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond).String())
+	logger.Infow("Events synced", "from", lastSynced+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond).String())
 	return nil
 }
 
@@ -194,14 +193,6 @@ func (s *EventSyncer) runFetcher(ctx context.Context, fromBlock, toBlock uint64,
 		case <-ctx.Done():
 		}
 	}
-}
-
-func (s *EventSyncer) syncOnce(ctx context.Context) error {
-	finalizedBlock, err := s.client.GetFinalizedBlock(ctx)
-	if err != nil {
-		return fmt.Errorf("get finalized block: %w", err)
-	}
-	return s.SyncToBlock(ctx, finalizedBlock)
 }
 
 // processBatch processes all blocks in a batch within a single transaction.

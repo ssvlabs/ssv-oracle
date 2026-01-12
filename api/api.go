@@ -22,20 +22,19 @@ const (
 //go:embed ui/index.html
 var uiFS embed.FS
 
-// Storage defines the storage interface needed by the API.
-type Storage interface {
+type apiStorage interface {
 	GetLatestCommit(ctx context.Context) (*storage.OracleCommit, error)
 }
 
 // Server is the HTTP API server.
 type Server struct {
-	storage Storage
+	storage apiStorage
 	addr    string
 	server  *http.Server
 }
 
 // New creates a new API server.
-func New(storage Storage, addr string) *Server {
+func New(storage apiStorage, addr string) *Server {
 	return &Server{
 		storage: storage,
 		addr:    addr,
@@ -98,7 +97,7 @@ func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 			if err := recover(); err != nil {
 				logger.Errorw("Panic recovered", "error", err, "path", r.URL.Path)
 				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "internal error"})
+				_ = json.NewEncoder(w).Encode(ErrorResponse{Error: internalError})
 			}
 		}()
 		next.ServeHTTP(w, r)

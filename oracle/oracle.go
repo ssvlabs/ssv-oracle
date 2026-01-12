@@ -18,12 +18,11 @@ import (
 )
 
 const (
-	// gweiPerETH is the number of gwei in one ETH.
 	gweiPerETH = 1_000_000_000
 
-	// balanceFloorGwei is 32 ETH in Gwei. Per spec, if a validator's effective balance
+	// balanceFloor is 32 ETH. Per spec, if a validator's effective balance
 	// is below 32 ETH, it is rounded up to 32 ETH for cluster sum calculations.
-	balanceFloorGwei = 32 * gweiPerETH
+	balanceFloor phase0.Gwei = 32_000_000_000
 )
 
 // Config holds Oracle configuration.
@@ -273,8 +272,8 @@ func (o *Oracle) deduplicatePubkeys(validators []storage.ActiveValidator) [][]by
 	return pubkeys
 }
 
-func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanceMap map[phase0.BLSPubKey]uint64) ([]storage.ClusterBalance, int) {
-	clusterTotals := make(map[[32]byte]uint64)
+func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanceMap map[phase0.BLSPubKey]phase0.Gwei) ([]storage.ClusterBalance, int) {
+	clusterTotals := make(map[[32]byte]phase0.Gwei)
 	var notOnBeacon int
 
 	for _, v := range validators {
@@ -287,8 +286,8 @@ func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanc
 			// Balance is 0, will be floored to 32 ETH below.
 			notOnBeacon++
 		}
-		if balance < balanceFloorGwei {
-			balance = balanceFloorGwei
+		if balance < balanceFloor {
+			balance = balanceFloor
 		}
 
 		var clusterID [32]byte

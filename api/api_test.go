@@ -62,8 +62,8 @@ func TestHandleGetCommit_Basic(t *testing.T) {
 
 	var resp CommitResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, uint64(100), resp.Epoch)
-	require.Equal(t, uint64(500000), resp.ReferenceBlock)
+	require.Equal(t, commit.TargetEpoch, resp.Epoch)
+	require.Equal(t, commit.ReferenceBlock, resp.ReferenceBlock)
 	require.Equal(t, "0xff00000000000000000000000000000000000000000000000000000000000000", resp.MerkleRoot)
 	require.Equal(t, "0xee00000000000000000000000000000000000000000000000000000000000000", resp.TxHash)
 	require.Nil(t, resp.Clusters)
@@ -300,26 +300,31 @@ func TestHandleGetProof_SingleCluster(t *testing.T) {
 	require.Empty(t, resp.Proof) // Single cluster has empty proof
 }
 
-func TestIsValidClusterID(t *testing.T) {
+func TestParseClusterID(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		valid bool
+		name    string
+		input   string
+		wantErr bool
 	}{
-		{"valid", "0x1100000000000000000000000000000000000000000000000000000000000000", true},
-		{"all zeros", "0x0000000000000000000000000000000000000000000000000000000000000000", true},
-		{"all ff", "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", true},
-		{"empty", "", false},
-		{"no prefix", "1100000000000000000000000000000000000000000000000000000000000000", false},
-		{"short", "0x11", false},
-		{"long", "0x110000000000000000000000000000000000000000000000000000000000000000", false},
-		{"invalid hex", "0xgg00000000000000000000000000000000000000000000000000000000000000", false},
-		{"uppercase valid", "0xABCDEF0000000000000000000000000000000000000000000000000000000000", true},
+		{"valid", "0x1100000000000000000000000000000000000000000000000000000000000000", false},
+		{"all zeros", "0x0000000000000000000000000000000000000000000000000000000000000000", false},
+		{"all ff", "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", false},
+		{"empty", "", true},
+		{"no prefix", "1100000000000000000000000000000000000000000000000000000000000000", true},
+		{"short", "0x11", true},
+		{"long", "0x110000000000000000000000000000000000000000000000000000000000000000", true},
+		{"invalid hex", "0xgg00000000000000000000000000000000000000000000000000000000000000", true},
+		{"uppercase valid", "0xABCDEF0000000000000000000000000000000000000000000000000000000000", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.valid, isValidClusterID(tt.input))
+			_, err := parseClusterID(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

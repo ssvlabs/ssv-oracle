@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"time"
 
 	"github.com/attestantio/go-eth2-client/api"
@@ -20,7 +21,7 @@ const (
 
 // RetryConfig holds retry behavior configuration.
 type RetryConfig struct {
-	MaxRetries int
+	MaxRetries uint
 	BaseDelay  time.Duration
 	MaxDelay   time.Duration
 }
@@ -35,17 +36,11 @@ func DefaultRetryConfig() RetryConfig {
 }
 
 // WithRetry executes fn with exponential backoff and jitter.
-// Returns nil on success, or the last error after all attempts exhausted.
-// MaxRetries specifies the number of retries after the initial attempt,
-// so MaxRetries=3 means 4 total attempts.
-// Client errors (4xx except 429) are not retried as they indicate permanent failures.
+// MaxRetries is the number of retries after the initial attempt.
+// Client errors (4xx except 429) are not retried.
 func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
-	if cfg.MaxRetries < 0 {
-		return fn()
-	}
-
 	var err error
-	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+	for attempt := uint(0); attempt <= cfg.MaxRetries; attempt++ {
 		if err = fn(); err == nil {
 			return nil
 		}
@@ -85,7 +80,7 @@ func isRetriable(err error) bool {
 	var apiErr *api.Error
 	if errors.As(err, &apiErr) {
 		code := apiErr.StatusCode
-		if code >= 400 && code < 500 && code != 429 {
+		if code >= 400 && code < 500 && code != http.StatusTooManyRequests {
 			return false
 		}
 	}

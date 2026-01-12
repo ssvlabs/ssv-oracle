@@ -10,7 +10,7 @@ const (
 // AdaptiveBatchSize adjusts batch size based on RPC responses.
 // Uses AIMD (Additive Increase, Multiplicative Decrease) strategy:
 // - On success: increase by min(10% of current, 100), minimum +1, up to max
-// - On "block range too large" error: halve immediately, down to min
+// - On batch-related errors (block range, rate limit, timeout): halve, down to min
 type AdaptiveBatchSize struct {
 	current uint64
 	min     uint64

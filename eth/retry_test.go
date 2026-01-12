@@ -69,19 +69,6 @@ func TestWithRetry_ZeroMaxRetries(t *testing.T) {
 	require.Equal(t, 1, calls, "should execute once even with MaxRetries=0")
 }
 
-func TestWithRetry_NegativeMaxRetries(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: -1, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
-	calls := 0
-
-	err := WithRetry(context.Background(), cfg, func() error {
-		calls++
-		return nil
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, 1, calls, "should execute once even with negative MaxRetries")
-}
-
 func TestWithRetry_ContextCanceled(t *testing.T) {
 	cfg := RetryConfig{MaxRetries: 10, BaseDelay: time.Second, MaxDelay: 10 * time.Second}
 	ctx, cancel := context.WithCancel(context.Background())

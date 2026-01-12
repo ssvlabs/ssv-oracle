@@ -46,8 +46,8 @@ func init() {
 	runCmd.Flags().BoolVar(&withUpdater, "updater", false, "Enable the cluster updater")
 }
 
-func run(_ *cobra.Command, _ []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+func run(cmd *cobra.Command, _ []string) error {
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	cfg, err := loadConfig(configPath, withUpdater)

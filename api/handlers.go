@@ -3,16 +3,20 @@ package api
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
+const internalError = "internal error"
+
 func (s *Server) handleGetCommit(w http.ResponseWriter, r *http.Request) {
 	commit, err := s.storage.GetLatestCommit(r.Context())
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "internal error")
+		logger.Errorw("Failed to get latest commit", "error", err)
+		s.writeError(w, http.StatusInternalServerError, internalError)
 		return
 	}
 	if commit == nil {
@@ -27,13 +31,13 @@ func (s *Server) handleGetCommit(w http.ResponseWriter, r *http.Request) {
 		TxHash:         toHexOrEmpty(commit.TxHash),
 	}
 
-	if r.URL.Query().Get("full") == "true" {
+	if strings.ToLower(r.URL.Query().Get("full")) == "true" {
 		tree := buildTree(commit.ClusterBalances)
 
 		// Verify computed root matches stored root
 		if !rootMatches(tree.Root, commit.MerkleRoot) {
 			logger.Errorw("Merkle root mismatch", "computed", toHex(tree.Root[:]), "stored", toHex(commit.MerkleRoot))
-			s.writeError(w, http.StatusInternalServerError, "internal error")
+			s.writeError(w, http.StatusInternalServerError, internalError)
 			return
 		}
 
@@ -64,17 +68,16 @@ func (s *Server) handleGetCommit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetProof(w http.ResponseWriter, r *http.Request) {
-	clusterIDStr := r.PathValue("clusterId")
-	if !isValidClusterID(clusterIDStr) {
+	clusterID, err := parseClusterID(r.PathValue("clusterId"))
+	if err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid clusterId format")
 		return
 	}
 
-	clusterID, _ := parseClusterID(clusterIDStr)
-
 	commit, err := s.storage.GetLatestCommit(r.Context())
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "internal error")
+		logger.Errorw("Failed to get latest commit", "error", err)
+		s.writeError(w, http.StatusInternalServerError, internalError)
 		return
 	}
 	if commit == nil {
@@ -87,7 +90,7 @@ func (s *Server) handleGetProof(w http.ResponseWriter, r *http.Request) {
 	// Verify computed root matches stored root
 	if !rootMatches(tree.Root, commit.MerkleRoot) {
 		logger.Errorw("Merkle root mismatch", "computed", toHex(tree.Root[:]), "stored", toHex(commit.MerkleRoot))
-		s.writeError(w, http.StatusInternalServerError, "internal error")
+		s.writeError(w, http.StatusInternalServerError, internalError)
 		return
 	}
 
@@ -111,7 +114,7 @@ func (s *Server) handleGetProof(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := ProofResponse{
-		ClusterID:        clusterIDStr,
+		ClusterID:        toHex(clusterID[:]),
 		EffectiveBalance: effectiveBalance,
 		Proof:            proofStrings,
 		MerkleRoot:       toHex(commit.MerkleRoot),
@@ -131,21 +134,15 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// isValidClusterID validates the cluster ID format (0x-prefixed 32-byte hex).
-func isValidClusterID(id string) bool {
-	if len(id) != 66 || !strings.HasPrefix(id, "0x") {
-		return false
-	}
-	_, err := hex.DecodeString(id[2:])
-	return err == nil
-}
-
-// parseClusterID parses a validated cluster ID string into bytes.
+// parseClusterID parses and validates a cluster ID string (0x + 64 hex chars).
 func parseClusterID(id string) ([32]byte, error) {
 	var result [32]byte
+	if len(id) != 66 || !strings.HasPrefix(id, "0x") {
+		return result, errors.New("invalid cluster ID format")
+	}
 	decoded, err := hex.DecodeString(id[2:])
 	if err != nil {
-		return result, err
+		return result, errors.New("invalid cluster ID format")
 	}
 	copy(result[:], decoded)
 	return result, nil

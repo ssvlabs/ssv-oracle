@@ -143,9 +143,9 @@ func (c *Client) VerifyFinalizedBlockRoot(ctx context.Context, expectedBlockRoot
 
 // GetValidatorBalances returns effective balances in Gwei for the given validators
 // at the finalized state.
-func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]uint64, error) {
+func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (map[phase0.BLSPubKey]phase0.Gwei, error) {
 	if len(pubkeys) == 0 {
-		return make(map[phase0.BLSPubKey]uint64), nil
+		return make(map[phase0.BLSPubKey]phase0.Gwei), nil
 	}
 
 	blsPubkeys := make([]phase0.BLSPubKey, len(pubkeys))
@@ -166,7 +166,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 	g.SetLimit(balanceFetchConcurrency)
 
 	var mu sync.Mutex
-	merged := make(map[phase0.BLSPubKey]uint64, len(pubkeys))
+	merged := make(map[phase0.BLSPubKey]phase0.Gwei, len(pubkeys))
 
 	for _, batch := range batches {
 		g.Go(func() error {
@@ -181,7 +181,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 
 				mu.Lock()
 				for _, v := range resp.Data {
-					merged[v.Validator.PublicKey] = uint64(v.Validator.EffectiveBalance)
+					merged[v.Validator.PublicKey] = v.Validator.EffectiveBalance
 				}
 				mu.Unlock()
 				return nil
