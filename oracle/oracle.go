@@ -109,7 +109,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 				continue
 			}
 
-			fullyFinalized := checkpoint.Epoch - 1
+			fullyFinalized = checkpoint.Epoch - 1
 
 			if fullyFinalized < o.nextTarget {
 				logger.Debugw("Waiting for target",
@@ -146,7 +146,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 
 func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpoint, target uint64) error {
 	log := logger.With("target", target)
-	fetchStart := time.Now()
+	start := time.Now()
 
 	log.Infow("Committing", "refBlock", checkpoint.BlockNum)
 
@@ -163,7 +163,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("fetch balances: %w", err)
 	}
 
-	merkleRoot := o.buildMerkleTree(clusterBalances).Root
+	merkleRoot := buildTree(clusterBalances).Root
 	log.Debugw("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", merkleRoot),
 		"clusters", len(clusterBalances))
@@ -172,7 +172,10 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("store pending commit: %w", err)
 	}
 
-	// Check on-chain IMMEDIATELY before sending to minimize race window
+	// Check on-chain IMMEDIATELY before sending to minimize race window.
+	// Race: Multiple oracles may compute the same root for this block and race to commit.
+	// If another oracle commits first, our tx would revert with "root already committed".
+	// By checking here, we avoid wasting gas on a tx that will fail.
 	committedRoot, err := o.contractClient.GetCommittedRoot(ctx, checkpoint.BlockNum)
 	if err != nil {
 		log.Warnw("Failed to check committed root, proceeding with commit", "error", err)
@@ -211,11 +214,11 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		"refBlock", checkpoint.BlockNum,
 		"validators", validatorCount,
 		"clusters", len(clusterBalances),
-		"took", time.Since(fetchStart).Round(time.Millisecond).String())
+		"took", time.Since(start).Round(time.Millisecond).String())
 	return nil
 }
 
-func (o *Oracle) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree {
+func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
 	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte

@@ -116,7 +116,6 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, ErrorResponse{Error: message})
 }
 
-// buildTree rebuilds the merkle tree from cluster balances.
 func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
 	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -42,8 +41,9 @@ const (
 )
 
 const (
-	receiptPollInterval = 4 * time.Second
-	percentBase         = 100
+	receiptPollInterval   = 4 * time.Second
+	percentBase           = 100
+	blockNumberRetryLimit = 3
 )
 
 // RevertError represents a contract call or transaction that reverted.
@@ -79,8 +79,6 @@ type TxManager struct {
 	chainID        *big.Int
 	policy         *TxPolicy
 	errorSelectors map[string]string
-
-	nonceMu sync.Mutex
 }
 
 // New creates a TxManager.
@@ -133,9 +131,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		return nil, err
 	}
 
-	m.nonceMu.Lock()
 	nonce, err := m.client.PendingNonceAt(ctx, from)
-	m.nonceMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("get nonce: %w", err)
 	}
@@ -145,25 +141,23 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		value = big.NewInt(0)
 	}
 
-	var lastTx *types.Transaction
 	var publishedTxs []*types.Transaction
 	currentTip := gasTipCap
 	currentFeeCap := gasFeeCap
 
+	var log logger.Logger
 	for attempt := 1; attempt <= m.policy.MaxAttempts; attempt++ {
 		signedTx, err := m.buildAndSignTx(opts, nonce, gasLimit, currentTip, currentFeeCap, value)
 		if err != nil {
 			return nil, err
 		}
-		lastTx = signedTx
+		log = logger.With("hash", signedTx.Hash().Hex(), "nonce", nonce)
 
 		alreadyKnown := false
 		if sendErr := m.client.SendTransaction(ctx, signedTx); sendErr != nil {
 			switch {
 			case isTxAlreadyKnown(sendErr):
-				logger.Debugw("Tx already in mempool",
-					"hash", signedTx.Hash().Hex(),
-					"nonce", nonce)
+				log.Debug("Tx already in mempool")
 				alreadyKnown = true
 
 			case isNonceTooLow(sendErr):
@@ -180,24 +174,27 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			case isUnderpriced(sendErr):
 				newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 				if shouldCancel {
-					logger.Warnw("Max gas reached on underpriced",
-						"nonce", nonce,
+					log.Warnw("Max gas reached on underpriced",
 						"maxFeePerGas", m.policy.MaxFeePerGasWei(),
 						"currentFeeCap", currentFeeCap)
 					if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-						logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
+						log.Warnw("Cancel tx failed", "error", err)
 					}
 					return nil, errMaxGasReached
 				}
-				logger.Warnw("Tx underpriced, bumping fees",
+				log.Warnw("Tx underpriced, bumping fees",
 					"attempt", attempt,
+					"currentTip", currentTip,
+					"currentFeeCap", currentFeeCap,
+					"newTip", newTip,
+					"newFeeCap", newFeeCap,
 					"error", sendErr)
 				currentTip, currentFeeCap = newTip, newFeeCap
 				continue
 
 			default:
 				if attempt < m.policy.MaxAttempts {
-					logger.Warnw("Tx submission failed",
+					log.Warnw("Tx submission failed",
 						"attempt", attempt,
 						"maxAttempts", m.policy.MaxAttempts,
 						"error", sendErr)
@@ -214,9 +211,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 		publishedTxs = append(publishedTxs, signedTx)
 		if !alreadyKnown {
-			logger.Debugw("Tx submitted",
-				"hash", signedTx.Hash().Hex(),
-				"nonce", nonce,
+			log.Debugw("Tx submitted",
 				"gasTipCap", currentTip,
 				"gasFeeCap", currentFeeCap,
 				"attempt", attempt)
@@ -232,8 +227,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		}
 
 		if attempt >= m.policy.MaxAttempts {
-			logger.Warnw("Tx receipt wait failed",
-				"hash", signedTx.Hash().Hex(),
+			log.Warnw("Tx receipt wait failed",
 				"attempt", attempt,
 				"error", err)
 			break
@@ -241,29 +235,24 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 		newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 		if shouldCancel {
-			logger.Warnw("Max gas reached",
-				"nonce", nonce,
+			log.Warnw("Max gas reached",
 				"maxFeePerGas", m.policy.MaxFeePerGasWei(),
 				"currentFeeCap", currentFeeCap)
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-				logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
+				log.Warnw("Cancel tx failed", "error", err)
 			}
 			return nil, errMaxGasReached
 		}
 
-		logger.Warnw("Tx pending timeout, bumping gas",
-			"hash", signedTx.Hash().Hex(),
+		log.Warnw("Tx pending timeout, bumping gas",
 			"attempt", attempt,
 			"newFeeCap", newFeeCap)
 		currentTip, currentFeeCap = newTip, newFeeCap
 	}
 
-	logger.Warnw("Max attempts exhausted",
-		"hash", lastTx.Hash().Hex(),
-		"nonce", nonce,
-		"attempts", m.policy.MaxAttempts)
+	log.Warnw("Max attempts exhausted", "attempts", m.policy.MaxAttempts)
 	if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-		logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
+		log.Warnw("Cancel tx failed", "error", err)
 	}
 
 	return nil, errMaxAttemptsExhausted
@@ -362,7 +351,7 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 		return fmt.Errorf("cancel tx not confirmed: %w", err)
 	}
 
-	logger.Debugw("Nonce freed",
+	logger.Debugw("Cancel tx confirmed",
 		"nonce", nonce,
 		"block", receipt.BlockNumber.Uint64())
 
@@ -499,6 +488,8 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 	ticker := time.NewTicker(receiptPollInterval)
 	defer ticker.Stop()
 
+	var lastErr error
+	var blockNumFailures int
 	for {
 		select {
 		case <-ctx.Done():
@@ -508,15 +499,21 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 			if err == nil {
 				return receipt, nil
 			}
+			lastErr = err
 
 			currentBlock, err := m.client.BlockNumber(ctx)
 			if err != nil {
-				logger.Warnw("Failed to get block number", "error", err)
+				blockNumFailures++
+				if blockNumFailures >= blockNumberRetryLimit {
+					return nil, fmt.Errorf("get block number: %w", err)
+				}
+				logger.Warnw("Failed to get block number", "error", err, "failures", blockNumFailures)
 				continue
 			}
+			blockNumFailures = 0
 
 			if currentBlock-startBlock >= uint64(m.policy.PendingTimeoutBlocks) {
-				return nil, fmt.Errorf("pending timeout after %d blocks", m.policy.PendingTimeoutBlocks)
+				return nil, fmt.Errorf("timed out waiting for receipt after %d blocks: %w", m.policy.PendingTimeoutBlocks, lastErr)
 			}
 		}
 	}

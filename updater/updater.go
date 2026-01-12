@@ -65,7 +65,7 @@ func (u *Updater) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err != nil {
-			logger.Errorw("Subscription failed", "willRetry", true, "error", err)
+			logger.Errorw("Subscription failed", "retryIn", subscriptionRetryDelay.String(), "error", err)
 		}
 
 		select {
@@ -121,7 +121,7 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 
 	// Deduplicate by block number
 	if event.BlockNum <= u.lastProcessedBlock {
-		log.Debugw("Duplicate RootCommitted event", "lastProcessed", u.lastProcessedBlock)
+		log.Debugw("Duplicate RootCommitted event", "lastProcessedBlock", u.lastProcessedBlock)
 		return
 	}
 
@@ -165,7 +165,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		return nil
 	}
 
-	tree := u.buildTree(commit.ClusterBalances)
+	tree := buildTree(commit.ClusterBalances)
 	log.Debugw("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", tree.Root),
 		"clusters", len(commit.ClusterBalances))
@@ -180,7 +180,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 	if len(staleLeaves) > 0 {
 		log.Debugw("Stale clusters detected", "count", len(staleLeaves))
 		if err := u.syncer.SyncClustersToHead(ctx); err != nil {
-			log.Errorw("Failed to sync", "error", err)
+			log.Errorw("Failed to sync clusters to head", "error", err)
 		} else {
 			for _, leaf := range staleLeaves {
 				if ctx.Err() != nil {
@@ -211,7 +211,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 	return nil
 }
 
-func (u *Updater) buildTree(balances []storage.ClusterBalance) *merkle.Tree {
+func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
 	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte
@@ -312,7 +312,7 @@ func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merk
 		proof,
 	)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("update cluster balance: %w", err)
 	}
 
 	logger.Debugw("Tx confirmed",
