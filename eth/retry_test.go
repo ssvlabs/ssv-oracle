@@ -1,4 +1,4 @@
-package eth
+package eth_test
 
 import (
 	"context"
@@ -9,46 +9,49 @@ import (
 
 	"github.com/attestantio/go-eth2-client/api"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ssvlabs/ssv-oracle/eth"
+	"github.com/ssvlabs/ssv-oracle/eth/beacon"
 )
 
 func TestWithRetry_Success(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	cfg := eth.RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
 	calls := 0
 
-	err := WithRetry(context.Background(), cfg, func() error {
+	err := eth.WithRetry(context.Background(), cfg, func() error {
 		calls++
 		return nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 }
 
 func TestWithRetry_SuccessAfterRetries(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	cfg := eth.RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
 	calls := 0
 
-	err := WithRetry(context.Background(), cfg, func() error {
+	err := eth.WithRetry(context.Background(), cfg, func() error {
 		calls++
 		if calls < 3 {
 			return errors.New("transient error")
 		}
 		return nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, 3, calls)
 }
 
 func TestWithRetry_AllAttemptsFail(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	cfg := eth.RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
 	calls := 0
 	testErr := errors.New("persistent error")
 
-	err := WithRetry(context.Background(), cfg, func() error {
+	err := eth.WithRetry(context.Background(), cfg, func() error {
 		calls++
 		return testErr
-	})
+	}, nil)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, testErr)
@@ -57,20 +60,20 @@ func TestWithRetry_AllAttemptsFail(t *testing.T) {
 }
 
 func TestWithRetry_ZeroMaxRetries(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 0, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	cfg := eth.RetryConfig{MaxRetries: 0, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
 	calls := 0
 
-	err := WithRetry(context.Background(), cfg, func() error {
+	err := eth.WithRetry(context.Background(), cfg, func() error {
 		calls++
 		return nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, calls, "should execute once even with MaxRetries=0")
 }
 
 func TestWithRetry_ContextCanceled(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 10, BaseDelay: time.Second, MaxDelay: 10 * time.Second}
+	cfg := eth.RetryConfig{MaxRetries: 10, BaseDelay: time.Second, MaxDelay: 10 * time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
 
@@ -79,10 +82,10 @@ func TestWithRetry_ContextCanceled(t *testing.T) {
 		cancel()
 	}()
 
-	err := WithRetry(ctx, cfg, func() error {
+	err := eth.WithRetry(ctx, cfg, func() error {
 		calls++
 		return errors.New("always fail")
-	})
+	}, nil)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
@@ -90,14 +93,14 @@ func TestWithRetry_ContextCanceled(t *testing.T) {
 }
 
 func TestWithRetry_OneRetry(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	cfg := eth.RetryConfig{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
 	calls := 0
 	testErr := errors.New("fail")
 
-	err := WithRetry(context.Background(), cfg, func() error {
+	err := eth.WithRetry(context.Background(), cfg, func() error {
 		calls++
 		return testErr
-	})
+	}, nil)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, testErr)
@@ -105,7 +108,7 @@ func TestWithRetry_OneRetry(t *testing.T) {
 }
 
 func TestWithRetry_NonRetriableErrors(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	cfg := eth.RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
 
 	tests := []struct {
 		name        string
@@ -131,10 +134,10 @@ func TestWithRetry_NonRetriableErrors(t *testing.T) {
 				Data:       []byte(fmt.Sprintf(`{"code":%d,"message":"test error"}`, tt.statusCode)),
 			}
 
-			err := WithRetry(context.Background(), cfg, func() error {
+			err := eth.WithRetry(context.Background(), cfg, func() error {
 				calls++
 				return &apiErr
-			})
+			}, beacon.IsRetriable)
 
 			require.Error(t, err)
 			if tt.shouldRetry {
@@ -149,7 +152,7 @@ func TestWithRetry_NonRetriableErrors(t *testing.T) {
 }
 
 func TestWithRetry_WrappedNonRetriableError(t *testing.T) {
-	cfg := RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	cfg := eth.RetryConfig{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
 	calls := 0
 
 	apiErr := &api.Error{
@@ -160,10 +163,10 @@ func TestWithRetry_WrappedNonRetriableError(t *testing.T) {
 	}
 	wrappedErr := fmt.Errorf("get validators: %w", apiErr)
 
-	err := WithRetry(context.Background(), cfg, func() error {
+	err := eth.WithRetry(context.Background(), cfg, func() error {
 		calls++
 		return wrappedErr
-	})
+	}, beacon.IsRetriable)
 
 	require.Error(t, err)
 	require.Equal(t, 1, calls, "wrapped non-retriable errors should fail immediately")

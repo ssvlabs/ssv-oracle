@@ -2,14 +2,16 @@ package beacon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
 	eth2client "github.com/attestantio/go-eth2-client"
 	"github.com/attestantio/go-eth2-client/api"
 	apiv1 "github.com/attestantio/go-eth2-client/api/v1"
-	"github.com/attestantio/go-eth2-client/http"
+	eth2http "github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
@@ -45,16 +47,23 @@ type ClientConfig struct {
 	RetryConfig *eth.RetryConfig // nil uses DefaultRetryConfig()
 }
 
+// FinalizedCheckpoint represents a finalized beacon chain checkpoint.
+type FinalizedCheckpoint struct {
+	Epoch     uint64
+	BlockNum  uint64
+	BlockRoot phase0.Root
+}
+
 // New creates a new beacon client.
 func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = defaultBeaconTimeout
 	}
 
-	client, err := http.New(ctx,
-		http.WithAddress(cfg.URL),
-		http.WithTimeout(cfg.Timeout),
-		http.WithLogLevel(zerolog.Disabled),
+	client, err := eth2http.New(ctx,
+		eth2http.WithAddress(cfg.URL),
+		eth2http.WithTimeout(cfg.Timeout),
+		eth2http.WithLogLevel(zerolog.Disabled),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("beacon node %s: %w", cfg.URL, err)
@@ -79,13 +88,6 @@ func New(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
-// FinalizedCheckpoint represents a finalized beacon chain checkpoint.
-type FinalizedCheckpoint struct {
-	Epoch     uint64
-	BlockNum  uint64
-	BlockRoot phase0.Root
-}
-
 // GetFinalizedEpoch returns the latest finalized checkpoint epoch.
 func (c *Client) GetFinalizedEpoch(ctx context.Context) (uint64, error) {
 	var epoch uint64
@@ -98,7 +100,7 @@ func (c *Client) GetFinalizedEpoch(ctx context.Context) (uint64, error) {
 		}
 		epoch = uint64(resp.Data.Finalized.Epoch)
 		return nil
-	})
+	}, IsRetriable)
 	return epoch, err
 }
 
@@ -138,7 +140,7 @@ func (c *Client) VerifyFinalizedBlockRoot(ctx context.Context, expectedBlockRoot
 				expectedBlockRoot, headerResp.Data.Root)
 		}
 		return nil
-	})
+	}, IsRetriable)
 }
 
 // GetValidatorBalances returns effective balances in Gwei for the given validators
@@ -185,7 +187,7 @@ func (c *Client) GetValidatorBalances(ctx context.Context, pubkeys [][]byte) (ma
 				}
 				mu.Unlock()
 				return nil
-			})
+			}, IsRetriable)
 		})
 	}
 
@@ -210,7 +212,7 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 				var fetchErr error
 				checkpoint, fetchErr = c.fetchCheckpoint(ctx, event)
 				return fetchErr
-			})
+			}, IsRetriable)
 			if err != nil {
 				logger.Errorw("Failed to fetch checkpoint",
 					"epoch", event.Epoch,
@@ -242,4 +244,17 @@ func (c *Client) SubscribeFinalizedCheckpoints(ctx context.Context) (<-chan *Fin
 	}()
 
 	return ch, nil
+}
+
+// IsRetriable returns true if the error is transient and worth retrying.
+// HTTP 4xx errors (except 429 Too Many Requests) are client errors and not retriable.
+func IsRetriable(err error) bool {
+	var apiErr *api.Error
+	if errors.As(err, &apiErr) {
+		code := apiErr.StatusCode
+		if code >= 400 && code < 500 && code != http.StatusTooManyRequests {
+			return false
+		}
+	}
+	return true
 }

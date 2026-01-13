@@ -100,7 +100,7 @@ func (c *Client) GetFinalizedBlock(ctx context.Context) (uint64, error) {
 		var err error
 		result, err = c.client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return 0, fmt.Errorf("get finalized block: %w", err)
 	}
@@ -114,7 +114,7 @@ func (c *Client) GetHeadBlock(ctx context.Context) (uint64, error) {
 		var err error
 		result, err = c.client.HeaderByNumber(ctx, nil) // nil = latest
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return 0, fmt.Errorf("get head block: %w", err)
 	}
@@ -306,7 +306,7 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 
 	err := eth.WithRetry(ctx, c.retryConfig, func() error {
 		return c.rpcClient.BatchCallContext(ctx, batch)
-	})
+	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("batch RPC: %w", err)
 	}
@@ -347,7 +347,7 @@ func (c *Client) fetchLogsBatch(
 		var err error
 		logs, err = c.client.FilterLogs(ctx, query)
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("fetch logs [%d-%d]: %w", fromBlock, toBlock, err)
 	}
@@ -361,7 +361,7 @@ func (c *Client) GetChainID(ctx context.Context) (*big.Int, error) {
 		var err error
 		chainID, err = c.client.ChainID(ctx)
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get chain ID: %w", err)
 	}
