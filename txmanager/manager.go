@@ -44,7 +44,7 @@ const (
 	receiptPollInterval   = 4 * time.Second
 	percentBase           = 100
 	blockNumberRetryLimit = 3
-	minTipCap           = params.GWei // minimum for MEV RPC compatibility
+	minTipCap             = params.GWei // minimum for MEV RPC compatibility
 )
 
 // RevertError represents a contract call or transaction that reverted.
