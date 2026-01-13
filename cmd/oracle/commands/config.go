@@ -12,9 +12,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 
-	"ssv-oracle/oracle"
-	"ssv-oracle/txmanager"
-	"ssv-oracle/wallet"
+	"github.com/ssvlabs/ssv-oracle/oracle"
+	"github.com/ssvlabs/ssv-oracle/txmanager"
+	"github.com/ssvlabs/ssv-oracle/wallet"
 )
 
 const (

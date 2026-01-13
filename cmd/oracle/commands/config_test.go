@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"ssv-oracle/oracle"
+	"github.com/ssvlabs/ssv-oracle/oracle"
 )
 
 func validConfig() *config {

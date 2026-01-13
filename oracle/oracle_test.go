@@ -6,7 +6,7 @@ import (
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 
-	"ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/storage"
 )
 
 // mockStorage implements the oracleStorage interface for testing.
@@ -107,7 +107,7 @@ func TestAggregateByCluster_MultipleClusters(t *testing.T) {
 	}
 
 	// Build balance map: 32 ETH each
-	balanceMap := make(map[phase0.BLSPubKey]uint64)
+	balanceMap := make(map[phase0.BLSPubKey]phase0.Gwei)
 	var blsPk1, blsPk2, blsPk3 phase0.BLSPubKey
 	copy(blsPk1[:], pk1)
 	copy(blsPk2[:], pk2)
@@ -237,7 +237,7 @@ func TestAggregateByCluster_BalanceFloor(t *testing.T) {
 	}
 
 	// Build balance map with various scenarios
-	balanceMap := make(map[phase0.BLSPubKey]uint64)
+	balanceMap := make(map[phase0.BLSPubKey]phase0.Gwei)
 
 	var blsPk1, blsPk2, blsPk3 phase0.BLSPubKey
 	copy(blsPk1[:], pk1)
@@ -283,7 +283,7 @@ func TestAggregateByCluster_AllBelowThreshold(t *testing.T) {
 		{ClusterID: clusterID, ValidatorPubkey: pk2},
 	}
 
-	balanceMap := make(map[phase0.BLSPubKey]uint64)
+	balanceMap := make(map[phase0.BLSPubKey]phase0.Gwei)
 
 	var blsPk1, blsPk2 phase0.BLSPubKey
 	copy(blsPk1[:], pk1)
@@ -322,7 +322,7 @@ func TestAggregateByCluster_NotOnBeacon(t *testing.T) {
 	}
 
 	// Empty balance map - validator not on beacon (e.g., pending activation)
-	balanceMap := make(map[phase0.BLSPubKey]uint64)
+	balanceMap := make(map[phase0.BLSPubKey]phase0.Gwei)
 
 	result, notOnBeacon := o.aggregateByCluster(validators, balanceMap)
 

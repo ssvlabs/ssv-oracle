@@ -2,14 +2,11 @@ package eth
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"time"
 
-	"github.com/attestantio/go-eth2-client/api"
-
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 const (
@@ -20,7 +17,7 @@ const (
 
 // RetryConfig holds retry behavior configuration.
 type RetryConfig struct {
-	MaxRetries int
+	MaxRetries uint
 	BaseDelay  time.Duration
 	MaxDelay   time.Duration
 }
@@ -35,21 +32,15 @@ func DefaultRetryConfig() RetryConfig {
 }
 
 // WithRetry executes fn with exponential backoff and jitter.
-// Returns nil on success, or the last error after all attempts exhausted.
-// MaxRetries specifies the number of retries after the initial attempt,
-// so MaxRetries=3 means 4 total attempts.
-// Client errors (4xx except 429) are not retried as they indicate permanent failures.
-func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
-	if cfg.MaxRetries < 0 {
-		return fn()
-	}
-
+// MaxRetries is the number of retries after the initial attempt.
+// If isRetriable is nil, all errors are retried.
+func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error, isRetriable func(error) bool) error {
 	var err error
-	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+	for attempt := uint(0); attempt <= cfg.MaxRetries; attempt++ {
 		if err = fn(); err == nil {
 			return nil
 		}
-		if !isRetriable(err) {
+		if isRetriable != nil && !isRetriable(err) {
 			return err
 		}
 		if attempt < cfg.MaxRetries {
@@ -77,17 +68,4 @@ func WithRetry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 		}
 	}
 	return fmt.Errorf("after %d attempts: %w", cfg.MaxRetries+1, err)
-}
-
-// isRetriable returns true if the error is transient and worth retrying.
-// HTTP 4xx errors (except 429 Too Many Requests) are client errors and not retriable.
-func isRetriable(err error) bool {
-	var apiErr *api.Error
-	if errors.As(err, &apiErr) {
-		code := apiErr.StatusCode
-		if code >= 400 && code < 500 && code != 429 {
-			return false
-		}
-	}
-	return true
 }

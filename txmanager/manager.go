@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -17,8 +16,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 
-	"ssv-oracle/logger"
-	"ssv-oracle/wallet"
+	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/wallet"
 )
 
 var (
@@ -42,8 +41,9 @@ const (
 )
 
 const (
-	receiptPollInterval = 4 * time.Second
-	percentBase         = 100
+	receiptPollInterval   = 4 * time.Second
+	percentBase           = 100
+	blockNumberRetryLimit = 3
 	minTipCap           = params.GWei // minimum for MEV RPC compatibility
 )
 
@@ -82,8 +82,6 @@ type TxManager struct {
 	policy         *TxPolicy
 	errorSelectors map[string]string
 	mevClients     map[string]*ethclient.Client // url -> client for MEV RPCs
-
-	nonceMu sync.Mutex
 }
 
 // New creates a TxManager.
@@ -162,9 +160,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		return nil, err
 	}
 
-	m.nonceMu.Lock()
 	nonce, err := m.client.PendingNonceAt(ctx, from)
-	m.nonceMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("get nonce: %w", err)
 	}
@@ -174,7 +170,6 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		value = big.NewInt(0)
 	}
 
-	var lastTx *types.Transaction
 	var publishedTxs []*types.Transaction
 	currentTip := gasTipCap
 	currentFeeCap := gasFeeCap
@@ -182,12 +177,15 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	// MEV path: use MEV RPCs for initial attempt, switch to eth_rpc after first timeout
 	useMEV := opts.UseMEV && len(m.mevClients) > 0
 
+	var log logger.Logger
 	for attempt := 1; attempt <= m.policy.MaxAttempts; attempt++ {
 		signedTx, err := m.buildAndSignTx(opts, nonce, gasLimit, currentTip, currentFeeCap, value)
 		if err != nil {
 			return nil, err
 		}
-		lastTx = signedTx
+		log = logger.With("hash", signedTx.Hash().Hex(),
+			"nonce", nonce,
+			"useMEV", useMEV)
 
 		var sendErr error
 		if useMEV {
@@ -200,10 +198,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		if sendErr != nil {
 			switch {
 			case isTxAlreadyKnown(sendErr):
-				logger.Debugw("Tx already in mempool",
-					"hash", signedTx.Hash().Hex(),
-					"nonce", nonce,
-					"useMEV", useMEV)
+				log.Debug("Tx already in mempool")
 				alreadyKnown = true
 
 			case isNonceTooLow(sendErr):
@@ -220,29 +215,30 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			case isUnderpriced(sendErr):
 				newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 				if shouldCancel {
-					logger.Warnw("Max gas reached",
-						"nonce", nonce,
+					log.Warnw("Max gas reached",
 						"maxFeePerGas", m.policy.MaxFeePerGasWei(),
 						"currentFeeCap", currentFeeCap,
 						"willRetry", false)
 					if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-						logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
+						log.Warnw("Cancel tx failed", "error", err)
 					}
 					return nil, errMaxGasReached
 				}
-				logger.Warnw("Tx underpriced",
+				log.Warnw("Tx underpriced",
 					"attempt", attempt,
-					"useMEV", useMEV,
+					"currentTip", currentTip,
+					"currentFeeCap", currentFeeCap,
+					"newTip", newTip,
+					"newFeeCap", newFeeCap,
 					"error", sendErr)
 				currentTip, currentFeeCap = newTip, newFeeCap
 				continue
 
 			default:
 				if attempt < m.policy.MaxAttempts {
-					logger.Warnw("Tx submission failed",
+					log.Warnw("Tx submission failed",
 						"attempt", attempt,
 						"maxAttempts", m.policy.MaxAttempts,
-						"useMEV", useMEV,
 						"error", sendErr)
 					select {
 					case <-ctx.Done():
@@ -257,12 +253,9 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 		publishedTxs = append(publishedTxs, signedTx)
 		if !alreadyKnown {
-			logger.Debugw("Tx submitted",
-				"hash", signedTx.Hash().Hex(),
-				"nonce", nonce,
+			log.Debugw("Tx submitted",
 				"gasTipCap", currentTip,
 				"gasFeeCap", currentFeeCap,
-				"useMEV", useMEV,
 				"attempt", attempt)
 		}
 
@@ -276,8 +269,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		}
 
 		if attempt >= m.policy.MaxAttempts {
-			logger.Warnw("Tx receipt wait failed",
-				"hash", signedTx.Hash().Hex(),
+			log.Warnw("Tx receipt wait failed",
 				"attempt", attempt,
 				"willRetry", false,
 				"error", err)
@@ -286,40 +278,34 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 		// MEV had its chance, switch to eth_rpc for remaining retries
 		if useMEV {
-			logger.Warnw("MEV not included, switching to eth_rpc",
-				"hash", signedTx.Hash().Hex(),
-				"blocks", m.policy.PendingTimeoutBlocks)
+			log.Warnw("MEV not included, switching to eth_rpc",
+				"pendingTimeoutBlocks", m.policy.PendingTimeoutBlocks)
 			useMEV = false
 		}
 
 		newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 		if shouldCancel {
-			logger.Warnw("Max gas reached",
-				"nonce", nonce,
+			log.Warnw("Max gas reached",
 				"maxFeePerGas", m.policy.MaxFeePerGasWei(),
 				"currentFeeCap", currentFeeCap,
 				"willRetry", false)
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-				logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
+				log.Warnw("Cancel tx failed", "error", err)
 			}
 			return nil, errMaxGasReached
 		}
 
-		logger.Warnw("Tx pending timeout",
-			"hash", signedTx.Hash().Hex(),
+		log.Warnw("Tx pending timeout",
 			"attempt", attempt,
 			"newFeeCap", newFeeCap)
 		currentTip, currentFeeCap = newTip, newFeeCap
 	}
 
-	// Cancel via eth_rpc only - on-chain inclusion invalidates tx in all mempools
-	logger.Warnw("Max attempts exhausted",
-		"hash", lastTx.Hash().Hex(),
-		"nonce", nonce,
+	log.Warnw("Max attempts exhausted",
 		"attempts", m.policy.MaxAttempts,
 		"willRetry", false)
 	if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
-		logger.Warnw("Cancel tx failed", "nonce", nonce, "error", err)
+		log.Warnw("Cancel tx failed", "error", err)
 	}
 
 	return nil, errMaxAttemptsExhausted
@@ -463,7 +449,7 @@ func (m *TxManager) cancelTx(ctx context.Context, nonce uint64, prevGasFeeCap *b
 		return fmt.Errorf("cancel tx not confirmed: %w", err)
 	}
 
-	logger.Debugw("Nonce freed",
+	logger.Debugw("Cancel tx confirmed",
 		"nonce", nonce,
 		"block", receipt.BlockNumber.Uint64())
 
@@ -606,6 +592,8 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 	ticker := time.NewTicker(receiptPollInterval)
 	defer ticker.Stop()
 
+	var lastErr error
+	var blockNumFailures int
 	for {
 		select {
 		case <-ctx.Done():
@@ -615,15 +603,21 @@ func (m *TxManager) waitForReceipt(ctx context.Context, tx *types.Transaction) (
 			if err == nil {
 				return receipt, nil
 			}
+			lastErr = err
 
 			currentBlock, err := m.client.BlockNumber(ctx)
 			if err != nil {
-				logger.Warnw("Failed to get block number", "error", err)
+				blockNumFailures++
+				if blockNumFailures >= blockNumberRetryLimit {
+					return nil, fmt.Errorf("get block number: %w", err)
+				}
+				logger.Warnw("Failed to get block number", "error", err, "failures", blockNumFailures)
 				continue
 			}
+			blockNumFailures = 0
 
 			if currentBlock-startBlock >= uint64(m.policy.PendingTimeoutBlocks) {
-				return nil, fmt.Errorf("pending timeout after %d blocks", m.policy.PendingTimeoutBlocks)
+				return nil, fmt.Errorf("timed out waiting for receipt after %d blocks: %w", m.policy.PendingTimeoutBlocks, lastErr)
 			}
 		}
 	}

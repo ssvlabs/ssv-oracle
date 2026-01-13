@@ -42,10 +42,13 @@ func TestAdaptiveBatchSize_Increase(t *testing.T) {
 		increase int
 		expected uint64
 	}{
-		{"increase once from 100", 50, 1000, 100, 1, 110},  // +10%
-		{"increase once from 500", 50, 1000, 500, 1, 550},  // +10% = 50
-		{"increase once from 900", 50, 1000, 900, 1, 990},  // +10% = 90
-		{"increase capped at max", 50, 1000, 950, 1, 1000}, // would be 1045, capped at 1000
+		{"increase once from 100", 50, 1000, 100, 1, 110},         // +10%
+		{"increase once from 500", 50, 1000, 500, 1, 550},         // +10% = 50
+		{"increase once from 900", 50, 1000, 900, 1, 990},         // +10% = 90
+		{"increase twice", 50, 1000, 100, 2, 121},                 // 100 -> 110 -> 121
+		{"increase three times", 50, 1000, 500, 3, 665},           // 500 -> 550 -> 605 -> 665
+		{"increase capped at max", 50, 1000, 950, 1, 1000},        // would be 1045, capped at 1000
+		{"increase to max over multiple", 50, 1000, 900, 3, 1000}, // 900 -> 990 -> 1000 -> 1000
 		{"already at max", 50, 1000, 1000, 1, 1000},
 		{"large value caps increment", 50, 10000, 2000, 1, 2100}, // +100 (capped)
 	}

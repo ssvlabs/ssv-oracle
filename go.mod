@@ -1,4 +1,4 @@
-module ssv-oracle
+module github.com/ssvlabs/ssv-oracle
 
 go 1.25.0
 

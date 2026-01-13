@@ -14,8 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 
-	"ssv-oracle/eth"
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/eth"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 // Client wraps an Ethereum execution client for fetching logs and blocks.
@@ -100,7 +100,7 @@ func (c *Client) GetFinalizedBlock(ctx context.Context) (uint64, error) {
 		var err error
 		result, err = c.client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return 0, fmt.Errorf("get finalized block: %w", err)
 	}
@@ -114,7 +114,7 @@ func (c *Client) GetHeadBlock(ctx context.Context) (uint64, error) {
 		var err error
 		result, err = c.client.HeaderByNumber(ctx, nil) // nil = latest
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return 0, fmt.Errorf("get head block: %w", err)
 	}
@@ -231,8 +231,33 @@ func (c *Client) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, e
 		return nil, nil
 	}
 
-	// Sort logs by block number, tx index, then log index.
-	// Log index is critical: multiple events in the same tx must be processed in order.
+	// Extract unique block numbers.
+	var uniqueBlocks []uint64
+	seen := make(map[uint64]bool)
+	for _, log := range logs {
+		if !seen[log.BlockNumber] {
+			seen[log.BlockNumber] = true
+			uniqueBlocks = append(uniqueBlocks, log.BlockNumber)
+		}
+	}
+
+	blockTimes, err := c.getBlockTimestampsBatch(ctx, uniqueBlocks)
+	if err != nil {
+		return nil, fmt.Errorf("fetch block timestamps: %w", err)
+	}
+
+	return groupLogsByBlock(logs, blockTimes)
+}
+
+// groupLogsByBlock sorts logs and groups them by block number with timestamps.
+// Logs are sorted by block number, tx index, then log index to preserve event order.
+func groupLogsByBlock(logs []types.Log, blockTimes map[uint64]time.Time) ([]BlockLogs, error) {
+	if len(logs) == 0 {
+		return nil, nil
+	}
+
+	// Sort by block number, tx index, then log index.
+	// Order is critical: multiple events in the same tx must be processed in order.
 	sort.Slice(logs, func(i, j int) bool {
 		if logs[i].BlockNumber != logs[j].BlockNumber {
 			return logs[i].BlockNumber < logs[j].BlockNumber
@@ -243,20 +268,6 @@ func (c *Client) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, e
 		return logs[i].Index < logs[j].Index
 	})
 
-	uniqueBlocks := make([]uint64, 0)
-	blockSet := make(map[uint64]bool)
-	for _, log := range logs {
-		if !blockSet[log.BlockNumber] {
-			blockSet[log.BlockNumber] = true
-			uniqueBlocks = append(uniqueBlocks, log.BlockNumber)
-		}
-	}
-
-	blockTimes, err := c.getBlockTimestampsBatch(ctx, uniqueBlocks)
-	if err != nil {
-		return nil, fmt.Errorf("fetch block timestamps: %w", err)
-	}
-
 	var result []BlockLogs
 	for _, log := range logs {
 		if len(result) == 0 || result[len(result)-1].BlockNumber != log.BlockNumber {
@@ -264,7 +275,6 @@ func (c *Client) packLogs(ctx context.Context, logs []types.Log) ([]BlockLogs, e
 			if !ok {
 				return nil, fmt.Errorf("missing block time for block %d", log.BlockNumber)
 			}
-
 			result = append(result, BlockLogs{
 				BlockNumber: log.BlockNumber,
 				BlockTime:   blockTime,
@@ -296,7 +306,7 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 
 	err := eth.WithRetry(ctx, c.retryConfig, func() error {
 		return c.rpcClient.BatchCallContext(ctx, batch)
-	})
+	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("batch RPC: %w", err)
 	}
@@ -337,7 +347,7 @@ func (c *Client) fetchLogsBatch(
 		var err error
 		logs, err = c.client.FilterLogs(ctx, query)
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("fetch logs [%d-%d]: %w", fromBlock, toBlock, err)
 	}
@@ -351,7 +361,7 @@ func (c *Client) GetChainID(ctx context.Context) (*big.Int, error) {
 		var err error
 		chainID, err = c.client.ChainID(ctx)
 		return err
-	})
+	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get chain ID: %w", err)
 	}

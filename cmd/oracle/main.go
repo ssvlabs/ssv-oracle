@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"ssv-oracle/cmd/oracle/commands"
-	"ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/cmd/oracle/commands"
+	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
 var (

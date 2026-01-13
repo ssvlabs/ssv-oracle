@@ -8,22 +8,21 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ethereum/go-ethereum/core/types"
 
-	"ssv-oracle/contract"
-	"ssv-oracle/eth/beacon"
-	"ssv-oracle/eth/syncer"
-	"ssv-oracle/logger"
-	"ssv-oracle/merkle"
-	"ssv-oracle/storage"
-	"ssv-oracle/txmanager"
+	"github.com/ssvlabs/ssv-oracle/contract"
+	"github.com/ssvlabs/ssv-oracle/eth/beacon"
+	"github.com/ssvlabs/ssv-oracle/eth/syncer"
+	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/merkle"
+	"github.com/ssvlabs/ssv-oracle/storage"
+	"github.com/ssvlabs/ssv-oracle/txmanager"
 )
 
 const (
-	// gweiPerETH is the number of gwei in one ETH.
 	gweiPerETH = 1_000_000_000
 
-	// balanceFloorGwei is 32 ETH in Gwei. Per spec, if a validator's effective balance
+	// balanceFloor is 32 ETH. Per spec, if a validator's effective balance
 	// is below 32 ETH, it is rounded up to 32 ETH for cluster sum calculations.
-	balanceFloorGwei = 32 * gweiPerETH
+	balanceFloor phase0.Gwei = 32_000_000_000
 )
 
 // Config holds Oracle configuration.
@@ -109,7 +108,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 				continue
 			}
 
-			fullyFinalized := checkpoint.Epoch - 1
+			fullyFinalized = checkpoint.Epoch - 1
 
 			if fullyFinalized < o.nextTarget {
 				logger.Debugw("Waiting for target",
@@ -146,7 +145,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 
 func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpoint, target uint64) error {
 	log := logger.With("target", target)
-	fetchStart := time.Now()
+	start := time.Now()
 
 	log.Infow("Committing", "refBlock", checkpoint.BlockNum)
 
@@ -163,7 +162,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("fetch balances: %w", err)
 	}
 
-	merkleRoot := o.buildMerkleTree(clusterBalances).Root
+	merkleRoot := buildTree(clusterBalances).Root
 	log.Debugw("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", merkleRoot),
 		"clusters", len(clusterBalances))
@@ -172,7 +171,10 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("store pending commit: %w", err)
 	}
 
-	// Check on-chain IMMEDIATELY before sending to minimize race window
+	// Check on-chain IMMEDIATELY before sending to minimize race window.
+	// Race: Multiple oracles may compute the same root for this block and race to commit.
+	// If another oracle commits first, our tx would revert with "root already committed".
+	// By checking here, we avoid wasting gas on a tx that will fail.
 	committedRoot, err := o.contractClient.GetCommittedRoot(ctx, checkpoint.BlockNum)
 	if err != nil {
 		log.Warnw("Failed to check committed root, proceeding with commit", "error", err)
@@ -211,11 +213,11 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		"refBlock", checkpoint.BlockNum,
 		"validators", validatorCount,
 		"clusters", len(clusterBalances),
-		"took", time.Since(fetchStart).Round(time.Millisecond).String())
+		"took", time.Since(start).Round(time.Millisecond).String())
 	return nil
 }
 
-func (o *Oracle) buildMerkleTree(balances []storage.ClusterBalance) *merkle.Tree {
+func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
 	clusterMap := make(map[[32]byte]uint32)
 	for _, bal := range balances {
 		var clusterID [32]byte
@@ -270,8 +272,8 @@ func (o *Oracle) deduplicatePubkeys(validators []storage.ActiveValidator) [][]by
 	return pubkeys
 }
 
-func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanceMap map[phase0.BLSPubKey]uint64) ([]storage.ClusterBalance, int) {
-	clusterTotals := make(map[[32]byte]uint64)
+func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanceMap map[phase0.BLSPubKey]phase0.Gwei) ([]storage.ClusterBalance, int) {
+	clusterTotals := make(map[[32]byte]phase0.Gwei)
 	var notOnBeacon int
 
 	for _, v := range validators {
@@ -284,8 +286,8 @@ func (o *Oracle) aggregateByCluster(validators []storage.ActiveValidator, balanc
 			// Balance is 0, will be floored to 32 ETH below.
 			notOnBeacon++
 		}
-		if balance < balanceFloorGwei {
-			balance = balanceFloorGwei
+		if balance < balanceFloor {
+			balance = balanceFloor
 		}
 
 		var clusterID [32]byte

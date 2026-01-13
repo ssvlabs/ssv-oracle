@@ -3,7 +3,7 @@ package syncer
 import (
 	"github.com/ethereum/go-ethereum/common"
 
-	"ssv-oracle/contract"
+	"github.com/ssvlabs/ssv-oracle/contract"
 )
 
 // handledEvents lists event names that the syncer processes.
