@@ -1,0 +1,47 @@
+services:
+  oracle:
+    # Build locally (default)
+    build:
+      context: .
+      args:
+        VERSION: dev
+        GIT_COMMIT: local
+    
+    # Alternative: Use pre-built image from Docker Hub (uncomment and comment out build section above)
+    # image: ssvlabs/ssv-oracle:latest
+    
+    container_name: ssv-oracle
+    restart: unless-stopped
+    
+    volumes:
+      # Database persistence
+      - ./data:/data
+      
+      # Configuration file (read-only)
+      - ./config.yaml:/config/config.yaml:ro
+      
+      # Keystore file (if using keystore wallet)
+      # Uncomment and adjust path:
+      # - ./keystore.json:/config/keystore.json:ro
+    
+    ports:
+      # API server (localhost only by default)
+      # Change to "8080:8080" to expose externally (use reverse proxy)
+      - "127.0.0.1:8080:8080"
+    
+    # Environment variables (uncomment as needed)
+    # environment:
+      # Wallet Option 1: Private key from environment
+      # PRIVATE_KEY: ${PRIVATE_KEY}
+      
+      # Wallet Option 2: Keystore password
+      # KEYSTORE_PASSWORD: ${KEYSTORE_PASSWORD}
+      
+      # Development mode (colored logs)
+      # DEV: "true"
+    
+    # Run with cluster updater (requires eth_ws_rpc in config.yaml)
+    command: ["run", "--config", "/config/config.yaml", "--updater"]
+    
+    # Alternative: Oracle only (no updater)
+    # command: ["run", "--config", "/config/config.yaml"]
