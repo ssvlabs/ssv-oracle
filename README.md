@@ -1,6 +1,6 @@
 # SSV Oracle
 
-Off-chain oracle that bridges Ethereum's beacon chain and SSV Network smart contracts by tracking validator effective balances and publishing Merkle roots on-chain. It keeps cluster balances in sync to support fair fee accrual in **SSV Staking**, including consolidated validators introduced in Ethereum's Pectra upgrade.
+Off-chain oracle that bridges Ethereum's beacon chain and SSV Network smart contracts by tracking validator effective balances and publishing Merkle roots on-chain. It synchronizes validator effective balances from the beacon chain to SSV Network contracts, supporting both individual and post-Pectra consolidated validators.
 
 ## Features
 
@@ -74,5 +74,5 @@ DEV=true make run
 
 **All targets:**
 ```bash
-make help       # Show all available commands
+make            # Show all available commands
 ```

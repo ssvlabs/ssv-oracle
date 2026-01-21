@@ -20,7 +20,15 @@ This guide covers deploying the SSV Oracle using Docker.
 cp config.yaml.example config.yaml
 ```
 
-**2. Edit `config.yaml` with your settings:**
+**2. Create `.env`:**
+
+Copy and edit your environment variables (used by Docker Compose):
+
+```bash
+cp .env.example .env
+```
+
+**3. Edit `config.yaml` with your settings:**
 
 See [`config.yaml.example`](../config.yaml.example) for all available options. Key settings for Docker:
 
@@ -32,7 +40,7 @@ See [`config.yaml.example`](../config.yaml.example) for all available options. K
 - `db_path` - Use `/data/oracle.db` for Docker
 - `api_address` - Use `0.0.0.0:8080` to expose outside container
 
-**3. Configure wallet in `config.yaml`:**
+**4. Configure wallet in `config.yaml`:**
 
 Two options:
 
@@ -51,15 +59,9 @@ volumes:
   - ./keystore.json:/config/keystore.json:ro
 ```
 
-Uncomment and set password in `docker-compose.yml`:
-```yaml
-environment:
-  - KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}
-```
-
-Then create `.env`:
+Set password in `.env`:
 ```bash
-echo "KEYSTORE_PASSWORD=your_password_here" > .env
+echo "KEYSTORE_PASSWORD=your_password_here" >> .env
 ```
 
 **Option B: Private key from environment (development only)**
@@ -70,15 +72,9 @@ wallet:
   private_key_env: "PRIVATE_KEY"
 ```
 
-Uncomment in `docker-compose.yml`:
-```yaml
-environment:
-  - PRIVATE_KEY=${PRIVATE_KEY}
-```
-
-Then create `.env`:
+Set in `.env`:
 ```bash
-echo "PRIVATE_KEY=0x..." > .env
+echo "PRIVATE_KEY=0x..." >> .env
 ```
 
 ## Running
@@ -91,7 +87,9 @@ The repository includes a production-ready [`docker-compose.yml`](../docker-comp
 docker compose up -d --build
 ```
 
-By default, the docker-compose.yml builds the image locally. It runs with the `--updater` flag enabled.
+By default, the docker-compose.yml builds the image locally and runs the oracle only.
+
+To enable the cluster updater, uncomment the `--updater` command in `docker-compose.yml` and ensure `eth_ws_rpc` is set in `config.yaml`.
 
 **Alternative: Use pre-built image from Docker Hub**
 
@@ -104,8 +102,8 @@ If you prefer using a pre-built image, edit `docker-compose.yml`:
 #     VERSION: dev
 #     GIT_COMMIT: local
 
-# Uncomment this:
-image: ssvlabs/ssv-oracle:latest
+# Uncomment this (pin to a version tag):
+image: ssvlabs/ssv-oracle:v1.0.0
 ```
 
 Then run:
@@ -162,7 +160,7 @@ To update to a new version:
 
 ```bash
 docker compose down
-docker compose pull    # Pull latest image
+docker compose pull    # Pull configured image tag
 docker compose up -d
 ```
 
@@ -173,7 +171,7 @@ Database migrations run automatically on startup.
 1. **Use keystore**, not `PRIVATE_KEY` environment variable
 2. **Backup database**: Regularly backup `./data/oracle.db` (see Database section below)
 3. **Monitor logs**: Set up log aggregation for production
-4. **Pin versions**: In production, use specific tags instead of `:latest` in docker-compose.yml
+4. **Pin versions**: In production, use specific tags in docker-compose.yml
    ```yaml
    image: ssvlabs/ssv-oracle:v1.0.0
    ```
