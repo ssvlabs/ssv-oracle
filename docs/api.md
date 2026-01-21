@@ -23,20 +23,18 @@ Get the latest confirmed commit metadata.
 
 ```json
 {
-  "block_number": 12345678,
   "epoch": 54321,
-  "root": "0xabcdef...",
-  "tx_hash": "0x123456...",
-  "timestamp": 1234567890
+  "referenceBlock": 12345678,
+  "merkleRoot": "0xabcdef...",
+  "txHash": "0x123456..."
 }
 ```
 
 **Fields:**
-- `block_number` - Execution layer block number where commit occurred
 - `epoch` - Beacon chain epoch for this commit
-- `root` - Merkle root committed on-chain
-- `tx_hash` - Transaction hash of the commit
-- `timestamp` - Block timestamp (Unix seconds)
+- `referenceBlock` - Execution layer block number where commit occurred
+- `merkleRoot` - Merkle root committed on-chain
+- `txHash` - Transaction hash of the commit
 
 **Example:**
 
@@ -52,18 +50,18 @@ Get the latest commit with full cluster balances and merkle tree layers.
 
 ```json
 {
-  "block_number": 12345678,
   "epoch": 54321,
-  "root": "0xabcdef...",
-  "tx_hash": "0x123456...",
-  "timestamp": 1234567890,
+  "referenceBlock": 12345678,
+  "merkleRoot": "0xabcdef...",
+  "txHash": "0x123456...",
   "clusters": [
     {
-      "cluster_id": "0xabc...",
-      "effective_balance": 32000000000
+      "clusterId": "0xabc...",
+      "effectiveBalance": 32000000000,
+      "hash": "0xleaf..."
     }
   ],
-  "tree_layers": [
+  "layers": [
     ["0xleaf1...", "0xleaf2..."],
     ["0xnode1..."],
     ["0xroot..."]
@@ -73,7 +71,7 @@ Get the latest commit with full cluster balances and merkle tree layers.
 
 **Additional fields:**
 - `clusters` - Array of cluster balances used to build the tree
-- `tree_layers` - Complete merkle tree structure (leaves to root)
+- `layers` - Complete merkle tree structure (leaves to root)
 
 **Example:**
 
@@ -92,20 +90,24 @@ Get the merkle proof for a specific cluster.
 
 ```json
 {
-  "cluster_id": "0xabc...",
-  "effective_balance": 32000000000,
+  "clusterId": "0xabc...",
+  "effectiveBalance": 32000000000,
   "proof": [
     "0xsibling1...",
     "0xsibling2...",
     "0xsibling3..."
-  ]
+  ],
+  "merkleRoot": "0xabcdef...",
+  "referenceBlock": 12345678
 }
 ```
 
 **Fields:**
-- `cluster_id` - The requested cluster ID
-- `effective_balance` - Cluster's effective balance at commit time
+- `clusterId` - The requested cluster ID
+- `effectiveBalance` - Cluster's effective balance at commit time
 - `proof` - Array of sibling hashes for merkle verification
+- `merkleRoot` - Merkle root the proof is built against
+- `referenceBlock` - Execution layer block number where commit occurred
 
 **Example:**
 
@@ -143,7 +145,7 @@ The UI displays:
 Check what root was committed in the latest transaction:
 
 ```bash
-curl -s http://127.0.0.1:8080/api/v1/commit | jq -r '.root'
+curl -s http://127.0.0.1:8080/api/v1/commit | jq -r '.merkleRoot'
 ```
 
 Compare with on-chain data from SSV Network contract.
@@ -164,7 +166,7 @@ Use the proof array to verify the cluster's balance against the committed root.
 Inspect the full tree structure to understand leaf ordering:
 
 ```bash
-curl -s 'http://127.0.0.1:8080/api/v1/commit?full=true' | jq '.tree_layers'
+curl -s 'http://127.0.0.1:8080/api/v1/commit?full=true' | jq '.layers'
 ```
 
 Useful for:
@@ -178,7 +180,7 @@ Poll the API to track new commits:
 
 ```bash
 while true; do
-  curl -s http://127.0.0.1:8080/api/v1/commit | jq '{epoch, root, tx_hash}'
+  curl -s http://127.0.0.1:8080/api/v1/commit | jq '{epoch, merkleRoot, txHash}'
   sleep 60
 done
 ```
@@ -193,7 +195,7 @@ Or set up monitoring/alerting based on commit frequency and success.
 // Get latest commit
 const response = await fetch('http://127.0.0.1:8080/api/v1/commit');
 const commit = await response.json();
-console.log(`Latest root: ${commit.root} at epoch ${commit.epoch}`);
+console.log(`Latest root: ${commit.merkleRoot} at epoch ${commit.epoch}`);
 
 // Get merkle proof
 const clusterId = '0xabc123...';
@@ -210,7 +212,7 @@ import requests
 # Get latest commit
 response = requests.get('http://127.0.0.1:8080/api/v1/commit')
 commit = response.json()
-print(f"Latest root: {commit['root']} at epoch {commit['epoch']}")
+print(f"Latest root: {commit['merkleRoot']} at epoch {commit['epoch']}")
 
 # Get merkle proof
 cluster_id = '0xabc123...'
@@ -227,25 +229,30 @@ package main
 import (
     "encoding/json"
     "fmt"
+    "log"
     "net/http"
 )
 
 type Commit struct {
-    BlockNumber uint64 `json:"block_number"`
-    Epoch       uint64 `json:"epoch"`
-    Root        string `json:"root"`
-    TxHash      string `json:"tx_hash"`
-    Timestamp   int64  `json:"timestamp"`
+    Epoch          uint64 `json:"epoch"`
+    ReferenceBlock uint64 `json:"referenceBlock"`
+    MerkleRoot     string `json:"merkleRoot"`
+    TxHash         string `json:"txHash"`
 }
 
 func main() {
     // Get latest commit
-    resp, _ := http.Get("http://127.0.0.1:8080/api/v1/commit")
+    resp, err := http.Get("http://127.0.0.1:8080/api/v1/commit")
+    if err != nil {
+        log.Fatal(err)
+    }
     defer resp.Body.Close()
     
     var commit Commit
-    json.NewDecoder(resp.Body).Decode(&commit)
-    fmt.Printf("Latest root: %s at epoch %d\n", commit.Root, commit.Epoch)
+    if err := json.NewDecoder(resp.Body).Decode(&commit); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Latest root: %s at epoch %d\n", commit.MerkleRoot, commit.Epoch)
 }
 ```
 

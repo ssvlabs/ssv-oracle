@@ -21,7 +21,6 @@ jobs:
       - name: Get Tag Source Branch
         id: check_branch
         run: |
-          set -x
           git checkout main
           git pull
           TAG_SHA=$(git rev-list -n 1 ${{ github.ref }})

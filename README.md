@@ -15,13 +15,13 @@ The oracle is a critical component of **SSV Staking**, enabling accurate fee cal
 ## Getting Started
 
 **For deployment:**
-- 🐳 [Docker deployment](docs/deployment.md)
-- 📝 [Configuration guide](docs/deployment.md#configuration)
-- 🔍 [Troubleshooting](docs/deployment.md#troubleshooting)
+- [Docker deployment](docs/deployment.md)
+- [Configuration guide](docs/deployment.md#configuration)
+- [Troubleshooting](docs/deployment.md#troubleshooting)
 
 **For API integration:**
-- 📡 [API reference](docs/api.md)
-- 💡 [Integration examples](docs/api.md#integration-examples)
+- [API reference](docs/api.md)
+- [Integration examples](docs/api.md#integration-examples)
 
 **Quick reference:**
 - Configuration: [`config.yaml.example`](config.yaml.example)
@@ -91,4 +91,3 @@ DEV=true make run
 ```bash
 make help       # Show all available commands
 ```
-

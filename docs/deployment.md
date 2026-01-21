@@ -6,7 +6,7 @@ This guide covers deploying the SSV Oracle using Docker.
 
 ## Prerequisites
 
-- Docker 20.10+ and Docker Compose
+- Docker 20.10+ with Docker Compose
 - Ethereum execution client (HTTP RPC endpoint)
 - Beacon node (HTTP RPC endpoint)
 - Funded wallet with ETH for gas
@@ -87,7 +87,7 @@ The repository includes a production-ready [`docker-compose.yml`](../docker-comp
 **Build and run locally (default):**
 
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 By default, the docker-compose.yml builds the image locally. It runs with the `--updater` flag enabled.
@@ -109,24 +109,24 @@ image: ssvlabs/ssv-oracle:latest
 
 Then run:
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 **View logs:**
 
 ```bash
-docker-compose logs -f
+docker compose logs -f
 ```
 
 **Stop:**
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ## Using Makefile (Alternative)
 
-For local development without docker-compose:
+For local development without Docker Compose:
 
 ```bash
 make docker        # Build image
@@ -141,9 +141,9 @@ Note: `make docker-run` uses environment variable `PRIVATE_KEY` (not recommended
 To update to a new version:
 
 ```bash
-docker-compose down
-docker-compose pull    # Pull latest image
-docker-compose up -d
+docker compose down
+docker compose pull    # Pull latest image
+docker compose up -d
 ```
 
 Database migrations run automatically on startup.
@@ -210,12 +210,12 @@ wallet:
 - `gas_bump_percent` - Gas increase per retry (min 10%)
 - `max_attempts` - Total submission attempts
 
-**Commit Schedule:**
+**Commit Phases:**
 
 Define when to commit roots on-chain:
 
 ```yaml
-commit_schedule:
+commit_phases:
   - start_epoch: 0
     interval: 225  # Every 225 epochs
 ```
