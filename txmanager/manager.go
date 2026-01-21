@@ -67,11 +67,11 @@ func (e *RevertError) Error() string {
 
 // TxOpts specifies transaction parameters.
 type TxOpts struct {
-	To       common.Address
-	Data     []byte
-	Value    *big.Int
-	GasLimit uint64
-	UseMEV   bool // Use MEV RPCs for initial submission (updater only)
+	To           common.Address
+	Data         []byte
+	Value        *big.Int
+	GasLimit     uint64
+	MEVProtected bool // Use private mempool for frontrunning protection
 }
 
 // TxManager handles transaction submission, gas bumping, and cancellation.
@@ -144,7 +144,7 @@ func IsRevertError(err error) (*RevertError, bool) {
 }
 
 // SendTransaction submits a transaction with automatic retries and gas bumping.
-// If UseMEV=true and MEV clients configured: broadcast to all MEV RPCs in parallel,
+// If MEVProtected=true and MEV clients configured: broadcast to all MEV RPCs in parallel,
 // retry MEV on send errors; after first successful submission, wait PendingTimeoutBlocks
 // then switch to eth_rpc for remaining retries.
 func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.Receipt, error) {
@@ -175,7 +175,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	currentFeeCap := gasFeeCap
 
 	// MEV path: use MEV RPCs for initial attempt, switch to eth_rpc after first timeout
-	useMEV := opts.UseMEV && len(m.mevClients) > 0
+	mevProtected := opts.MEVProtected
 
 	var log logger.Logger
 	for attempt := 1; attempt <= m.policy.MaxAttempts; attempt++ {
@@ -185,10 +185,10 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		}
 		log = logger.With("hash", signedTx.Hash().Hex(),
 			"nonce", nonce,
-			"useMEV", useMEV)
+			"mevProtected", mevProtected)
 
 		var sendErr error
-		if useMEV {
+		if mevProtected {
 			sendErr = m.sendToMEVRPCs(ctx, signedTx)
 		} else {
 			sendErr = m.client.SendTransaction(ctx, signedTx)
@@ -277,10 +277,10 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		}
 
 		// MEV had its chance, switch to eth_rpc for remaining retries
-		if useMEV {
+		if mevProtected {
 			log.Warnw("MEV not included, switching to eth_rpc",
 				"pendingTimeoutBlocks", m.policy.PendingTimeoutBlocks)
-			useMEV = false
+			mevProtected = false
 		}
 
 		newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
@@ -295,9 +295,6 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			return nil, errMaxGasReached
 		}
 
-		log.Warnw("Tx pending timeout",
-			"attempt", attempt,
-			"newFeeCap", newFeeCap)
 		currentTip, currentFeeCap = newTip, newFeeCap
 	}
 

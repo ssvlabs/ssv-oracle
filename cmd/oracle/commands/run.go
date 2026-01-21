@@ -134,7 +134,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		contractCfg.WSRPCURL = cfg.EthWSRPC
 		contractCfg.MEVRPCs = cfg.getMEVRPCs()
 	} else if len(cfg.getMEVRPCs()) > 0 {
-		logger.Warnw("mev_rpc configured but --updater not set, ignoring")
+		logger.Warnw("mev_rpcs configured but --updater not set, ignoring")
 	}
 
 	ethClient, err := contract.NewClient(contractCfg)

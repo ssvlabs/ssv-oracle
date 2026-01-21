@@ -111,9 +111,9 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum u
 	}
 
 	return c.txManager.SendTransaction(ctx, &txmanager.TxOpts{
-		To:     c.contractAddress,
-		Data:   data,
-		UseMEV: false,
+		To:           c.contractAddress,
+		Data:         data,
+		MEVProtected: false,
 	})
 }
 
@@ -168,7 +168,7 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 }
 
 // UpdateClusterBalance updates a cluster's balance using a merkle proof.
-// Unpermissioned call - uses MEV protection when available.
+// Permissionless call - uses MEV protection when available.
 // Not thread-safe; callers must ensure sequential execution.
 func (c *Client) UpdateClusterBalance(
 	ctx context.Context,
@@ -185,8 +185,8 @@ func (c *Client) UpdateClusterBalance(
 	}
 
 	return c.txManager.SendTransaction(ctx, &txmanager.TxOpts{
-		To:     c.contractAddress,
-		Data:   data,
-		UseMEV: true,
+		To:           c.contractAddress,
+		Data:         data,
+		MEVProtected: true,
 	})
 }

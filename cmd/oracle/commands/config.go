@@ -28,7 +28,7 @@ type config struct {
 	EthRPC    string `yaml:"eth_rpc"`
 	EthWSRPC  string `yaml:"eth_ws_rpc"` // Required only with --updater
 	BeaconRPC string `yaml:"beacon_rpc"`
-	MEVRPC    string `yaml:"mev_rpc"` // Comma-separated MEV RPC URLs (optional, for --updater)
+	MEVRPCs   string `yaml:"mev_rpcs"` // Comma-separated MEV RPC URLs (optional, for --updater)
 
 	SSVContract      string `yaml:"ssv_contract"`
 	SSVViewsContract string `yaml:"ssv_views_contract"`
@@ -46,12 +46,12 @@ type config struct {
 
 // getMEVRPCs parses comma-separated MEV RPC URLs, deduplicates, and returns unique URLs.
 func (c *config) getMEVRPCs() []string {
-	if c.MEVRPC == "" {
+	if c.MEVRPCs == "" {
 		return nil
 	}
 	seen := make(map[string]struct{})
 	var rpcs []string
-	for _, s := range strings.Split(c.MEVRPC, ",") {
+	for _, s := range strings.Split(c.MEVRPCs, ",") {
 		if trimmed := strings.TrimSpace(s); trimmed != "" {
 			if _, exists := seen[trimmed]; !exists {
 				seen[trimmed] = struct{}{}
@@ -101,7 +101,7 @@ func (c *config) validate(withUpdater bool) error {
 
 	// Validate MEV RPC URLs if configured
 	for i, rpc := range c.getMEVRPCs() {
-		if err := validateURL(rpc, fmt.Sprintf("mev_rpc[%d]", i), "http", "https"); err != nil {
+		if err := validateURL(rpc, fmt.Sprintf("mev_rpcs[%d]", i), "http", "https"); err != nil {
 			errs = append(errs, err)
 		}
 	}
