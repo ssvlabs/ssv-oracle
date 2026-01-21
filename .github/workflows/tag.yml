@@ -1,37 +1,11 @@
-name: Deploy to production
+name: push on tag
 
 on:
   push:
     tags:
-      - '*'  # Triggers on any tag creation
-      
-  workflow_dispatch:
-
+      - 'v*'
 jobs:
-  # ensure that only main branch tags are deployed to production
-  check-tag-origin:
-    runs-on: ubuntu-latest
-    outputs:
-      is_main: ${{ steps.check_branch.outputs.is_main }}
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 0
-      - name: Get Tag Source Branch
-        id: check_branch
-        run: |
-          git checkout main
-          git pull
-          TAG_SHA=$(git rev-list -n 1 ${{ github.ref }})
-          if git merge-base --is-ancestor "$TAG_SHA" main; then
-            echo "is_main=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_main=false" >> "$GITHUB_OUTPUT"
-          fi
   docker-hub-publish:
-    needs: check-tag-origin
-    if: needs.check-tag-origin.outputs.is_main == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -59,7 +33,6 @@ jobs:
             VERSION=${{ steps.extract_tag.outputs.tag }}
             GIT_COMMIT=${{ github.sha }}
           tags: |
-            docker.io/ssvlabs/ssv-oracle:latest
             docker.io/ssvlabs/ssv-oracle:${{ steps.extract_tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
