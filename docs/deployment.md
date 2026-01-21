@@ -7,6 +7,7 @@ This guide covers deploying the SSV Oracle using Docker.
 ## Prerequisites
 
 - Docker 20.10+ with Docker Compose
+- Resources: light workload; observed <0.1 vCPU and ~100 MB RAM. Monitor and adjust as needed.
 - Ethereum execution client (HTTP RPC endpoint)
 - Beacon node (HTTP RPC endpoint)
 - Funded wallet with ETH for gas
@@ -122,6 +123,25 @@ docker compose logs -f
 
 ```bash
 docker compose down
+```
+
+## Verify
+
+If the oracle is healthy, the commit endpoint returns JSON with `epoch`, `referenceBlock`, `merkleRoot`, and `txHash`:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/commit
+```
+
+Example response:
+
+```json
+{
+  "epoch": 54321,
+  "referenceBlock": 12345678,
+  "merkleRoot": "0xabcdef...",
+  "txHash": "0x123456..."
+}
 ```
 
 ## Using Makefile (Alternative)

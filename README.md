@@ -1,8 +1,6 @@
 # SSV Oracle
 
-Off-chain oracle that bridges Ethereum's beacon chain and SSV Network smart contracts by tracking validator effective balances and publishing Merkle roots on-chain.
-
-The oracle is a critical component of **SSV Staking**, enabling accurate fee calculations for network and operator rewards based on validators' actual stake.
+Off-chain oracle that bridges Ethereum's beacon chain and SSV Network smart contracts by tracking validator effective balances and publishing Merkle roots on-chain. It keeps cluster balances in sync to support fair fee accrual in **SSV Staking**, including consolidated validators introduced in Ethereum's Pectra upgrade.
 
 ## Features
 
@@ -26,22 +24,6 @@ The oracle is a critical component of **SSV Staking**, enabling accurate fee cal
 **Quick reference:**
 - Configuration: [`config.yaml.example`](config.yaml.example)
 - Environment: [`.env.example`](.env.example)
-
-## Purpose
-
-The oracle serves four key functions:
-
-**Data Pipeline**  
-Fetches validator effective balances from the beacon chain and keeps them updated on-chain via Merkle root commits. The Cluster Updater component then uses these roots to submit per-cluster balance proofs.
-
-**Fair Fee Accrual**  
-Ensures operators and the network collect fees proportional to actual effective balance managed, not just validator count.
-
-**Pectra Compatibility**  
-Supports consolidated validators (up to 2048 ETH per validator) introduced in Ethereum's Pectra upgrade.
-
-**Governance & Controls**  
-Operates under DAO-governed parameters including buffer thresholds for balance updates.
 
 ## How It Works
 
