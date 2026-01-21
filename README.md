@@ -21,6 +21,9 @@ Off-chain oracle that bridges Ethereum's beacon chain and SSV Network smart cont
 - [API reference](docs/api.md)
 - [Integration examples](docs/api.md#integration-examples)
 
+**For contributors:**
+- [Development workflow](#development)
+
 **Quick reference:**
 - Configuration: [`config.yaml.example`](config.yaml.example)
 - Environment: [`.env.example`](.env.example)
