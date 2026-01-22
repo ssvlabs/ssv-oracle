@@ -44,19 +44,15 @@ type config struct {
 	Schedule oracle.CommitSchedule `yaml:"commit_phases"`
 }
 
-// getMEVRPCs parses comma-separated MEV RPC URLs, deduplicates, and returns unique URLs.
+// getMEVRPCs parses comma-separated MEV RPC URLs.
 func (c *config) getMEVRPCs() []string {
 	if c.MEVRPCs == "" {
 		return nil
 	}
-	seen := make(map[string]struct{})
 	var rpcs []string
 	for _, s := range strings.Split(c.MEVRPCs, ",") {
 		if trimmed := strings.TrimSpace(s); trimmed != "" {
-			if _, exists := seen[trimmed]; !exists {
-				seen[trimmed] = struct{}{}
-				rpcs = append(rpcs, trimmed)
-			}
+			rpcs = append(rpcs, trimmed)
 		}
 	}
 	return rpcs
@@ -100,7 +96,12 @@ func (c *config) validate(withUpdater bool) error {
 	}
 
 	// Validate MEV RPC URLs if configured
+	seen := make(map[string]struct{})
 	for i, rpc := range c.getMEVRPCs() {
+		if _, exists := seen[rpc]; exists {
+			errs = append(errs, fmt.Errorf("duplicate mev_rpcs entry: %s", rpc))
+		}
+		seen[rpc] = struct{}{}
 		if err := validateURL(rpc, fmt.Sprintf("mev_rpcs[%d]", i), "http", "https"); err != nil {
 			errs = append(errs, err)
 		}
