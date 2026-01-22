@@ -112,5 +112,5 @@ Set `DEV=true` env for colored console output.
 |-------|----------|
 | Database errors | `make fresh` or `make fresh-all` to reset |
 | Connection failed | Verify RPC endpoints are accessible |
-| Beacon not synced | Wait for `curl <beacon_rpc>/eth/v1/node/syncing` to show `is_syncing: false` |
+| Beacon not synced | Wait for `curl <beacon_url>/eth/v1/node/syncing` to show `is_syncing: false` |
 

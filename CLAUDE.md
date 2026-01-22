@@ -165,7 +165,7 @@ sqlite3 data/oracle.db ".backup data/oracle.db.backup"
 log_level: "info"                     # debug, info, warn, error
 eth_rpc: "http://localhost:8545"      # Execution layer RPC (HTTP)
 eth_ws_rpc: "ws://localhost:8546"     # Execution layer WebSocket (for updater)
-beacon_rpc: "http://localhost:5052"   # Beacon node RPC
+beacon_url: "http://localhost:5052"   # Beacon node URL
 ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
 ssv_views_contract: "0x..."           # Required for --updater (SSV Network Views contract)
 db_path: "./data/oracle.db"           # SQLite database path
