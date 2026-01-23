@@ -16,7 +16,7 @@ After forking or cloning this template, run the following:
 5. Update GitHub Actions in `.github/workflows/` if needed (e.g., rename, add secrets).
 
 -->
-<p align="center"><img src="https://ssv.network/wp-content/uploads/2024/06/full_logo_dark.svg" alt="SSV Network"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/ssvlabs/.github/refs/heads/main/assets/ssvnetwork-dark.svg" alt="SSV Network"></p>
 
 <img src="https://github.com/ssvlabs/template-repository/actions/workflows/main.yml/badge.svg" alt="Check" />
 <a href="https://discord.com/invite/ssvnetworkofficial"><img src="https://img.shields.io/badge/discord-%23ssvlabs-8A2BE2.svg" alt="Discord" /></a>
