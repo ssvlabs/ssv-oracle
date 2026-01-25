@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/attestantio/go-eth2-client v0.28.0
-	github.com/ethereum/go-ethereum v1.16.7
+	github.com/ethereum/go-ethereum v1.16.8
 	github.com/rs/zerolog v1.34.0
 	github.com/schollz/progressbar/v3 v3.19.0
 	github.com/spf13/cobra v1.10.2
