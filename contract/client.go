@@ -43,6 +43,7 @@ type Config struct {
 	ChainID              *big.Int
 	Signer               wallet.Signer
 	TxPolicy             *txmanager.TxPolicy
+	MEVRPCs              []string // MEV-protected RPC endpoints (optional)
 }
 
 // NewClient creates a contract client.
@@ -60,7 +61,7 @@ func NewClient(cfg *Config) (*Client, error) {
 		return nil, fmt.Errorf("dial RPC: %w", err)
 	}
 
-	txMgr, err := txmanager.New(ethClient, cfg.Signer, cfg.ChainID, cfg.TxPolicy)
+	txMgr, err := txmanager.New(ethClient, cfg.Signer, cfg.ChainID, cfg.TxPolicy, cfg.MEVRPCs)
 	if err != nil {
 		ethClient.Close()
 		return nil, fmt.Errorf("create tx manager: %w", err)
@@ -90,6 +91,9 @@ func NewClient(cfg *Config) (*Client, error) {
 
 // Close closes all client connections.
 func (c *Client) Close() {
+	if c.txManager != nil {
+		c.txManager.Close()
+	}
 	if c.ethClient != nil {
 		c.ethClient.Close()
 	}
@@ -99,6 +103,7 @@ func (c *Client) Close() {
 }
 
 // CommitRoot submits a merkle root to the SSV Network contract.
+// Permissioned call - no MEV protection needed.
 func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum uint64) (*types.Receipt, error) {
 	data, err := SSVNetworkABI.Pack("commitRoot", merkleRoot, blockNum)
 	if err != nil {
@@ -106,8 +111,9 @@ func (c *Client) CommitRoot(ctx context.Context, merkleRoot [32]byte, blockNum u
 	}
 
 	return c.txManager.SendTransaction(ctx, &txmanager.TxOpts{
-		To:   c.contractAddress,
-		Data: data,
+		To:           c.contractAddress,
+		Data:         data,
+		MEVProtected: false,
 	})
 }
 
@@ -162,6 +168,9 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 }
 
 // UpdateClusterBalance updates a cluster's balance using a merkle proof.
+// Permissionless call - uses MEV protection when available to prevent
+// front-running: balance updates can trigger liquidation, and without
+// protection attackers could observe our tx and liquidate first.
 // Not thread-safe; callers must ensure sequential execution.
 func (c *Client) UpdateClusterBalance(
 	ctx context.Context,
@@ -178,7 +187,8 @@ func (c *Client) UpdateClusterBalance(
 	}
 
 	return c.txManager.SendTransaction(ctx, &txmanager.TxOpts{
-		To:   c.contractAddress,
-		Data: data,
+		To:           c.contractAddress,
+		Data:         data,
+		MEVProtected: true,
 	})
 }

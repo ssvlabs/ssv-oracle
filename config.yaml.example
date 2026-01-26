@@ -15,6 +15,10 @@ eth_rpc: "http://127.0.0.1:8545"       # Execution layer (HTTP)
 eth_ws_rpc: "ws://127.0.0.1:8546"      # Execution layer (WebSocket, required for --updater)
 beacon_url: "http://127.0.0.1:5052"    # Consensus layer
 
+# MEV Protection (optional, for --updater)
+# Comma-separated list of MEV RPC URLs for frontrunning protection on UpdateClusterBalance.
+# mev_rpcs: "https://rpc.flashbots.net/fast,https://rpc.titanbuilder.xyz"
+
 # ============================================================================
 # Contract
 # ============================================================================

@@ -166,6 +166,7 @@ log_level: "info"                     # debug, info, warn, error
 eth_rpc: "http://localhost:8545"      # Execution layer RPC (HTTP)
 eth_ws_rpc: "ws://localhost:8546"     # Execution layer WebSocket (for updater)
 beacon_url: "http://localhost:5052"   # Beacon node URL
+mev_rpcs: "https://rpc.flashbots.net/fast,https://rpc.titanbuilder.xyz"  # MEV protection (optional)
 ssv_contract: "0x..."                 # SSV Network contract (includes oracle functionality)
 ssv_views_contract: "0x..."           # Required for --updater (SSV Network Views contract)
 db_path: "./data/oracle.db"           # SQLite database path
@@ -177,6 +178,7 @@ max_sync_batch_size: 10000            # Max blocks per eth_getLogs request (defa
 - Batch size auto-adjusts: halves on RPC errors (block range, rate limit, timeout), grows on success
 - `eth_ws_rpc` is required when running with `--updater` (event subscriptions need WebSocket)
 - `ssv_views_contract` is required when running with `--updater` (for getBalance view call)
+- `mev_rpcs` is optional; only used with `--updater`
 
 ### Wallet Configuration
 
@@ -212,3 +214,20 @@ tx_policy:
 ```
 
 **Lifecycle:** estimate gas → submit tx → monitor blocks → bump if stuck → cancel if max reached
+
+### MEV Protection (txmanager/)
+
+Optional MEV-protected transaction submission for updater transactions:
+
+```yaml
+mev_rpcs: "https://rpc.flashbots.net/fast,https://rpc.titanbuilder.xyz"
+```
+
+**Behavior:**
+- Only applies to `UpdateClusterBalance` (permissionless, frontrun-vulnerable)
+- `CommitRoot` uses `eth_rpc` directly (permissioned, no MEV risk)
+- Broadcasts to all MEV RPCs in parallel for faster inclusion
+- Falls back to `eth_rpc` if all MEV RPCs reject
+- After `pending_timeout_blocks`, switches to `eth_rpc` with gas bumping
+- Minimum 1 gwei tip enforced for MEV RPC compatibility
+- Mutex serializes all tx sends to prevent nonce collisions

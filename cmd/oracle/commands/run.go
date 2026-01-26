@@ -77,6 +77,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if withUpdater {
 		startupFields = append(startupFields,
 			"ethWSRPC", cfg.EthWSRPC,
+			"mevRPCs", cfg.getMEVRPCs(),
 		)
 	}
 	logger.Infow("SSV Oracle starting", startupFields...)
@@ -131,6 +132,9 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	if withUpdater {
 		contractCfg.WSRPCURL = cfg.EthWSRPC
+		contractCfg.MEVRPCs = cfg.getMEVRPCs()
+	} else if len(cfg.getMEVRPCs()) > 0 {
+		logger.Warnw("mev_rpcs configured but --updater not set, ignoring")
 	}
 
 	ethClient, err := contract.NewClient(contractCfg)
