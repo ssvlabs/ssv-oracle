@@ -130,6 +130,27 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: "eth_rpc is required",
 		},
+		{
+			name: "duplicate mev_rpcs",
+			modify: func(c *config) {
+				c.MEVRPCs = "https://rpc.example.com,https://rpc.example.com"
+			},
+			wantErr: "duplicate mev_rpcs entry",
+		},
+		{
+			name: "duplicate mev_rpcs with spaces",
+			modify: func(c *config) {
+				c.MEVRPCs = "https://rpc.example.com , https://rpc.example.com"
+			},
+			wantErr: "duplicate mev_rpcs entry",
+		},
+		{
+			name: "valid unique mev_rpcs",
+			modify: func(c *config) {
+				c.MEVRPCs = "https://rpc1.example.com,https://rpc2.example.com"
+			},
+			wantErr: "",
+		},
 	}
 
 	for _, tt := range tests {

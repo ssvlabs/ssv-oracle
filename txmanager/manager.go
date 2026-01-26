@@ -44,6 +44,7 @@ const (
 	receiptPollInterval   = 4 * time.Second
 	percentBase           = 100
 	blockNumberRetryLimit = 3
+	minTipCap             = params.GWei // minimum for MEV RPC compatibility
 )
 
 // RevertError represents a contract call or transaction that reverted.
@@ -66,10 +67,11 @@ func (e *RevertError) Error() string {
 
 // TxOpts specifies transaction parameters.
 type TxOpts struct {
-	To       common.Address
-	Data     []byte
-	Value    *big.Int
-	GasLimit uint64
+	To           common.Address
+	Data         []byte
+	Value        *big.Int
+	GasLimit     uint64
+	MEVProtected bool // Use private mempool for frontrunning protection
 }
 
 // TxManager handles transaction submission, gas bumping, and cancellation.
@@ -79,10 +81,12 @@ type TxManager struct {
 	chainID        *big.Int
 	policy         *TxPolicy
 	errorSelectors map[string]string
+	mevClients     map[string]*ethclient.Client // url -> client for MEV RPCs
 }
 
 // New creates a TxManager.
-func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, policy *TxPolicy) (*TxManager, error) {
+// mevRPCs is optional; when empty, MEV protection is disabled.
+func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, policy *TxPolicy, mevRPCs []string) (*TxManager, error) {
 	if policy == nil {
 		return nil, fmt.Errorf("tx policy is required")
 	}
@@ -91,8 +95,22 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 		return nil, fmt.Errorf("invalid tx policy: %w", err)
 	}
 
+	mevClients := make(map[string]*ethclient.Client)
+	for _, rpcURL := range mevRPCs {
+		mevClient, err := ethclient.Dial(rpcURL)
+		if err != nil {
+			for _, c := range mevClients {
+				c.Close()
+			}
+			return nil, fmt.Errorf("dial MEV RPC %s: %w", rpcURL, err)
+		}
+		mevClients[rpcURL] = mevClient
+	}
+
 	logger.Infow("Transaction manager initialized",
-		"policy", policy)
+		"policy", policy,
+		"mevRPCs", mevRPCs,
+	)
 
 	return &TxManager{
 		client:         client,
@@ -100,12 +118,20 @@ func New(client *ethclient.Client, signer wallet.Signer, chainID *big.Int, polic
 		chainID:        chainID,
 		policy:         policy,
 		errorSelectors: make(map[string]string),
+		mevClients:     mevClients,
 	}, nil
 }
 
 // SetErrorSelectors configures error selectors for decoding revert reasons.
 func (m *TxManager) SetErrorSelectors(selectors map[string]string) {
 	m.errorSelectors = selectors
+}
+
+// Close closes all MEV RPC connections.
+func (m *TxManager) Close() {
+	for _, mc := range m.mevClients {
+		mc.Close()
+	}
 }
 
 // IsRevertError returns the RevertError if err wraps one.
@@ -118,6 +144,9 @@ func IsRevertError(err error) (*RevertError, bool) {
 }
 
 // SendTransaction submits a transaction with automatic retries and gas bumping.
+// If MEVProtected=true and MEV clients configured: broadcast to all MEV RPCs in parallel,
+// retry MEV on send errors; after first successful submission, wait PendingTimeoutBlocks
+// then switch to eth_rpc for remaining retries.
 func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.Receipt, error) {
 	from := m.signer.Address()
 
@@ -145,16 +174,28 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	currentTip := gasTipCap
 	currentFeeCap := gasFeeCap
 
+	// MEV path: use MEV RPCs for initial attempt, switch to eth_rpc after first timeout
+	mevProtected := opts.MEVProtected
+
 	var log logger.Logger
 	for attempt := 1; attempt <= m.policy.MaxAttempts; attempt++ {
 		signedTx, err := m.buildAndSignTx(opts, nonce, gasLimit, currentTip, currentFeeCap, value)
 		if err != nil {
 			return nil, err
 		}
-		log = logger.With("hash", signedTx.Hash().Hex(), "nonce", nonce)
+		log = logger.With("hash", signedTx.Hash().Hex(),
+			"nonce", nonce,
+			"mevProtected", mevProtected)
+
+		var sendErr error
+		if mevProtected {
+			sendErr = m.sendToMEVRPCs(ctx, signedTx)
+		} else {
+			sendErr = m.client.SendTransaction(ctx, signedTx)
+		}
 
 		alreadyKnown := false
-		if sendErr := m.client.SendTransaction(ctx, signedTx); sendErr != nil {
+		if sendErr != nil {
 			switch {
 			case isTxAlreadyKnown(sendErr):
 				log.Debug("Tx already in mempool")
@@ -174,15 +215,16 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			case isUnderpriced(sendErr):
 				newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 				if shouldCancel {
-					log.Warnw("Max gas reached on underpriced",
+					log.Warnw("Max gas reached",
 						"maxFeePerGas", m.policy.MaxFeePerGasWei(),
-						"currentFeeCap", currentFeeCap)
+						"currentFeeCap", currentFeeCap,
+						"willRetry", false)
 					if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 						log.Warnw("Cancel tx failed", "error", err)
 					}
 					return nil, errMaxGasReached
 				}
-				log.Warnw("Tx underpriced, bumping fees",
+				log.Warnw("Tx underpriced",
 					"attempt", attempt,
 					"currentTip", currentTip,
 					"currentFeeCap", currentFeeCap,
@@ -229,28 +271,36 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		if attempt >= m.policy.MaxAttempts {
 			log.Warnw("Tx receipt wait failed",
 				"attempt", attempt,
+				"willRetry", false,
 				"error", err)
 			break
+		}
+
+		// MEV had its chance, switch to eth_rpc for remaining retries
+		if mevProtected {
+			log.Warnw("MEV not included, switching to eth_rpc",
+				"pendingTimeoutBlocks", m.policy.PendingTimeoutBlocks)
+			mevProtected = false
 		}
 
 		newTip, newFeeCap, shouldCancel := m.bumpOrResuggest(ctx, currentTip, currentFeeCap)
 		if shouldCancel {
 			log.Warnw("Max gas reached",
 				"maxFeePerGas", m.policy.MaxFeePerGasWei(),
-				"currentFeeCap", currentFeeCap)
+				"currentFeeCap", currentFeeCap,
+				"willRetry", false)
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 				log.Warnw("Cancel tx failed", "error", err)
 			}
 			return nil, errMaxGasReached
 		}
 
-		log.Warnw("Tx pending timeout, bumping gas",
-			"attempt", attempt,
-			"newFeeCap", newFeeCap)
 		currentTip, currentFeeCap = newTip, newFeeCap
 	}
 
-	log.Warnw("Max attempts exhausted", "attempts", m.policy.MaxAttempts)
+	log.Warnw("Max attempts exhausted",
+		"attempts", m.policy.MaxAttempts,
+		"willRetry", false)
 	if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 		log.Warnw("Cancel tx failed", "error", err)
 	}
@@ -275,6 +325,51 @@ func (m *TxManager) buildAndSignTx(opts *TxOpts, nonce, gasLimit uint64, gasTipC
 		return nil, fmt.Errorf("sign tx: %w", err)
 	}
 	return signedTx, nil
+}
+
+// sendToMEVRPCs broadcasts tx to all MEV RPCs in parallel.
+// Returns nil if any MEV RPC accepts (or already knows) the tx.
+// Falls back to eth_rpc if all MEV RPCs reject.
+func (m *TxManager) sendToMEVRPCs(ctx context.Context, tx *types.Transaction) error {
+	if len(m.mevClients) == 0 {
+		return m.client.SendTransaction(ctx, tx)
+	}
+
+	type result struct {
+		url string
+		err error
+	}
+	results := make(chan result, len(m.mevClients))
+
+	for url, client := range m.mevClients {
+		go func(u string, c *ethclient.Client) {
+			err := c.SendTransaction(ctx, tx)
+			results <- result{u, err}
+		}(url, client)
+	}
+
+	var lastErr error
+	successCount := 0
+	for range m.mevClients {
+		r := <-results
+		if r.err == nil {
+			successCount++
+			logger.Debugw("MEV RPC accepted tx", "url", r.url, "hash", tx.Hash().Hex())
+		} else if isTxAlreadyKnown(r.err) {
+			successCount++
+			logger.Debugw("MEV RPC already knows tx", "url", r.url, "hash", tx.Hash().Hex())
+		} else {
+			lastErr = r.err
+			logger.Warnw("MEV RPC rejected tx", "url", r.url, "error", r.err)
+		}
+	}
+
+	if successCount > 0 {
+		return nil
+	}
+
+	logger.Warnw("All MEV RPCs failed, falling back to eth_rpc", "lastError", lastErr)
+	return m.client.SendTransaction(ctx, tx)
 }
 
 func (m *TxManager) applyBumpPercent(value *big.Int) *big.Int {
@@ -426,6 +521,7 @@ func (m *TxManager) replayForRevertReason(ctx context.Context, opts *TxOpts, blo
 }
 
 // suggestGasFees returns suggested tip and fee cap, capped at maxFeePerGas.
+// Enforces minimum tip cap for MEV RPC compatibility.
 // Returns errBaseFeeExceedsMax if current base fee exceeds the configured maximum.
 func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, error) {
 	maxFee := m.policy.MaxFeePerGasWei()
@@ -433,6 +529,11 @@ func (m *TxManager) suggestGasFees(ctx context.Context) (*big.Int, *big.Int, err
 	gasTipCap, err := m.client.SuggestGasTipCap(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get gas tip cap: %w", err)
+	}
+
+	// Enforce minimum tip (MEV RPCs may drop tx if tip == 0)
+	if gasTipCap.Cmp(big.NewInt(minTipCap)) < 0 {
+		gasTipCap = big.NewInt(minTipCap)
 	}
 
 	header, err := m.client.HeaderByNumber(ctx, nil)
