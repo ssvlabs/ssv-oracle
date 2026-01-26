@@ -11,7 +11,7 @@ import (
 func validConfig() *config {
 	return &config{
 		EthRPC:                 "http://localhost:8545",
-		BeaconRPC:              "http://localhost:5052",
+		BeaconURL:              "http://localhost:5052",
 		SSVContract:            "0x1234567890123456789012345678901234567890",
 		SSVViewsContract:       "0x1234567890123456789012345678901234567890",
 		SSVContractDeployBlock: 17507487,
@@ -52,9 +52,9 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: "invalid eth_rpc scheme",
 		},
 		{
-			name:    "missing beacon_rpc",
-			modify:  func(c *config) { c.BeaconRPC = "" },
-			wantErr: "beacon_rpc is required",
+			name:    "missing beacon_url",
+			modify:  func(c *config) { c.BeaconURL = "" },
+			wantErr: "beacon_url is required",
 		},
 		{
 			name:    "missing ssv_contract",
@@ -125,7 +125,7 @@ func TestConfig_Validate(t *testing.T) {
 			name: "multiple errors collected",
 			modify: func(c *config) {
 				c.EthRPC = ""
-				c.BeaconRPC = ""
+				c.BeaconURL = ""
 				c.SSVContract = ""
 			},
 			wantErr: "eth_rpc is required",
@@ -196,7 +196,7 @@ func TestConfig_Defaults(t *testing.T) {
 func TestConfig_MultipleErrors(t *testing.T) {
 	cfg := &config{
 		EthRPC:                 "",
-		BeaconRPC:              "",
+		BeaconURL:              "",
 		SSVContract:            "",
 		SSVViewsContract:       "",
 		SSVContractDeployBlock: 0,
@@ -211,7 +211,7 @@ func TestConfig_MultipleErrors(t *testing.T) {
 	errStr := err.Error()
 	expected := []string{
 		"eth_rpc is required",
-		"beacon_rpc is required",
+		"beacon_url is required",
 		"ssv_contract is required",
 		"ssv_views_contract is required",
 		"ssv_contract_deploy_block is required",
@@ -244,7 +244,7 @@ func TestLoadConfig_UnknownField(t *testing.T) {
 
 	content := `
 eth_rpc: "http://localhost:8545"
-beacon_rpc: "http://localhost:5052"
+beacon_url: "http://localhost:5052"
 ssv_contract: "0x1234567890123456789012345678901234567890"
 ssv_views_contract: "0x1234567890123456789012345678901234567890"
 ssv_contract_deploy_block: 17507487
@@ -277,7 +277,7 @@ func TestLoadConfig_DefaultDBPath(t *testing.T) {
 	// Config without db_path - should use default
 	content := `
 eth_rpc: "http://localhost:8545"
-beacon_rpc: "http://localhost:5052"
+beacon_url: "http://localhost:5052"
 ssv_contract: "0x1234567890123456789012345678901234567890"
 ssv_views_contract: "0x1234567890123456789012345678901234567890"
 ssv_contract_deploy_block: 17507487
@@ -309,7 +309,7 @@ func TestLoadConfig_ExplicitDBPath(t *testing.T) {
 
 	content := `
 eth_rpc: "http://localhost:8545"
-beacon_rpc: "http://localhost:5052"
+beacon_url: "http://localhost:5052"
 ssv_contract: "0x1234567890123456789012345678901234567890"
 ssv_views_contract: "0x1234567890123456789012345678901234567890"
 ssv_contract_deploy_block: 17507487

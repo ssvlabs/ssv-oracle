@@ -69,7 +69,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		"DBPath", cfg.DBPath,
 		"apiAddress", cfg.APIAddress,
 		"ethRPC", cfg.EthRPC,
-		"beaconRPC", cfg.BeaconRPC,
+		"beaconURL", cfg.BeaconURL,
 		"contract", cfg.SSVContract,
 		"viewsContract", cfg.SSVViewsContract,
 		"signerAddress", signer.Address().Hex(),
@@ -109,7 +109,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	beaconClient, err := beacon.New(ctx, beacon.ClientConfig{
-		URL: cfg.BeaconRPC,
+		URL: cfg.BeaconURL,
 	})
 	if err != nil {
 		return fmt.Errorf("create beacon client: %w", err)

@@ -27,7 +27,7 @@ type config struct {
 
 	EthRPC    string `yaml:"eth_rpc"`
 	EthWSRPC  string `yaml:"eth_ws_rpc"` // Required only with --updater
-	BeaconRPC string `yaml:"beacon_rpc"`
+	BeaconURL string `yaml:"beacon_url"`
 	MEVRPCs   string `yaml:"mev_rpcs"` // Comma-separated MEV RPC URLs (optional, for --updater)
 
 	SSVContract      string `yaml:"ssv_contract"`
@@ -74,7 +74,7 @@ func (c *config) validate(withUpdater bool) error {
 	if err := validateURL(c.EthRPC, "eth_rpc", "http", "https"); err != nil {
 		errs = append(errs, err)
 	}
-	if err := validateURL(c.BeaconRPC, "beacon_rpc", "http", "https"); err != nil {
+	if err := validateURL(c.BeaconURL, "beacon_url", "http", "https"); err != nil {
 		errs = append(errs, err)
 	}
 	if err := validateAddress(c.SSVContract, "ssv_contract"); err != nil {
