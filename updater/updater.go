@@ -119,6 +119,8 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		"blockNum", event.BlockNum,
 		"merkleRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
 
+	log.Info("RootCommitted event")
+
 	// Deduplicate by block number
 	if event.BlockNum <= u.lastProcessedBlock {
 		log.Debugw("Duplicate RootCommitted event", "lastProcessedBlock", u.lastProcessedBlock)
