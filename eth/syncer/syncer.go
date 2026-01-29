@@ -128,6 +128,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	}
 	if !isTTY {
 		barOpts = append(barOpts, progressbar.OptionSetVisibility(false))
+		logger.Infow("Syncing events", "from", lastSynced+1, "to", targetBlock, "blocks", totalBlocks)
 	}
 	bar := progressbar.NewOptions(totalBlocks, barOpts...)
 

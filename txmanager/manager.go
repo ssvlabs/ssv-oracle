@@ -175,7 +175,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	currentFeeCap := gasFeeCap
 
 	// MEV path: use MEV RPCs for initial attempt, switch to eth_rpc after first timeout
-	mevProtected := opts.MEVProtected
+	mevProtected := opts.MEVProtected && len(m.mevClients) > 0
 
 	var log logger.Logger
 	for attempt := 1; attempt <= m.policy.MaxAttempts; attempt++ {
@@ -331,10 +331,6 @@ func (m *TxManager) buildAndSignTx(opts *TxOpts, nonce, gasLimit uint64, gasTipC
 // Returns nil if any MEV RPC accepts (or already knows) the tx.
 // Falls back to eth_rpc if all MEV RPCs reject.
 func (m *TxManager) sendToMEVRPCs(ctx context.Context, tx *types.Transaction) error {
-	if len(m.mevClients) == 0 {
-		return m.client.SendTransaction(ctx, tx)
-	}
-
 	type result struct {
 		url string
 		err error
