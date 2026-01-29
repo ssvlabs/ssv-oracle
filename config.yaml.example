@@ -1,0 +1,95 @@
+# SSV Oracle Configuration
+# Copy to config.yaml and update for your environment.
+
+# ============================================================================
+# Logging
+# ============================================================================
+
+log_level: "info"                     # debug, info, warn, error
+
+# ============================================================================
+# Ethereum & Beacon Chain
+# ============================================================================
+
+eth_rpc: "http://127.0.0.1:8545"       # Execution layer (HTTP)
+eth_ws_rpc: "ws://127.0.0.1:8546"      # Execution layer (WebSocket, required for --updater)
+beacon_url: "http://127.0.0.1:5052"    # Consensus layer
+
+# MEV Protection (optional, for --updater)
+# Comma-separated list of MEV RPC URLs for frontrunning protection on UpdateClusterBalance.
+# mev_rpcs: "https://rpc.flashbots.net/fast,https://rpc.titanbuilder.xyz"
+
+# ============================================================================
+# Contract
+# ============================================================================
+
+ssv_contract: "0x..."                   # SSV Network contract address (REPLACE)
+ssv_views_contract: "0x..."             # SSV Network Views contract (REPLACE, required for --updater)
+
+# ============================================================================
+# Database (SQLite)
+# ============================================================================
+
+db_path: "./data/oracle.db"            # SQLite database file (local)
+                                       # For Docker: use "/data/oracle.db"
+
+# ============================================================================
+# API Server
+# ============================================================================
+
+api_address: "127.0.0.1:8080"          # HTTP API server address
+                                       # Default binds to localhost only (secure)
+                                       # Use "0.0.0.0:8080" to expose externally
+
+# ============================================================================
+# Event Syncing
+# ============================================================================
+
+ssv_contract_deploy_block: 17507487    # Block when SSV contract was deployed (mainnet example)
+# max_sync_batch_size: 10000           # Max blocks per eth_getLogs (default: 10000, auto-adapts)
+
+# ============================================================================
+# Wallet
+# ============================================================================
+#
+# WARNING: "env" type is for development/testing only.
+# For production, use "keystore" with an encrypted keystore file.
+
+wallet:
+  # Development (NOT for production):
+  type: "env"
+  private_key_env: "PRIVATE_KEY"
+
+  # Production (recommended):
+  # type: "keystore"
+  # keystore_path: "/path/to/keystore.json"
+  # password_env: "KEYSTORE_PASSWORD"
+  # password_file: "/path/to/password.txt"
+
+# ============================================================================
+# Transaction Policy
+# ============================================================================
+
+tx_policy:
+  gas_buffer_percent: 20               # Extra % added to gas estimates (0-100)
+  max_fee_per_gas_gwei: 420            # Hard cap on gas price (in Gwei)
+  pending_timeout_blocks: 10           # Blocks before bumping gas on pending tx
+  gas_bump_percent: 10                 # Gas price bump per attempt (min 10%)
+  max_attempts: 3                      # Total submission attempts
+  retry_delay: 5s                      # Delay after RPC error before retry
+
+# ============================================================================
+# Commit Phases
+# ============================================================================
+
+# Phases define commit schedule. Multiple phases allow changing interval over time.
+# Note: Each phase's start_epoch must be a valid target of the previous phase.
+#
+# Example with two phases:
+#   - start_epoch: 0
+#     interval: 225
+#   - start_epoch: 900    # Must be divisible by previous interval (225)
+#     interval: 450
+commit_phases:
+  - start_epoch: 0                     # First epoch to commit
+    interval: 225                      # Commit every N epochs

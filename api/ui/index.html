@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSV Oracle</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js" integrity="sha384-9Ax3MmS9AClxJyd5/zafcXXjxmwFhZCdsT6HJoJjarvCaAkJlk5QDzjLJm+Wdx5F" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Manrope', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        ssv: {
+                            card: 'var(--c-card)', white: 'var(--c-white)', muted: 'var(--c-muted)',
+                            bg: 'rgb(var(--c-bg-rgb) / <alpha-value>)',
+                            border: 'rgb(var(--c-border-rgb) / <alpha-value>)',
+                            text: 'rgb(var(--c-text-rgb) / <alpha-value>)',
+                            accent: 'rgb(var(--c-accent-rgb) / <alpha-value>)',
+                            success: 'rgb(var(--c-success-rgb) / <alpha-value>)',
+                            error: 'rgb(var(--c-error-rgb) / <alpha-value>)',
+                            warning: 'rgb(var(--c-warning-rgb) / <alpha-value>)',
+                            treeLeaf: 'var(--c-tree-leaf)', treeLeafDark: 'var(--c-tree-leaf-dark)',
+                            treeInner: 'var(--c-accent)', treeInnerDark: 'var(--c-accent-dark)',
+                            treeRoot: 'var(--c-tree-root)', treeRootDark: 'var(--c-tree-root-dark)',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        :root {
+            --c-black: #011627; --c-bg: #062031; --c-card: #0b2a3c; --c-border: #34455a;
+            --c-muted: #63768b; --c-text: #97a5ba; --c-white: #fdfefe;
+            --c-accent: #1ba5f8; --c-accent-dark: #0792e8; --c-success: #08c858; --c-success-dark: #06b64f; --c-error: #ec1c26; --c-warning: #ffd20a;
+            --c-tree-leaf: #76c8fb; --c-tree-leaf-dark: #49b6f9; --c-tree-root: #067bc4; --c-tree-root-dark: #045588;
+            --c-bg-rgb: 6 32 49; --c-card-rgb: 11 42 60; --c-border-rgb: 52 69 90; --c-text-rgb: 151 165 186; --c-accent-rgb: 27 165 248; --c-success-rgb: 8 200 88; --c-error-rgb: 236 28 38; --c-warning-rgb: 255 210 10;
+        }
+        body { background: linear-gradient(180deg, var(--c-bg) 0%, var(--c-black) 100%); font-family: 'Manrope', system-ui, sans-serif; min-height: 100vh; }
+        .card { background: rgb(var(--c-card-rgb) / 0.8); border: 1px solid rgb(var(--c-border-rgb) / 0.6); backdrop-filter: blur(10px); border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.2); }
+        .stat-card { background: rgb(var(--c-bg-rgb) / 0.5); border: 1px solid rgb(var(--c-border-rgb) / 0.4); border-radius: 8px; transition: border-color 0.2s, box-shadow 0.2s; }
+        .stat-card:hover { border-color: rgb(var(--c-accent-rgb) / 0.3); box-shadow: 0 2px 12px rgb(var(--c-accent-rgb) / 0.1); }
+        .input-field { background: rgb(var(--c-bg-rgb) / 0.6); border: 1px solid var(--c-border); border-radius: 8px; transition: border-color 0.2s, box-shadow 0.2s; }
+        .input-field:focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgb(var(--c-accent-rgb) / 0.15); }
+        .btn { font-size: 16px; font-weight: 600; border-radius: 8px; transition: all 0.2s; line-height: 20px; }
+        .btn-sm { height: 36px; min-width: 100px; padding: 8px 16px; }
+        .btn-primary { background: var(--c-accent); color: var(--c-white); }
+        .btn-primary:hover { background: var(--c-accent-dark); }
+        .btn-secondary { background: transparent; border: 1px solid var(--c-border); color: var(--c-text); }
+        .label { color: var(--c-text); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .btn-secondary:hover { background: rgb(var(--c-border-rgb) / 0.4); border-color: var(--c-muted); color: var(--c-white); }
+        .btn-icon { background: rgb(var(--c-border-rgb) / 0.3); border-radius: 8px; transition: all 0.2s; }
+        .btn-icon:hover { background: rgb(var(--c-border-rgb) / 0.5); }
+        .hash-field { position: relative; display: inline-block; }
+        .hash-value { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; background: rgb(var(--c-bg-rgb) / 0.5); border-radius: 8px; padding: 12px 48px 12px 12px; }
+        .hash-field .copy-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); opacity: 0.4; transition: opacity 0.2s; }
+        .hash-field:hover .copy-btn { opacity: 1; }
+        @media (max-width: 768px) { .hash-field .copy-btn { opacity: 0.7; } }
+        .node { cursor: pointer; }
+        .node .visible { stroke-width: 2px; transition: all 0.2s ease; }
+        .node:hover .visible { filter: brightness(1.2); }
+        .link { fill: none; stroke: var(--c-muted); stroke-width: 2px; }
+        .highlighted .visible { stroke: var(--c-warning) !important; stroke-width: 3px !important; filter: drop-shadow(0 0 8px rgb(var(--c-warning-rgb) / 0.5)); }
+        .highlighted-link { stroke: var(--c-warning) !important; stroke-width: 3px !important; }
+        .duplicate-indicator { fill: none; stroke: var(--c-muted); stroke-dasharray: 4 2; }
+        .slide-enter { animation: slideDown 0.25s ease-out; }
+        .slide-leave { animation: slideUp 0.2s ease-in forwards; }
+        @keyframes slideDown { from { opacity: 0; max-height: 0; margin-bottom: 0; } to { opacity: 1; max-height: 500px; margin-bottom: 1.5rem; } }
+        @keyframes slideUp { from { opacity: 1; max-height: 500px; margin-bottom: 1.5rem; } to { opacity: 0; max-height: 0; margin-bottom: 0; } }
+        #tooltip { position: absolute; background: rgb(var(--c-card-rgb) / 0.95); border: 1px solid rgb(var(--c-accent-rgb) / 0.3); color: var(--c-white); padding: 12px 16px; border-radius: 8px; font-size: 13px; pointer-events: none; z-index: 100; max-width: 420px; word-break: break-all; box-shadow: 0 4px 20px rgba(0,0,0,0.4); display: none; }
+        #tooltip .title { color: var(--c-accent); font-weight: 600; margin-bottom: 8px; }
+        #tooltip .row { margin-bottom: 4px; }
+        #tooltip .label { color: var(--c-text); }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--c-bg); }
+        ::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--c-accent); }
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="min-h-screen text-ssv-white">
+    <svg class="hidden">
+        <symbol id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.62" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 13l4 4L19 7"/>
+        </symbol>
+        <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </symbol>
+        <symbol id="icon-zoom-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"/>
+        </symbol>
+        <symbol id="icon-zoom-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7"/>
+        </symbol>
+        <symbol id="icon-zoom-reset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+        </symbol>
+        <symbol id="icon-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </symbol>
+        <symbol id="icon-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </symbol>
+        <symbol id="icon-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+        </symbol>
+    </svg>
+
+    <div x-data="app()" x-init="init()" class="container mx-auto px-6 py-8 max-w-7xl">
+        <header class="mb-8 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <svg class="w-10 h-10" viewBox="0 0 40 40" fill="var(--c-accent)">
+                    <path opacity="0.62" d="M13.9083 31.6343L18.9539 25.4152C19.481 24.7656 20.4723 24.7656 20.9993 25.4152L26.045 31.6343C26.4373 32.1178 26.4373 32.8101 26.045 33.2937L20.9993 39.5128C20.4723 40.1624 19.481 40.1624 18.9539 39.5128L13.9083 33.2937C13.5159 32.8101 13.5159 32.1178 13.9083 31.6343Z"/>
+                    <path d="M21.7943 16.4263L26.8399 10.2073C27.367 9.55765 28.3582 9.55765 28.8853 10.2073L33.931 16.4263C34.3233 16.9099 34.3233 17.6022 33.931 18.0858L28.8853 24.3049C28.3582 24.9545 27.367 24.9545 26.8399 24.3049L21.7943 18.0858C21.4019 17.6022 21.4019 16.9099 21.7943 16.4263Z"/>
+                    <path d="M6.02766 16.4263L11.0733 10.2073C11.6004 9.55765 12.5916 9.55765 13.1187 10.2073L18.1644 16.4263C18.5567 16.9099 18.5567 17.6022 18.1644 18.0858L13.1187 24.3049C12.5916 24.9545 11.6004 24.9545 11.0733 24.3049L6.02766 18.0858C5.63531 17.6022 5.63531 16.9099 6.02766 16.4263Z"/>
+                    <path d="M13.9083 6.70628L18.9539 0.487217C19.481 -0.162406 20.4723 -0.162406 20.9993 0.487218L26.045 6.70628C26.4373 7.18987 26.4373 7.88216 26.045 8.36574L20.9993 14.5848C20.4723 15.2344 19.481 15.2344 18.9539 14.5848L13.9083 8.36574C13.5159 7.88216 13.5159 7.18987 13.9083 6.70628Z"/>
+                </svg>
+                <div>
+                    <h1 class="text-2xl font-bold">SSV Oracle</h1>
+                    <p class="text-ssv-text text-sm">Merkle Tree Viewer</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span x-cloak x-show="pollStatus === 'updated'" x-transition class="text-xs text-ssv-success">New commit loaded</span>
+                <button @click="manualRefresh()" :disabled="pollInFlight" class="p-1.5 rounded bg-ssv-border/30 hover:bg-ssv-border/50 text-ssv-text hover:text-ssv-white transition-colors disabled:opacity-50" title="Refresh now">
+                    <svg class="w-4 h-4" :class="pollInFlight && 'animate-spin'"><use href="#icon-refresh"/></svg>
+                </button>
+                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium stat-card">
+                    <span class="w-2 h-2 rounded-full" :class="pollInFlight ? 'bg-ssv-warning' : 'bg-ssv-success animate-pulse'"></span>
+                    <span class="text-ssv-text" x-text="pollInFlight ? 'Checking...' : pollCountdown + 's'"></span>
+                </span>
+            </div>
+        </header>
+
+        <div x-show="loading" class="flex flex-col items-center justify-center py-20">
+            <div class="relative">
+                <div class="w-12 h-12 rounded-full border-2 border-ssv-border"></div>
+                <div class="absolute inset-0 rounded-full border-2 border-transparent border-t-ssv-accent animate-spin"></div>
+            </div>
+            <span class="mt-4 text-ssv-text">Loading commit data...</span>
+        </div>
+
+        <div x-cloak x-show="error" class="card rounded-xl p-6 border-ssv-error/30 bg-ssv-error/5">
+            <div class="flex items-center gap-3">
+                <svg class="w-5 h-5 text-ssv-error shrink-0"><use href="#icon-alert"/></svg>
+                <span class="text-ssv-error" x-text="error"></span>
+            </div>
+        </div>
+
+        <template x-if="!loading && !error && commit">
+            <div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <template x-for="stat in stats" :key="stat.label">
+                        <div class="stat-card rounded-xl p-4">
+                            <p class="label" x-text="stat.label"></p>
+                            <p class="text-xl font-semibold" :class="stat.accent ? 'text-ssv-accent' : 'text-ssv-white'" x-text="stat.value"></p>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-cloak x-show="commit.clusters?.length > 2000" class="card rounded-xl p-4 mb-6 border-ssv-warning/30 bg-ssv-warning/5">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-5 h-5 text-ssv-warning shrink-0"><use href="#icon-warning"/></svg>
+                        <span class="text-ssv-warning text-sm">Large tree (<span x-text="commit.clusters.length"></span> clusters). Visualization may be slow.</span>
+                    </div>
+                </div>
+
+                <div class="card p-5 mb-6">
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <template x-for="field in [{label:'Merkle Root', val:commit.merkleRoot}, {label:'Transaction Hash', val:commit.txHash || 'Pending...', hide:!commit.txHash}]" :key="field.label">
+                            <div>
+                                <p class="label mb-2" x-text="field.label"></p>
+                                <div class="hash-field">
+                                    <p class="hash-value" x-text="field.val"></p>
+                                    <button x-show="!field.hide" @click="copyToClipboard(field.val, $event)" class="copy-btn btn-icon p-1.5" title="Copy">
+                                        <svg class="w-4 h-4 text-ssv-text"><use href="#icon-copy"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="card rounded-xl p-5 mb-6 relative z-20">
+                    <p class="text-ssv-white font-medium mb-4">Search Cluster</p>
+                    <div class="flex flex-col md:flex-row gap-3">
+                        <div class="relative flex-1">
+                            <input type="text" x-model="search.query"
+                                @input="updateSuggestions()" @keydown.enter.prevent="submitSearch()"
+                                @keydown.arrow-down.prevent="navigateSuggestion(1)" @keydown.arrow-up.prevent="navigateSuggestion(-1)"
+                                @keydown.escape="search.showDropdown = false" @focus="updateSuggestions()" @click.outside="search.showDropdown = false"
+                                placeholder="Enter cluster ID (0x...)"
+                                class="input-field w-full h-[36px] px-4 text-sm font-mono placeholder-ssv-text/50 focus:outline-none">
+                            <div x-show="search.showDropdown && search.suggestions.length" x-transition
+                                 class="absolute z-50 w-full mt-1 bg-ssv-card border border-ssv-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                <template x-for="(cluster, i) in search.suggestions" :key="cluster.clusterId">
+                                    <div @click="selectSuggestion(cluster)" @mouseenter="search.index = i"
+                                         :class="{'bg-ssv-border/50': i === search.index}"
+                                         class="px-4 py-3 cursor-pointer hover:bg-ssv-border/50 border-b border-ssv-border/30 last:border-0">
+                                        <p class="font-mono text-xs truncate" x-text="cluster.clusterId"></p>
+                                        <p class="text-xs text-ssv-text mt-1">Balance: <span class="text-ssv-accent" x-text="cluster.effectiveBalance + ' ETH'"></span></p>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                        <button @click="submitSearch()" class="btn btn-sm btn-primary">Search</button>
+                        <button x-cloak x-show="selected"
+                                x-transition:enter="transition ease-out duration-200"
+                                x-transition:enter-start="opacity-0 scale-95"
+                                x-transition:enter-end="opacity-100 scale-100"
+                                x-transition:leave="transition ease-in duration-150"
+                                x-transition:leave-start="opacity-100 scale-100"
+                                x-transition:leave-end="opacity-0 scale-95"
+                                @click="clearSelection()" class="btn btn-sm btn-secondary">Clear</button>
+                    </div>
+                    <p x-cloak x-show="search.error" class="mt-3 text-ssv-error text-sm" x-text="search.error"></p>
+                </div>
+
+                <div x-cloak x-show="selected"
+                     x-transition:enter="slide-enter" x-transition:leave="slide-leave"
+                     class="card p-5 border-ssv-accent/30 overflow-hidden" :class="selected ? 'mb-6' : ''">
+                    <div class="flex items-center gap-2 mb-4">
+                        <div class="w-2 h-2 rounded-full bg-ssv-accent"></div>
+                        <p class="font-medium">Selected Cluster</p>
+                    </div>
+                    <div class="grid md:grid-cols-3 gap-4 mb-4">
+                        <div class="md:col-span-2">
+                            <p class="label">Cluster ID</p>
+                            <div class="hash-field">
+                                <p class="hash-value" x-text="selected?.clusterId"></p>
+                                <button @click="copyToClipboard(selected?.clusterId, $event)" class="copy-btn btn-icon p-1.5" title="Copy">
+                                    <svg class="w-4 h-4 text-ssv-text"><use href="#icon-copy"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="label">Effective Balance</p>
+                            <p class="text-2xl font-semibold text-ssv-accent"><span x-text="selected?.effectiveBalance"></span> <span class="text-sm text-ssv-text">ETH</span></p>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <p class="label">Leaf Hash</p>
+                        <div class="hash-field">
+                            <p class="hash-value" x-text="selected?.hash"></p>
+                            <button @click="copyToClipboard(selected?.hash, $event)" class="copy-btn btn-icon p-1.5" title="Copy">
+                                <svg class="w-4 h-4 text-ssv-text"><use href="#icon-copy"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <template x-if="proof?.length">
+                        <div>
+                            <p class="label mb-2">Merkle Proof <span class="text-ssv-accent">(<span x-text="proof.length"></span> hashes)</span></p>
+                            <div class="bg-ssv-bg/50 rounded-lg p-3 max-h-40 overflow-y-auto">
+                                <template x-for="(hash, i) in proof" :key="i">
+                                    <div class="flex items-start gap-3 py-2 border-b border-ssv-border/30 last:border-0">
+                                        <span class="text-xs font-medium w-4 text-ssv-accent" x-text="i"></span>
+                                        <span class="font-mono text-xs break-all" x-text="hash"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <p x-cloak x-show="proofError" class="text-ssv-error text-sm italic" x-text="proofError"></p>
+                    <p x-show="!proofError && !proof?.length && commit.clusters?.length === 1" class="text-ssv-text text-sm italic">Single cluster tree - no proof needed</p>
+                    <p x-show="!proofError && !proof?.length && commit.clusters?.length > 1" class="text-ssv-text text-sm italic">Empty proof</p>
+                </div>
+
+                <div class="card rounded-xl p-5">
+                    <div class="flex items-center justify-between mb-4">
+                        <p class="font-medium">Merkle Tree</p>
+                        <div class="flex items-center gap-4">
+                            <div class="flex items-center gap-1">
+                                <template x-for="z in [{fn:'zoomIn',icon:'zoom-in',t:'Zoom in'},{fn:'zoomOut',icon:'zoom-out',t:'Zoom out'},{fn:'zoomReset',icon:'zoom-reset',t:'Reset'}]" :key="z.fn">
+                                    <button @click="$data[z.fn]()" class="p-1.5 rounded bg-ssv-border/30 hover:bg-ssv-border/50 text-ssv-text hover:text-ssv-white transition-colors" :title="z.t">
+                                        <svg class="w-4 h-4"><use :href="'#icon-'+z.icon"/></svg>
+                                    </button>
+                                </template>
+                            </div>
+                            <div class="flex items-center gap-6 text-xs">
+                                <template x-for="leg in [{c:'bg-ssv-treeRoot border-ssv-treeRootDark',s:'w-4 h-4',l:'Root'},{c:'bg-ssv-treeInner border-ssv-treeInnerDark',s:'w-3.5 h-3.5',l:'Inner'},{c:'bg-ssv-treeLeaf border-ssv-treeLeafDark',s:'w-3.5 h-3.5',l:'Leaf'}]" :key="leg.l">
+                                    <div class="flex items-center gap-2">
+                                        <div class="rounded-full border-2" :class="[leg.c, leg.s]"></div>
+                                        <span class="text-ssv-text" x-text="leg.l"></span>
+                                    </div>
+                                </template>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-6 h-0.5 bg-ssv-muted"></div>
+                                    <span class="text-ssv-text">Link</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div x-show="!commit.clusters?.length" class="text-ssv-text text-center py-12">No clusters in this commit</div>
+                    <div x-show="commit.clusters?.length" class="border border-ssv-border/30 rounded-lg bg-ssv-bg/30 p-4 overflow-hidden resize-y" style="height: 500px; min-height: 200px; max-height: 80vh;">
+                        <div id="tree-container" class="w-full h-full flex justify-center"></div>
+                    </div>
+                    <p class="text-ssv-text/60 text-xs mt-4 text-center">Hover over nodes to view details. Click on leaf nodes to select a cluster.</p>
+                </div>
+            </div>
+        </template>
+
+        <div x-cloak x-show="!loading && !error && !commit" class="card rounded-xl p-8 text-center">
+            <svg class="w-12 h-12 text-ssv-text mx-auto mb-4"><use href="#icon-inbox"/></svg>
+            <p class="font-medium mb-2">No Commit Data</p>
+            <p class="text-ssv-text text-sm">The oracle has not submitted any commits yet.</p>
+        </div>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <script>
+        const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+
+        function app() {
+            return {
+                loading: true, error: null, commit: null, selected: null, proof: null, proofError: null,
+                treeData: null, treeDepth: 0, zoom: null, svg: null,
+                search: { query: '', error: null, showDropdown: false, suggestions: [], index: -1 },
+                pollTimeout: null, pollCountdown: 30, pollInFlight: false, pollStatus: 'idle',
+                proofAbortController: null, suggestDebounce: null,
+
+                get stats() {
+                    return [
+                        { label: 'Epoch', value: this.commit?.epoch?.toLocaleString() },
+                        { label: 'Reference Block', value: this.commit?.referenceBlock?.toLocaleString() },
+                        { label: 'Clusters', value: this.commit?.clusters?.length || 0, accent: true },
+                        { label: 'Tree Depth', value: this.treeDepth },
+                    ];
+                },
+
+                async init() {
+                    try {
+                        const res = await fetch('/api/v1/commit?full=true');
+                        if (res.status === 404) { this.commit = null; this.loading = false; this.startPolling(); return; }
+                        if (!res.ok) throw new Error((await res.json()).error || 'Failed to fetch');
+                        this.commit = await res.json();
+                        this.loading = false;
+                        this.$nextTick(() => this.commit?.clusters?.length && this.renderTree());
+                        this.startPolling();
+                    } catch (e) { this.error = e.message; this.loading = false; }
+                },
+
+                startPolling() {
+                    if (this.pollTimeout) return;
+                    this.pollCountdown = 30;
+                    this.pollTick();
+                },
+
+                pollTick() {
+                    this.pollTimeout = setTimeout(() => {
+                        if (this.pollCountdown > 1) { this.pollCountdown--; this.pollTick(); }
+                        else this.checkForUpdates();
+                    }, 1000);
+                },
+
+                manualRefresh() {
+                    if (this.pollInFlight) return;
+                    clearTimeout(this.pollTimeout);
+                    this.checkForUpdates();
+                },
+
+                async checkForUpdates() {
+                    if (this.pollInFlight) return;
+                    this.pollInFlight = true;
+                    this.pollStatus = 'checking';
+                    try {
+                        const res = await fetch('/api/v1/commit');
+                        if (!res.ok) throw new Error();
+                        const data = await res.json();
+                        if (data.merkleRoot !== this.commit?.merkleRoot) {
+                            const fullRes = await fetch('/api/v1/commit?full=true');
+                            if (fullRes.ok) {
+                                const selectedId = this.selected?.clusterId;
+                                this.commit = await fullRes.json();
+                                this.$nextTick(() => {
+                                    if (this.commit?.clusters?.length) this.renderTree();
+                                    if (selectedId) {
+                                        const cluster = this.commit?.clusters?.find(c => c.clusterId === selectedId);
+                                        cluster ? this.selectCluster(cluster) : this.clearSelection();
+                                    }
+                                });
+                                this.pollStatus = 'updated';
+                                setTimeout(() => this.pollStatus = 'idle', 3000);
+                            }
+                        }
+                    } catch (e) { console.warn('Poll failed:', e); }
+                    this.pollInFlight = false;
+                    if (this.pollStatus !== 'updated') this.pollStatus = 'idle';
+                    this.pollCountdown = 30;
+                    this.pollTick();
+                },
+
+                renderTree() {
+                    const clusters = this.commit.clusters, layers = this.commit.layers || [];
+                    if (clusters.length === 1) {
+                        this.treeData = { hash: clusters[0].hash, type: 'root', cluster: clusters[0], children: [], isDuplicate: false };
+                        this.treeDepth = 1;
+                    } else {
+                        let level = clusters.map(c => ({ hash: c.hash, type: 'leaf', cluster: c, children: [], isDuplicate: false }));
+                        for (let i = 0; i < layers.length; i++) {
+                            const newLevel = [];
+                            for (let j = 0; j < layers[i].length; j++) {
+                                const li = j * 2, ri = j * 2 + 1, children = [];
+                                if (li < level.length) children.push(level[li]);
+                                if (ri < level.length) children.push(level[ri]);
+                                else if (li < level.length) children.push({ hash: level[li].hash, type: level[li].type, isDuplicate: true, originalHash: level[li].hash, children: [] });
+                                newLevel.push({ hash: layers[i][j], type: i === layers.length - 1 ? 'root' : 'inner', children, isDuplicate: false });
+                            }
+                            level = newLevel;
+                        }
+                        this.treeData = level[0];
+                        const getDepth = n => n.children?.length ? 1 + Math.max(...n.children.map(getDepth)) : 1;
+                        this.treeDepth = getDepth(this.treeData);
+                    }
+
+                    const container = document.getElementById('tree-container');
+                    container.innerHTML = '';
+                    const margin = 40, width = Math.max(800, clusters.length * 50), height = Math.max(400, this.treeDepth * 100);
+
+                    this.svg = d3.select(container).append('svg')
+                        .attr('viewBox', `0 0 ${width + margin * 2} ${height + margin * 2}`)
+                        .attr('preserveAspectRatio', 'xMidYMid meet')
+                        .style('width', '100%').style('height', '100%');
+
+                    const g = this.svg.append('g').attr('transform', `translate(${margin},${margin})`);
+                    this.zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform));
+                    this.svg.call(this.zoom);
+
+                    const root = d3.hierarchy(this.treeData);
+                    d3.tree().size([width, height]).separation(() => 1)(root);
+
+                    g.selectAll('.link').data(root.links()).enter().append('path')
+                        .attr('class', d => d.target.data.isDuplicate ? 'link duplicate-indicator' : 'link')
+                        .attr('d', d3.linkVertical().x(d => d.x).y(d => d.y));
+
+                    const sizes = { root: 14, inner: 10, leaf: 12 };
+                    const colors = {
+                        root: [css('--c-tree-root'), css('--c-tree-root-dark')],
+                        inner: [css('--c-accent'), css('--c-accent-dark')],
+                        leaf: [css('--c-tree-leaf'), css('--c-tree-leaf-dark')]
+                    };
+                    const nodes = g.selectAll('.node').data(root.descendants()).enter().append('g')
+                        .attr('class', 'node').attr('transform', d => `translate(${d.x},${d.y})`);
+
+                    nodes.append('circle').attr('r', 18).attr('fill', 'transparent').attr('class', 'hit-area')
+                        .on('mouseover', (e, d) => this.showTooltip(e, d.data))
+                        .on('mouseout', () => this.hideTooltip())
+                        .on('click', (e, d) => d.data.cluster && !d.data.isDuplicate && this.selectCluster(d.data.cluster));
+
+                    nodes.append('circle').attr('class', 'visible')
+                        .attr('r', d => d.data.isDuplicate ? sizes[d.data.type] * 0.7 : sizes[d.data.type])
+                        .attr('fill', d => d.data.isDuplicate ? 'transparent' : colors[d.data.type][0])
+                        .attr('stroke', d => colors[d.data.type][1])
+                        .attr('stroke-dasharray', d => d.data.isDuplicate ? '3 2' : 'none')
+                        .attr('opacity', d => d.data.isDuplicate ? 0.5 : 1)
+                        .attr('pointer-events', 'none');
+                },
+
+                showTooltip(event, data) {
+                    const tip = document.getElementById('tooltip');
+                    const row = (l, v) => `<div class="row"><span class="label">${l}: </span><span class="value">${v}</span></div>`;
+                    if (data.isDuplicate) tip.innerHTML = `<div class="title">Duplicate (odd leaf count)</div>${row('Original Hash', data.originalHash || data.hash)}`;
+                    else if (data.cluster) tip.innerHTML = `<div class="title">Cluster</div>${row('ID', data.cluster.clusterId)}${row('Balance', data.cluster.effectiveBalance + ' ETH')}${row('Hash', data.hash)}`;
+                    else tip.innerHTML = `<div class="title">${data.type === 'root' ? 'Root' : 'Inner Node'}</div>${row('Hash', data.hash)}`;
+                    tip.style.display = 'block';
+                    const rect = tip.getBoundingClientRect();
+                    tip.style.left = (event.pageX + 15 + rect.width > window.innerWidth ? event.pageX - rect.width - 15 : event.pageX + 15) + 'px';
+                    tip.style.top = (event.pageY + 15 + rect.height > window.innerHeight ? event.pageY - rect.height - 15 : event.pageY + 15) + 'px';
+                },
+
+                hideTooltip() { document.getElementById('tooltip').style.display = 'none'; },
+
+                updateSuggestions() {
+                    clearTimeout(this.suggestDebounce);
+                    const q = this.search.query.trim().toLowerCase();
+                    if (q.length < 2) { this.search.suggestions = []; this.search.showDropdown = false; return; }
+                    this.suggestDebounce = setTimeout(() => {
+                        this.search.suggestions = (this.commit?.clusters || []).filter(c => c.clusterId.toLowerCase().includes(q)).slice(0, 10);
+                        this.search.index = -1;
+                        this.search.showDropdown = this.search.suggestions.length > 0;
+                    }, 150);
+                },
+
+                navigateSuggestion(dir) {
+                    if (!this.search.showDropdown || !this.search.suggestions.length) return;
+                    this.search.index = (this.search.index + dir + this.search.suggestions.length) % this.search.suggestions.length;
+                },
+
+                selectSuggestion(cluster) { this.search.query = cluster.clusterId; this.search.showDropdown = false; this.selectCluster(cluster); },
+
+                submitSearch() {
+                    this.search.error = null;
+                    if (this.search.showDropdown && this.search.index >= 0) { this.selectSuggestion(this.search.suggestions[this.search.index]); return; }
+                    this.search.showDropdown = false;
+                    if (!this.search.query) { this.search.error = 'Please enter a cluster ID'; return; }
+                    const cluster = this.commit?.clusters?.find(c => c.clusterId.toLowerCase() === this.search.query.trim().toLowerCase());
+                    if (!cluster) { this.search.error = 'Cluster not found in current commit'; return; }
+                    this.selectCluster(cluster);
+                },
+
+                async selectCluster(cluster) {
+                    if (this.proofAbortController) this.proofAbortController.abort();
+                    this.proofAbortController = new AbortController();
+                    const clusterId = cluster.clusterId;
+                    this.selected = cluster; this.search.query = clusterId; this.search.error = null; this.proofError = null; this.proof = null;
+                    try {
+                        const res = await fetch(`/api/v1/proof/${encodeURIComponent(clusterId)}`, { signal: this.proofAbortController.signal });
+                        if (this.selected?.clusterId !== clusterId) return;
+                        if (res.ok) this.proof = (await res.json()).proof || [];
+                        else { const err = await res.json().catch(() => ({})); this.proofError = err.error || `Failed (${res.status})`; }
+                    } catch (e) { if (e.name !== 'AbortError') this.proofError = 'Network error'; }
+                    this.highlightPath();
+                },
+
+                clearSelection() {
+                    this.selected = null; this.proof = null; this.proofError = null; this.search.query = '';
+                    d3.selectAll('.node').classed('highlighted', false);
+                    d3.selectAll('.link').classed('highlighted-link', false);
+                },
+
+                highlightPath() {
+                    d3.selectAll('.node').classed('highlighted', false);
+                    d3.selectAll('.link').classed('highlighted-link', false);
+                    if (!this.selected || !this.treeData) return;
+                    const findPath = (node, target, path = []) => {
+                        if (node.isDuplicate) return null;
+                        path.push(node.hash);
+                        if (node.hash === target) return path;
+                        for (const child of node.children || []) { const r = findPath(child, target, [...path]); if (r) return r; }
+                        return null;
+                    };
+                    const pathSet = new Set([this.selected.hash, ...(findPath(this.treeData, this.selected.hash) || [])]);
+                    d3.selectAll('.node').each(function(d) { if (pathSet.has(d.data.hash) && !d.data.isDuplicate) d3.select(this).classed('highlighted', true); });
+                    d3.selectAll('.link').each(function(d) { if (pathSet.has(d.source.data.hash) && pathSet.has(d.target.data.hash) && !d.target.data.isDuplicate) d3.select(this).classed('highlighted-link', true); });
+                },
+
+                zoomIn() { this.svg?.transition().duration(300).call(this.zoom.scaleBy, 1.5); },
+                zoomOut() { this.svg?.transition().duration(300).call(this.zoom.scaleBy, 0.67); },
+                zoomReset() { this.svg?.transition().duration(300).call(this.zoom.transform, d3.zoomIdentity); },
+
+                async copyToClipboard(text, event) {
+                    if (!text) return;
+                    const btn = event.currentTarget;
+                    try { await navigator.clipboard.writeText(text); } catch { return; }
+                    const orig = btn.innerHTML;
+                    btn.innerHTML = '<svg class="w-4 h-4 text-ssv-success"><use href="#icon-check"/></svg>';
+                    btn.classList.add('bg-ssv-success/20');
+                    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('bg-ssv-success/20'); }, 1500);
+                }
+            };
+        }
+    </script>
+</body>
+</html>
