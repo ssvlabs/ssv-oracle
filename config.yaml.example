@@ -71,7 +71,7 @@ wallet:
 # ============================================================================
 
 tx_policy:
-  gas_buffer_percent: 20               # Extra % added to gas estimates (0-100)
+  gas_buffer_percent: 60               # Extra % added to gas estimates (0-100)
   max_fee_per_gas_gwei: 420            # Hard cap on gas price (in Gwei)
   pending_timeout_blocks: 10           # Blocks before bumping gas on pending tx
   gas_bump_percent: 10                 # Gas price bump per attempt (min 10%)
@@ -88,8 +88,8 @@ tx_policy:
 # Example with two phases:
 #   - start_epoch: 0
 #     interval: 225
-#   - start_epoch: 900    # Must be divisible by previous interval (225)
+#   - start_epoch: 900    # 900 = 0 + 4×225
 #     interval: 450
 commit_phases:
-  - start_epoch: 0                     # First epoch to commit
-    interval: 225                      # Commit every N epochs
+  - start_epoch: 74450                 # Hoodi testnet: Feb 11, 2026, 09:30 UTC
+    interval: 75                       # Every 75 epochs (~8 hours, 3x daily)
