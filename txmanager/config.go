@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultGasBufferPercent     = 60
+	defaultGasBufferPercent     = 20
 	defaultMaxFeePerGasGwei     = 420
 	defaultPendingTimeoutBlocks = 10
 	defaultGasBumpPercent       = 10

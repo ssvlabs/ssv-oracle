@@ -1,0 +1,3 @@
+commit_phases:
+  - start_epoch: 74450
+    interval: 75    # ~8 hours (3x daily)
