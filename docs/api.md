@@ -32,7 +32,7 @@ Get the latest confirmed commit metadata.
 
 **Fields:**
 - `epoch` - Beacon chain epoch for this commit
-- `referenceBlock` - Execution layer block number where commit occurred
+- `referenceBlock` - Finalized block number used to compute the merkle root
 - `merkleRoot` - Merkle root committed on-chain
 - `txHash` - Transaction hash of the commit
 
@@ -107,7 +107,7 @@ Get the merkle proof for a specific cluster.
 - `effectiveBalance` - Cluster's effective balance at commit time
 - `proof` - Array of sibling hashes for merkle verification
 - `merkleRoot` - Merkle root the proof is built against
-- `referenceBlock` - Execution layer block number where commit occurred
+- `referenceBlock` - Finalized block number used to compute the merkle root
 
 **Example:**
 
