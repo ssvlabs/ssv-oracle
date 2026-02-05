@@ -1,0 +1,36 @@
+# SSV Oracle - Hoodi Testnet
+
+log_level: "debug"
+
+# RPC Endpoints
+eth_rpc: ""
+beacon_url: ""
+
+# Contracts (Hoodi testnet)
+ssv_contract: "0x58410Bef803ECd7E63B23664C586A6DB72DAf59c"
+ssv_views_contract: "0x5AdDb3f1529C5ec70D77400499eE4bbF328368fe"
+ssv_contract_deploy_block: 1065
+
+# Wallet
+wallet:
+  type: "env"
+  private_key_env: "PRIVATE_KEY"
+  # Or use keystore:
+  # type: "keystore"
+  # keystore_path: "/path/to/keystore.json"
+  # password_env: "KEYSTORE_PASSWORD"
+
+# Transaction Policy
+tx_policy:
+  gas_buffer_percent: 60
+  max_fee_per_gas_gwei: 100
+  pending_timeout_blocks: 10
+  gas_bump_percent: 10
+  max_attempts: 3
+  retry_delay: 5s
+
+# Commit Schedule
+# Start: Feb 11, 2026, 09:30 UTC
+commit_phases:
+  - start_epoch: 74450
+    interval: 75    # ~8 hours (3x daily)
