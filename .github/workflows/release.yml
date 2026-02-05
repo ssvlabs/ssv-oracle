@@ -37,7 +37,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ssvlabs/ssv-oracle:${{ github.ref_name }}
+          tags: |
+            ssvlabs/ssv-oracle:${{ github.ref_name }}
+            ssvlabs/ssv-oracle:latest
           build-args: |
             VERSION=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
