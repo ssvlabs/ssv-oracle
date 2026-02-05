@@ -57,7 +57,7 @@ Get the latest commit with full cluster balances and merkle tree layers.
   "clusters": [
     {
       "clusterId": "0xabc...",
-      "effectiveBalance": 32000000000,
+      "effectiveBalance": 320,
       "hash": "0xleaf..."
     }
   ],
@@ -91,7 +91,7 @@ Get the merkle proof for a specific cluster.
 ```json
 {
   "clusterId": "0xabc...",
-  "effectiveBalance": 32000000000,
+  "effectiveBalance": 320,
   "proof": [
     "0xsibling1...",
     "0xsibling2...",
