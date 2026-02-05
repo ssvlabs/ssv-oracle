@@ -62,16 +62,15 @@ Get the latest commit with full cluster balances and merkle tree layers.
     }
   ],
   "layers": [
-    ["0xleaf1...", "0xleaf2..."],
-    ["0xnode1..."],
+    ["0xparent1...", "0xparent2..."],
     ["0xroot..."]
   ]
 }
 ```
 
 **Additional fields:**
-- `clusters` - Array of cluster balances used to build the tree
-- `layers` - Complete merkle tree structure (leaves to root)
+- `clusters` - Array of cluster balances with their leaf hashes
+- `layers` - Inner merkle tree layers (excludes leaves, which are in `clusters`)
 
 **Example:**
 
