@@ -26,6 +26,12 @@ docker compose up -d --build
 curl http://127.0.0.1:8080/api/v1/commit
 ```
 
+**Hoodi Testnet:** Use `config.hoodi.yaml` directly without copying:
+```bash
+./ssv-oracle run --config config.hoodi.yaml
+# Docker: mount config.hoodi.yaml as /config/config.yaml
+```
+
 ## Docker Compose
 
 The repository includes [`docker-compose.yml`](../docker-compose.yml).
