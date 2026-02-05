@@ -35,6 +35,8 @@ make build
 ./ssv-oracle run --config config.yaml --fresh --updater  # Both
 ```
 
+For Docker deployment, see the [Deployment Guide](docs/deployment.md).
+
 ## How It Works
 
 ### Oracle
@@ -99,6 +101,8 @@ curl http://127.0.0.1:8080/api/v1/proof/0x1234...
 # Open tree visualization
 open http://127.0.0.1:8080
 ```
+
+For detailed API documentation, see the [API Reference](docs/api.md).
 
 ## Development
 
