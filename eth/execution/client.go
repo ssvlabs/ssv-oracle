@@ -53,6 +53,9 @@ const (
 	errCategoryRateLimit       batchErrorCategory = "rate_limited"
 	errCategoryPayloadTooLarge batchErrorCategory = "payload_too_large"
 	errCategoryTimeout         batchErrorCategory = "timeout"
+
+	// RPC providers reject batch calls above a certain size.
+	maxBlockTimestampBatch = 100
 )
 
 // New creates a new execution client.
@@ -286,40 +289,49 @@ func groupLogsByBlock(logs []types.Log, blockTimes map[uint64]time.Time) ([]Bloc
 	return result, nil
 }
 
-// getBlockTimestampsBatch fetches timestamps for multiple blocks in a single batch RPC call.
+// getBlockTimestampsBatch fetches timestamps for multiple blocks using chunked batch RPC calls.
 func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uint64) (map[uint64]time.Time, error) {
 	if len(blockNumbers) == 0 {
 		return make(map[uint64]time.Time), nil
 	}
 
-	batch := make([]rpc.BatchElem, len(blockNumbers))
-	results := make([]*types.Header, len(blockNumbers))
+	blockTimes := make(map[uint64]time.Time, len(blockNumbers))
 
-	for i, blockNum := range blockNumbers {
-		results[i] = new(types.Header)
-		batch[i] = rpc.BatchElem{
-			Method: "eth_getBlockByNumber",
-			Args:   []any{fmt.Sprintf("0x%x", blockNum), false}, // false = don't include txs
-			Result: results[i],
+	for start := 0; start < len(blockNumbers); start += maxBlockTimestampBatch {
+		end := start + maxBlockTimestampBatch
+		if end > len(blockNumbers) {
+			end = len(blockNumbers)
 		}
-	}
+		chunk := blockNumbers[start:end]
 
-	err := eth.WithRetry(ctx, c.retryConfig, func() error {
-		return c.rpcClient.BatchCallContext(ctx, batch)
-	}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("batch RPC: %w", err)
-	}
+		batch := make([]rpc.BatchElem, len(chunk))
+		results := make([]*types.Header, len(chunk))
 
-	blockTimes := make(map[uint64]time.Time)
-	for i, elem := range batch {
-		if elem.Error != nil {
-			return nil, fmt.Errorf("get block %d: %w", blockNumbers[i], elem.Error)
+		for i, blockNum := range chunk {
+			results[i] = new(types.Header)
+			batch[i] = rpc.BatchElem{
+				Method: "eth_getBlockByNumber",
+				Args:   []any{fmt.Sprintf("0x%x", blockNum), false},
+				Result: results[i],
+			}
 		}
-		if results[i] == nil {
-			return nil, fmt.Errorf("nil result for block %d", blockNumbers[i])
+
+		err := eth.WithRetry(ctx, c.retryConfig, func() error {
+			return c.rpcClient.BatchCallContext(ctx, batch)
+		}, nil)
+		if err != nil {
+			return nil, fmt.Errorf("batch RPC: %w", err)
 		}
-		blockTimes[blockNumbers[i]] = time.Unix(int64(results[i].Time), 0).UTC()
+
+		for i, elem := range batch {
+			if elem.Error != nil {
+				return nil, fmt.Errorf("get block %d: %w", chunk[i], elem.Error)
+			}
+			if results[i] == nil {
+				return nil, fmt.Errorf("nil result for block %d", chunk[i])
+			}
+			blockTimes[chunk[i]] = time.Unix(int64(results[i].Time), 0).UTC()
+		}
 	}
 
 	return blockTimes, nil
