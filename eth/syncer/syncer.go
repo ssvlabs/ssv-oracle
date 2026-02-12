@@ -432,7 +432,7 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 }
 
 func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
-	var count int
+	var updated int
 	for _, log := range blockLogs.Logs {
 		_, eventData, err := s.parser.parseLog(&log)
 		if err != nil {
@@ -465,9 +465,9 @@ func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs executi
 		}
 
 		if err := s.storage.UpdateClusterIfExists(ctx, row); err != nil {
-			return 0, err
+			return updated, err
 		}
-		count++
+		updated++
 	}
-	return count, nil
+	return updated, nil
 }
