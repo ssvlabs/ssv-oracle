@@ -410,13 +410,16 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 		return nil
 	}
 
+	var updates int
 	topics := EventTopics() // Filter by handled event signatures
 	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock, topics,
 		func(batchEnd uint64, logs []execution.BlockLogs) error {
 			for _, blockLogs := range logs {
-				if err := s.applyClusterUpdates(ctx, blockLogs); err != nil {
+				n, err := s.applyClusterUpdates(ctx, blockLogs)
+				if err != nil {
 					return err
 				}
+				updates += n
 			}
 			return nil
 		})
@@ -424,11 +427,12 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 		return err
 	}
 
-	logger.Debugw("Clusters synced to head", "from", fromBlock+1, "to", headBlock)
+	logger.Debugw("Clusters synced to head", "from", fromBlock+1, "to", headBlock, "clusterUpdates", updates)
 	return nil
 }
 
-func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) error {
+func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
+	var count int
 	for _, log := range blockLogs.Logs {
 		_, eventData, err := s.parser.parseLog(&log)
 		if err != nil {
@@ -453,6 +457,7 @@ func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs executi
 
 		row := &storage.ClusterRow{
 			ClusterID:       clusterID[:],
+			ValidatorCount:  cluster.ValidatorCount,
 			NetworkFeeIndex: cluster.NetworkFeeIndex,
 			Index:           cluster.Index,
 			IsActive:        cluster.Active,
@@ -460,8 +465,9 @@ func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs executi
 		}
 
 		if err := s.storage.UpdateClusterIfExists(ctx, row); err != nil {
-			return err
+			return 0, err
 		}
+		count++
 	}
-	return nil
+	return count, nil
 }
