@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -55,7 +56,7 @@ const (
 	errCategoryTimeout         batchErrorCategory = "timeout"
 
 	// RPC providers reject batch calls above a certain size.
-	maxBlockTimestampBatch = 100
+	blockTimestampMaxBatchSize = 100
 )
 
 // New creates a new execution client.
@@ -297,13 +298,7 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 
 	blockTimes := make(map[uint64]time.Time, len(blockNumbers))
 
-	for start := 0; start < len(blockNumbers); start += maxBlockTimestampBatch {
-		end := start + maxBlockTimestampBatch
-		if end > len(blockNumbers) {
-			end = len(blockNumbers)
-		}
-		chunk := blockNumbers[start:end]
-
+	for chunk := range slices.Chunk(blockNumbers, blockTimestampMaxBatchSize) {
 		batch := make([]rpc.BatchElem, len(chunk))
 		results := make([]*types.Header, len(chunk))
 
@@ -320,7 +315,7 @@ func (c *Client) getBlockTimestampsBatch(ctx context.Context, blockNumbers []uin
 			return c.rpcClient.BatchCallContext(ctx, batch)
 		}, nil)
 		if err != nil {
-			return nil, fmt.Errorf("batch RPC: %w", err)
+			return nil, fmt.Errorf("batch get block timestamps: %w", err)
 		}
 
 		for i, elem := range batch {
