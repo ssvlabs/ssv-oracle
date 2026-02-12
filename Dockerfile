@@ -1,7 +1,7 @@
 # Multi-stage build for minimal production image
 
 # Build stage
-FROM golang:1.25.6-alpine@sha256:660f0b83cf50091e3777e4730ccc0e63e83fea2c420c872af5c60cb357dcafb2 AS builder
+FROM golang:1.25.7-alpine@sha256:f6751d823c26342f9506c03797d2527668d095b0a15f1862cddb4d927a7a4ced AS builder
 
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
