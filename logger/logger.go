@@ -37,6 +37,7 @@ func Init(level string) {
 		config.DisableStacktrace = true
 	} else {
 		config = zap.NewProductionConfig()
+		config.Sampling = nil
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	}
 
