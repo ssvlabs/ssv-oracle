@@ -82,6 +82,15 @@ type ClusterBalance struct {
 	EffectiveBalance uint32
 }
 
+// ClusterInfo contains the owner and operator IDs for a cluster.
+type ClusterInfo struct {
+	OwnerAddress []byte
+	OperatorIDs  []uint64
+}
+
+// AllClusterInfo is a map from hex cluster ID to ClusterInfo.
+type AllClusterInfo map[string]ClusterInfo
+
 // CommitStatus represents the status of an oracle commit.
 type CommitStatus string
 
@@ -370,6 +379,65 @@ func (s *Storage) GetLatestCommit(ctx context.Context) (*OracleCommit, error) {
 		return nil, fmt.Errorf("unmarshal cluster balances: %w", err)
 	}
 	return &c, nil
+}
+
+// GetCommitByEpoch retrieves a commit by target epoch with prev/next navigation epochs.
+// Returns nil commit if the epoch is not found. Prev/next are nil at boundaries.
+func (s *Storage) GetCommitByEpoch(ctx context.Context, epoch uint64) (*OracleCommit, *uint64, *uint64, error) {
+	query := `
+		SELECT target_epoch, merkle_root, reference_block, cluster_balances, status, tx_hash,
+			(SELECT MAX(target_epoch) FROM oracle_commits WHERE target_epoch < ?) AS prev_epoch,
+			(SELECT MIN(target_epoch) FROM oracle_commits WHERE target_epoch > ?) AS next_epoch
+		FROM oracle_commits WHERE target_epoch = ?
+	`
+	var c OracleCommit
+	var balancesJSON []byte
+	var status string
+	var prev, next *uint64
+	err := s.db.QueryRowContext(ctx, query, epoch, epoch, epoch).Scan(
+		&c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON, &status, &c.TxHash,
+		&prev, &next,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, nil, nil
+		}
+		return nil, nil, nil, fmt.Errorf("get commit by epoch: %w", err)
+	}
+	c.Status = CommitStatus(status)
+	if balancesJSON != nil {
+		if err := json.Unmarshal(balancesJSON, &c.ClusterBalances); err != nil {
+			return nil, nil, nil, fmt.Errorf("unmarshal cluster balances: %w", err)
+		}
+	}
+	return &c, prev, next, nil
+}
+
+// GetAllClusterInfo returns owner and operator IDs for all clusters.
+func (s *Storage) GetAllClusterInfo(ctx context.Context) (AllClusterInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT cluster_id, owner_address, operator_ids FROM clusters`)
+	if err != nil {
+		return nil, fmt.Errorf("query cluster info: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(AllClusterInfo)
+	for rows.Next() {
+		var clusterID, ownerAddr []byte
+		var operatorIDsJSON string
+		if err := rows.Scan(&clusterID, &ownerAddr, &operatorIDsJSON); err != nil {
+			return nil, fmt.Errorf("scan cluster info: %w", err)
+		}
+		operatorIDs, err := decodeOperatorIDs(operatorIDsJSON)
+		if err != nil {
+			return nil, err
+		}
+		result[fmt.Sprintf("%x", clusterID)] = ClusterInfo{
+			OwnerAddress: ownerAddr,
+			OperatorIDs:  operatorIDs,
+		}
+	}
+	return result, rows.Err()
 }
 
 // ClearAllState removes all data and resets sync progress.

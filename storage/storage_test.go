@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"os"
 	"testing"
@@ -841,6 +842,294 @@ func TestStorage_UpdateClusterIfExists_Existing(t *testing.T) {
 	if got.ValidatorCount != 1 {
 		t.Errorf("ValidatorCount = %d, want 1 (unchanged)", got.ValidatorCount)
 	}
+}
+
+func insertCommit(t *testing.T, s *Storage, epoch, block uint64, status CommitStatus) {
+	t.Helper()
+	root := make([]byte, 32)
+	root[0] = byte(epoch)
+	balances := []ClusterBalance{{ClusterID: make([]byte, 32), EffectiveBalance: uint32(epoch)}}
+	balances[0].ClusterID[0] = byte(epoch)
+	if err := s.InsertPendingCommit(context.Background(), epoch, root, block, balances); err != nil {
+		t.Fatalf("insert commit epoch %d: %v", epoch, err)
+	}
+	if status != CommitStatusPending {
+		if err := s.UpdateCommitStatus(context.Background(), epoch, status, nil); err != nil {
+			t.Fatalf("update commit epoch %d to %s: %v", epoch, status, err)
+		}
+	}
+}
+
+func TestStorage_GetCommitByEpoch(t *testing.T) {
+	s := setupTestStorage(t)
+
+	// Insert three commits: epochs 100, 200, 300
+	insertCommit(t, s, 100, 500000, CommitStatusConfirmed)
+	insertCommit(t, s, 200, 600000, CommitStatusConfirmed)
+	insertCommit(t, s, 300, 700000, CommitStatusPending)
+
+	tests := []struct {
+		name      string
+		epoch     uint64
+		wantNil   bool
+		wantPrev  *uint64
+		wantNext  *uint64
+		wantBlock uint64
+	}{
+		{
+			name:      "not found",
+			epoch:     999,
+			wantNil:   true,
+			wantPrev:  nil,
+			wantNext:  nil,
+			wantBlock: 0,
+		},
+		{
+			name:      "first commit has no prev",
+			epoch:     100,
+			wantNil:   false,
+			wantPrev:  nil,
+			wantNext:  ptr(uint64(200)),
+			wantBlock: 500000,
+		},
+		{
+			name:      "middle commit has both",
+			epoch:     200,
+			wantNil:   false,
+			wantPrev:  ptr(uint64(100)),
+			wantNext:  ptr(uint64(300)),
+			wantBlock: 600000,
+		},
+		{
+			name:      "last commit has no next",
+			epoch:     300,
+			wantNil:   false,
+			wantPrev:  ptr(uint64(200)),
+			wantNext:  nil,
+			wantBlock: 700000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			commit, prev, next, err := s.GetCommitByEpoch(context.Background(), tt.epoch)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantNil {
+				if commit != nil {
+					t.Fatal("expected nil commit")
+				}
+				return
+			}
+			if commit == nil {
+				t.Fatal("expected commit, got nil")
+			}
+			if commit.ReferenceBlock != tt.wantBlock {
+				t.Errorf("reference block = %d, want %d", commit.ReferenceBlock, tt.wantBlock)
+			}
+			if commit.TargetEpoch != tt.epoch {
+				t.Errorf("target epoch = %d, want %d", commit.TargetEpoch, tt.epoch)
+			}
+			if !ptrEqual(prev, tt.wantPrev) {
+				t.Errorf("prev = %v, want %v", fmtPtr(prev), fmtPtr(tt.wantPrev))
+			}
+			if !ptrEqual(next, tt.wantNext) {
+				t.Errorf("next = %v, want %v", fmtPtr(next), fmtPtr(tt.wantNext))
+			}
+		})
+	}
+}
+
+func TestStorage_GetCommitByEpoch_ReturnsAllStatuses(t *testing.T) {
+	s := setupTestStorage(t)
+
+	insertCommit(t, s, 100, 500000, CommitStatusPending)
+	insertCommit(t, s, 200, 600000, CommitStatusFailed)
+	insertCommit(t, s, 300, 700000, CommitStatusConfirmed)
+
+	for _, tt := range []struct {
+		epoch  uint64
+		status CommitStatus
+	}{
+		{100, CommitStatusPending},
+		{200, CommitStatusFailed},
+		{300, CommitStatusConfirmed},
+	} {
+		commit, _, _, err := s.GetCommitByEpoch(context.Background(), tt.epoch)
+		if err != nil {
+			t.Fatalf("epoch %d: unexpected error: %v", tt.epoch, err)
+		}
+		if commit == nil {
+			t.Fatalf("epoch %d: expected commit", tt.epoch)
+		}
+		if commit.Status != tt.status {
+			t.Errorf("epoch %d: status = %s, want %s", tt.epoch, commit.Status, tt.status)
+		}
+	}
+}
+
+func TestStorage_GetCommitByEpoch_PrevNextSpanAllStatuses(t *testing.T) {
+	s := setupTestStorage(t)
+
+	// prev/next should navigate across all statuses, not just confirmed
+	insertCommit(t, s, 100, 500000, CommitStatusFailed)
+	insertCommit(t, s, 200, 600000, CommitStatusConfirmed)
+	insertCommit(t, s, 300, 700000, CommitStatusPending)
+
+	commit, prev, next, err := s.GetCommitByEpoch(context.Background(), 200)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if commit == nil {
+		t.Fatal("expected commit")
+	}
+	if !ptrEqual(prev, ptr(uint64(100))) {
+		t.Errorf("prev = %v, want 100 (failed commit)", fmtPtr(prev))
+	}
+	if !ptrEqual(next, ptr(uint64(300))) {
+		t.Errorf("next = %v, want 300 (pending commit)", fmtPtr(next))
+	}
+}
+
+func TestStorage_GetCommitByEpoch_SingleCommit(t *testing.T) {
+	s := setupTestStorage(t)
+
+	insertCommit(t, s, 100, 500000, CommitStatusConfirmed)
+
+	commit, prev, next, err := s.GetCommitByEpoch(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if commit == nil {
+		t.Fatal("expected commit")
+	}
+	if prev != nil {
+		t.Errorf("prev = %v, want nil", *prev)
+	}
+	if next != nil {
+		t.Errorf("next = %v, want nil", *next)
+	}
+}
+
+func TestStorage_GetCommitByEpoch_ClusterBalances(t *testing.T) {
+	s := setupTestStorage(t)
+	ctx := context.Background()
+
+	balances := []ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64},
+	}
+	balances[0].ClusterID[0] = 0xaa
+	balances[1].ClusterID[0] = 0xbb
+
+	root := make([]byte, 32)
+	if err := s.InsertPendingCommit(ctx, 100, root, 500000, balances); err != nil {
+		t.Fatalf("insert commit: %v", err)
+	}
+
+	commit, _, _, err := s.GetCommitByEpoch(ctx, 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if commit == nil {
+		t.Fatal("expected commit")
+	}
+	if len(commit.ClusterBalances) != 2 {
+		t.Fatalf("cluster balances len = %d, want 2", len(commit.ClusterBalances))
+	}
+	if commit.ClusterBalances[0].EffectiveBalance != 32 {
+		t.Errorf("balance[0] = %d, want 32", commit.ClusterBalances[0].EffectiveBalance)
+	}
+	if commit.ClusterBalances[1].EffectiveBalance != 64 {
+		t.Errorf("balance[1] = %d, want 64", commit.ClusterBalances[1].EffectiveBalance)
+	}
+}
+
+func TestStorage_GetAllClusterInfo(t *testing.T) {
+	s := setupTestStorage(t)
+	ctx := context.Background()
+
+	// Empty DB
+	info, err := s.GetAllClusterInfo(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(info) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(info))
+	}
+
+	// Insert two clusters
+	c1 := &ClusterRow{
+		ClusterID:    make([]byte, 32),
+		OwnerAddress: []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44},
+		OperatorIDs:  []uint64{1, 2, 3, 4},
+		Balance:      big.NewInt(0),
+	}
+	c1.ClusterID[0] = 0xaa
+
+	c2 := &ClusterRow{
+		ClusterID:    make([]byte, 32),
+		OwnerAddress: []byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc},
+		OperatorIDs:  []uint64{5, 6, 7, 8},
+		Balance:      big.NewInt(0),
+	}
+	c2.ClusterID[0] = 0xbb
+
+	if err := s.UpsertCluster(ctx, c1); err != nil {
+		t.Fatalf("upsert c1: %v", err)
+	}
+	if err := s.UpsertCluster(ctx, c2); err != nil {
+		t.Fatalf("upsert c2: %v", err)
+	}
+
+	info, err = s.GetAllClusterInfo(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(info) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(info))
+	}
+
+	key1 := fmt.Sprintf("%x", c1.ClusterID)
+	if entry, ok := info[key1]; !ok {
+		t.Errorf("missing cluster %s", key1)
+	} else {
+		if len(entry.OperatorIDs) != 4 || entry.OperatorIDs[0] != 1 {
+			t.Errorf("c1 operator IDs = %v, want [1 2 3 4]", entry.OperatorIDs)
+		}
+		if entry.OwnerAddress[0] != 0x11 {
+			t.Errorf("c1 owner address[0] = %x, want 11", entry.OwnerAddress[0])
+		}
+	}
+
+	key2 := fmt.Sprintf("%x", c2.ClusterID)
+	if entry, ok := info[key2]; !ok {
+		t.Errorf("missing cluster %s", key2)
+	} else {
+		if len(entry.OperatorIDs) != 4 || entry.OperatorIDs[0] != 5 {
+			t.Errorf("c2 operator IDs = %v, want [5 6 7 8]", entry.OperatorIDs)
+		}
+	}
+}
+
+func ptr(v uint64) *uint64 { return &v }
+
+func ptrEqual(a, b *uint64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func fmtPtr(p *uint64) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%d", *p)
 }
 
 func TestStorage_DecodeOperatorIDs_Malformed(t *testing.T) {

@@ -68,6 +68,9 @@
         .link { fill: none; stroke: var(--c-muted); stroke-width: 2px; }
         .highlighted .visible { stroke: var(--c-warning) !important; stroke-width: 3px !important; filter: drop-shadow(0 0 8px rgb(var(--c-warning-rgb) / 0.5)); }
         .highlighted-link { stroke: var(--c-warning) !important; stroke-width: 3px !important; }
+        .nav-btn { background: rgb(var(--c-border-rgb) / 0.4); border: 1px solid rgb(var(--c-border-rgb) / 0.6); border-radius: 8px; transition: all 0.2s; padding: 4px 8px; }
+        .nav-btn:hover:not(:disabled) { background: rgb(var(--c-accent-rgb) / 0.15); border-color: rgb(var(--c-accent-rgb) / 0.4); }
+        .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
         .duplicate-indicator { fill: none; stroke: var(--c-muted); stroke-dasharray: 4 2; }
         .slide-enter { animation: slideDown 0.25s ease-out; }
         .slide-leave { animation: slideUp 0.2s ease-in forwards; }
@@ -113,19 +116,25 @@
         <symbol id="icon-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
         </symbol>
+        <symbol id="icon-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 19l-7-7 7-7"/>
+        </symbol>
+        <symbol id="icon-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5l7 7-7 7"/>
+        </symbol>
     </svg>
 
-    <div x-data="app()" x-init="init()" class="container mx-auto px-6 py-8 max-w-7xl">
-        <header class="mb-8 flex items-center justify-between">
-            <div class="flex items-center gap-4">
-                <svg class="w-10 h-10" viewBox="0 0 40 40" fill="var(--c-accent)">
+    <div x-data="app()" x-init="init()" class="container mx-auto px-4 md:px-6 py-6 md:py-8 max-w-7xl">
+        <header class="mb-6 md:mb-8 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3 md:gap-4">
+                <svg class="w-8 h-8 md:w-10 md:h-10 shrink-0" viewBox="0 0 40 40" fill="var(--c-accent)">
                     <path opacity="0.62" d="M13.9083 31.6343L18.9539 25.4152C19.481 24.7656 20.4723 24.7656 20.9993 25.4152L26.045 31.6343C26.4373 32.1178 26.4373 32.8101 26.045 33.2937L20.9993 39.5128C20.4723 40.1624 19.481 40.1624 18.9539 39.5128L13.9083 33.2937C13.5159 32.8101 13.5159 32.1178 13.9083 31.6343Z"/>
                     <path d="M21.7943 16.4263L26.8399 10.2073C27.367 9.55765 28.3582 9.55765 28.8853 10.2073L33.931 16.4263C34.3233 16.9099 34.3233 17.6022 33.931 18.0858L28.8853 24.3049C28.3582 24.9545 27.367 24.9545 26.8399 24.3049L21.7943 18.0858C21.4019 17.6022 21.4019 16.9099 21.7943 16.4263Z"/>
                     <path d="M6.02766 16.4263L11.0733 10.2073C11.6004 9.55765 12.5916 9.55765 13.1187 10.2073L18.1644 16.4263C18.5567 16.9099 18.5567 17.6022 18.1644 18.0858L13.1187 24.3049C12.5916 24.9545 11.6004 24.9545 11.0733 24.3049L6.02766 18.0858C5.63531 17.6022 5.63531 16.9099 6.02766 16.4263Z"/>
                     <path d="M13.9083 6.70628L18.9539 0.487217C19.481 -0.162406 20.4723 -0.162406 20.9993 0.487218L26.045 6.70628C26.4373 7.18987 26.4373 7.88216 26.045 8.36574L20.9993 14.5848C20.4723 15.2344 19.481 15.2344 18.9539 14.5848L13.9083 8.36574C13.5159 7.88216 13.5159 7.18987 13.9083 6.70628Z"/>
                 </svg>
                 <div>
-                    <h1 class="text-2xl font-bold">SSV Oracle</h1>
+                    <h1 class="text-xl md:text-2xl font-bold">SSV Oracle</h1>
                     <p class="text-ssv-text text-sm">Merkle Tree Viewer</p>
                 </div>
             </div>
@@ -158,11 +167,32 @@
 
         <template x-if="!loading && !error && commit">
             <div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-6">
+                    <div class="stat-card rounded-xl p-4 flex items-center gap-2 text-center col-span-2 md:col-span-1">
+                        <button @click="navigateTo(commit.previousEpoch)" :disabled="!commit.previousEpoch || navigating" class="nav-btn text-ssv-text hover:text-ssv-white shrink-0">
+                            <svg class="w-4 h-4"><use href="#icon-chevron-left"/></svg>
+                        </button>
+                        <div class="min-w-0 flex-1">
+                            <p class="label flex items-center justify-center gap-1.5">Epoch
+                                <span class="px-1.5 py-px rounded-full text-[9px] font-semibold uppercase normal-case tracking-normal"
+                                    :class="commit?.status === 'confirmed' ? 'bg-ssv-success/15 text-ssv-success' : commit?.status === 'failed' ? 'bg-ssv-error/15 text-ssv-error' : 'bg-ssv-warning/15 text-ssv-warning'"
+                                    x-text="commit?.status"></span>
+                            </p>
+                            <p class="text-xl font-semibold text-ssv-white" x-text="commit?.epoch?.toLocaleString()"></p>
+                        </div>
+                        <button @click="navigateTo(commit.nextEpoch)" :disabled="!commit.nextEpoch || navigating" class="nav-btn text-ssv-text hover:text-ssv-white shrink-0">
+                            <svg class="w-4 h-4"><use href="#icon-chevron-right"/></svg>
+                        </button>
+                    </div>
                     <template x-for="stat in stats" :key="stat.label">
-                        <div class="stat-card rounded-xl p-4">
+                        <div class="stat-card rounded-xl p-4 text-center">
                             <p class="label" x-text="stat.label"></p>
-                            <p class="text-xl font-semibold" :class="stat.accent ? 'text-ssv-accent' : 'text-ssv-white'" x-text="stat.value"></p>
+                            <p class="text-lg md:text-xl font-semibold flex flex-wrap items-baseline justify-center gap-x-1" :class="stat.accent ? 'text-ssv-accent' : 'text-ssv-white'">
+                                <span x-text="stat.value"></span>
+                                <span x-show="stat.delta" class="text-xs font-semibold"
+                                    :class="stat.delta > 0 ? 'text-ssv-success' : 'text-ssv-error'"
+                                    x-text="stat.delta > 0 ? '+' + stat.delta.toLocaleString() : stat.delta?.toLocaleString()"></span>
+                            </p>
                         </div>
                     </template>
                 </div>
@@ -176,19 +206,55 @@
 
                 <div class="card p-5 mb-6">
                     <div class="grid md:grid-cols-2 gap-4">
-                        <template x-for="field in [{label:'Merkle Root', val:commit.merkleRoot}, {label:'Transaction Hash', val:commit.txHash || 'Pending...', hide:!commit.txHash}]" :key="field.label">
-                            <div>
-                                <p class="label mb-2" x-text="field.label"></p>
-                                <div class="hash-field">
-                                    <p class="hash-value" x-text="field.val"></p>
-                                    <button x-show="!field.hide" @click="copyToClipboard(field.val, $event)" class="copy-btn btn-icon p-1.5" title="Copy">
-                                        <svg class="w-4 h-4 text-ssv-text"><use href="#icon-copy"/></svg>
-                                    </button>
-                                </div>
+                        <div>
+                            <p class="label mb-2">Merkle Root</p>
+                            <div class="hash-field">
+                                <p class="hash-value" x-text="commit.merkleRoot"></p>
+                                <button @click="copyToClipboard(commit.merkleRoot, $event)" class="copy-btn btn-icon p-1.5" title="Copy">
+                                    <svg class="w-4 h-4 text-ssv-text"><use href="#icon-copy"/></svg>
+                                </button>
                             </div>
-                        </template>
+                        </div>
+                        <div>
+                            <p class="label mb-2">Transaction Hash</p>
+                            <div x-show="commit.txHash" class="hash-field">
+                                <p class="hash-value" x-text="commit.txHash"></p>
+                                <button @click="copyToClipboard(commit.txHash, $event)" class="copy-btn btn-icon p-1.5" title="Copy">
+                                    <svg class="w-4 h-4 text-ssv-text"><use href="#icon-copy"/></svg>
+                                </button>
+                            </div>
+                            <p x-show="!commit.txHash" class="text-ssv-muted text-sm italic mt-1"
+                                x-text="commit.status === 'pending' ? 'Awaiting confirmation...' : 'No transaction'"></p>
+                        </div>
                     </div>
                 </div>
+
+                <template x-if="commit.balanceDiff?.changed?.length">
+                    <div class="card rounded-xl p-5 mb-6">
+                        <div class="flex items-center gap-3 mb-4">
+                            <p class="font-medium">Cluster Balance Updates</p>
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-ssv-accent/15 text-ssv-accent border-ssv-accent/30"
+                                x-text="commit.balanceDiff.changed.length + ' changed'"></span>
+                        </div>
+                        <div class="bg-ssv-bg/50 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                            <table class="w-full text-sm">
+                                <thead class="text-xs text-ssv-text uppercase sticky top-0 bg-ssv-bg/90">
+                                    <tr><th class="text-left px-3 py-2">Cluster ID</th><th class="text-right px-3 py-2">Old</th><th class="text-right px-3 py-2">New</th><th class="text-right px-3 py-2">Delta</th></tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="d in [...commit.balanceDiff.changed].sort((a, b) => Math.abs(b.newBalance - b.oldBalance) - Math.abs(a.newBalance - a.oldBalance))" :key="d.clusterId">
+                                        <tr class="border-t border-ssv-border/20 hover:bg-ssv-border/20 cursor-pointer" @click="selectClusterById(d.clusterId)">
+                                            <td class="px-3 py-2 font-mono text-xs truncate max-w-[200px]" x-text="d.clusterId"></td>
+                                            <td class="px-3 py-2 text-right text-ssv-text" x-text="d.oldBalance.toLocaleString()"></td>
+                                            <td class="px-3 py-2 text-right" x-text="d.newBalance.toLocaleString()"></td>
+                                            <td class="px-3 py-2 text-right font-medium" :class="d.newBalance > d.oldBalance ? 'text-ssv-success' : 'text-ssv-error'" x-text="(d.newBalance > d.oldBalance ? '+' : '') + (d.newBalance - d.oldBalance).toLocaleString()"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </template>
 
                 <div class="card rounded-xl p-5 mb-6 relative z-20">
                     <p class="text-ssv-white font-medium mb-4">Search Cluster</p>
@@ -198,7 +264,7 @@
                                 @input="updateSuggestions()" @keydown.enter.prevent="submitSearch()"
                                 @keydown.arrow-down.prevent="navigateSuggestion(1)" @keydown.arrow-up.prevent="navigateSuggestion(-1)"
                                 @keydown.escape="search.showDropdown = false" @focus="updateSuggestions()" @click.outside="search.showDropdown = false"
-                                placeholder="Enter cluster ID (0x...)"
+                                placeholder="Cluster ID, owner address, or operator IDs (e.g. 1,2,3,4)"
                                 class="input-field w-full h-[36px] px-4 text-sm font-mono placeholder-ssv-text/50 focus:outline-none">
                             <div x-show="search.showDropdown && search.suggestions.length" x-transition
                                  class="absolute z-50 w-full mt-1 bg-ssv-card border border-ssv-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
@@ -207,20 +273,17 @@
                                          :class="{'bg-ssv-border/50': i === search.index}"
                                          class="px-4 py-3 cursor-pointer hover:bg-ssv-border/50 border-b border-ssv-border/30 last:border-0">
                                         <p class="font-mono text-xs truncate" x-text="cluster.clusterId"></p>
-                                        <p class="text-xs text-ssv-text mt-1">Balance: <span class="text-ssv-accent" x-text="cluster.effectiveBalance + ' ETH'"></span></p>
+                                        <p x-show="cluster.ownerAddress" class="font-mono text-[11px] text-ssv-muted mt-0.5 truncate" x-text="cluster.ownerAddress"></p>
+                                        <p class="text-xs text-ssv-text mt-1">
+                                            <span x-text="cluster.effectiveBalance + ' ETH'"></span>
+                                            <span x-show="cluster.operatorIds?.length" class="ml-2 text-ssv-muted">Ops: <span x-text="cluster.operatorIds?.join(', ')"></span></span>
+                                        </p>
                                     </div>
                                 </template>
                             </div>
                         </div>
                         <button @click="submitSearch()" class="btn btn-sm btn-primary">Search</button>
-                        <button x-cloak x-show="selected"
-                                x-transition:enter="transition ease-out duration-200"
-                                x-transition:enter-start="opacity-0 scale-95"
-                                x-transition:enter-end="opacity-100 scale-100"
-                                x-transition:leave="transition ease-in duration-150"
-                                x-transition:leave-start="opacity-100 scale-100"
-                                x-transition:leave-end="opacity-0 scale-95"
-                                @click="clearSelection()" class="btn btn-sm btn-secondary">Clear</button>
+                        <button x-cloak x-show="selected" x-transition @click="clearSelection()" class="btn btn-sm btn-secondary">Clear</button>
                     </div>
                     <p x-cloak x-show="search.error" class="mt-3 text-ssv-error text-sm" x-text="search.error"></p>
                 </div>
@@ -232,8 +295,8 @@
                         <div class="w-2 h-2 rounded-full bg-ssv-accent"></div>
                         <p class="font-medium">Selected Cluster</p>
                     </div>
-                    <div class="grid md:grid-cols-3 gap-4 mb-4">
-                        <div class="md:col-span-2">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                        <div class="md:col-span-3 min-w-0">
                             <p class="label">Cluster ID</p>
                             <div class="hash-field">
                                 <p class="hash-value" x-text="selected?.clusterId"></p>
@@ -243,11 +306,30 @@
                             </div>
                         </div>
                         <div>
-                            <p class="label">Effective Balance</p>
-                            <p class="text-2xl font-semibold text-ssv-accent"><span x-text="selected?.effectiveBalance"></span> <span class="text-sm text-ssv-text">ETH</span></p>
+                            <p class="label">Balance</p>
+                            <p class="text-lg font-semibold text-ssv-accent mt-1"><span x-text="selected?.effectiveBalance?.toLocaleString()"></span> <span class="text-xs text-ssv-text">ETH</span></p>
                         </div>
                     </div>
-                    <div class="mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3" x-show="selected?.ownerAddress">
+                        <div class="md:col-span-3 min-w-0">
+                            <p class="label">Owner Address</p>
+                            <div class="hash-field">
+                                <p class="hash-value" x-text="selected?.ownerAddress"></p>
+                                <button @click="copyToClipboard(selected?.ownerAddress, $event)" class="copy-btn btn-icon p-1.5" title="Copy">
+                                    <svg class="w-4 h-4 text-ssv-text"><use href="#icon-copy"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="label">Operators</p>
+                            <div class="flex flex-wrap gap-1.5 mt-1">
+                                <template x-for="opId in (selected?.operatorIds || [])" :key="opId">
+                                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-ssv-accent/15 text-ssv-accent border border-ssv-accent/30" x-text="opId"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
                         <p class="label">Leaf Hash</p>
                         <div class="hash-field">
                             <p class="hash-value" x-text="selected?.hash"></p>
@@ -256,28 +338,33 @@
                             </button>
                         </div>
                     </div>
-                    <template x-if="proof?.length">
-                        <div>
-                            <p class="label mb-2">Merkle Proof <span class="text-ssv-accent">(<span x-text="proof.length"></span> hashes)</span></p>
-                            <div class="bg-ssv-bg/50 rounded-lg p-3 max-h-40 overflow-y-auto">
-                                <template x-for="(hash, i) in proof" :key="i">
-                                    <div class="flex items-start gap-3 py-2 border-b border-ssv-border/30 last:border-0">
-                                        <span class="text-xs font-medium w-4 text-ssv-accent" x-text="i"></span>
-                                        <span class="font-mono text-xs break-all" x-text="hash"></span>
-                                    </div>
-                                </template>
+                    <div x-data="{showProof: false}">
+                        <template x-if="proof?.length">
+                            <div>
+                                <button @click="showProof = !showProof" class="flex items-center gap-2 mb-2 group">
+                                    <p class="label mb-0">Merkle Proof</p>
+                                    <span class="text-xs text-ssv-accent">(<span x-text="proof.length"></span> hashes)</span>
+                                    <svg class="w-3.5 h-3.5 text-ssv-muted group-hover:text-ssv-accent transition-all" :class="showProof && 'rotate-180'"><use href="#icon-chevron-right" style="transform-origin:center" transform="rotate(90)"/></svg>
+                                </button>
+                                <div x-show="showProof" x-transition class="bg-ssv-bg/50 rounded-lg p-3 max-h-48 overflow-y-auto">
+                                    <template x-for="(hash, i) in proof" :key="i">
+                                        <div class="flex items-start gap-3 py-1.5 border-b border-ssv-border/20 last:border-0">
+                                            <span class="text-xs font-medium w-4 text-ssv-accent" x-text="i"></span>
+                                            <span class="font-mono text-xs break-all" x-text="hash"></span>
+                                        </div>
+                                    </template>
+                                </div>
                             </div>
-                        </div>
-                    </template>
-                    <p x-cloak x-show="proofError" class="text-ssv-error text-sm italic" x-text="proofError"></p>
-                    <p x-show="!proofError && !proof?.length && commit.clusters?.length === 1" class="text-ssv-text text-sm italic">Single cluster tree - no proof needed</p>
-                    <p x-show="!proofError && !proof?.length && commit.clusters?.length > 1" class="text-ssv-text text-sm italic">Empty proof</p>
+                        </template>
+                        <p x-cloak x-show="proofError" class="text-ssv-error text-sm" x-text="proofError"></p>
+                        <p x-show="!proofError && !proof?.length && commit.clusters?.length === 1" class="text-ssv-text text-sm italic">Single cluster tree - no proof needed</p>
+                    </div>
                 </div>
 
-                <div class="card rounded-xl p-5">
-                    <div class="flex items-center justify-between mb-4">
+                <div class="card rounded-xl p-5 hidden md:block">
+                    <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
                         <p class="font-medium">Merkle Tree</p>
-                        <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-4 flex-wrap">
                             <div class="flex items-center gap-1">
                                 <template x-for="z in [{fn:'zoomIn',icon:'zoom-in',t:'Zoom in'},{fn:'zoomOut',icon:'zoom-out',t:'Zoom out'},{fn:'zoomReset',icon:'zoom-reset',t:'Reset'}]" :key="z.fn">
                                     <button @click="$data[z.fn]()" class="p-1.5 rounded bg-ssv-border/30 hover:bg-ssv-border/50 text-ssv-text hover:text-ssv-white transition-colors" :title="z.t">
@@ -285,7 +372,7 @@
                                     </button>
                                 </template>
                             </div>
-                            <div class="flex items-center gap-6 text-xs">
+                            <div class="flex items-center gap-4 lg:gap-6 text-xs flex-wrap">
                                 <template x-for="leg in [{c:'bg-ssv-treeRoot border-ssv-treeRootDark',s:'w-4 h-4',l:'Root'},{c:'bg-ssv-treeInner border-ssv-treeInnerDark',s:'w-3.5 h-3.5',l:'Inner'},{c:'bg-ssv-treeLeaf border-ssv-treeLeafDark',s:'w-3.5 h-3.5',l:'Leaf'}]" :key="leg.l">
                                     <div class="flex items-center gap-2">
                                         <div class="rounded-full border-2" :class="[leg.c, leg.s]"></div>
@@ -323,30 +410,60 @@
         function app() {
             return {
                 loading: true, error: null, commit: null, selected: null, proof: null, proofError: null,
-                treeData: null, treeDepth: 0, zoom: null, svg: null,
+                treeData: null, treeDepth: 0, zoom: null, svg: null, navigating: false, viewingEpoch: null,
                 search: { query: '', error: null, showDropdown: false, suggestions: [], index: -1 },
                 pollTimeout: null, pollCountdown: 30, pollInFlight: false, pollStatus: 'idle',
                 proofAbortController: null, suggestDebounce: null,
 
                 get stats() {
                     return [
-                        { label: 'Epoch', value: this.commit?.epoch?.toLocaleString() },
                         { label: 'Reference Block', value: this.commit?.referenceBlock?.toLocaleString() },
-                        { label: 'Clusters', value: this.commit?.clusters?.length || 0, accent: true },
+                        { label: 'Total Eff. Balance', value: this.commit?.totalEffectiveBalance ? this.commit.totalEffectiveBalance.toLocaleString() + ' ETH' : '-', accent: true, delta: this.balanceDelta },
+                        { label: 'Clusters', value: this.commit?.clusters?.length || 0 },
                         { label: 'Tree Depth', value: this.treeDepth },
                     ];
                 },
 
+                get balanceDelta() {
+                    const changed = this.commit?.balanceDiff?.changed;
+                    if (!changed?.length) return null;
+                    let delta = 0;
+                    for (const c of changed) delta += c.newBalance - c.oldBalance;
+                    return delta || null;
+                },
+
                 async init() {
                     try {
-                        const res = await fetch('/api/v1/commit?full=true');
-                        if (res.status === 404) { this.commit = null; this.loading = false; this.startPolling(); return; }
-                        if (!res.ok) throw new Error((await res.json()).error || 'Failed to fetch');
-                        this.commit = await res.json();
+                        const epoch = new URLSearchParams(window.location.search).get('epoch');
+                        await this.loadCommit(epoch ? Number(epoch) : null);
                         this.loading = false;
-                        this.$nextTick(() => this.commit?.clusters?.length && this.renderTree());
                         this.startPolling();
                     } catch (e) { this.error = e.message; this.loading = false; }
+                },
+
+                async navigateTo(epoch) {
+                    if (!epoch || this.navigating) return;
+                    this.navigating = true;
+                    try { this.clearSelection(); await this.loadCommit(epoch); }
+                    catch (e) { console.error('Navigation failed:', e); }
+                    this.navigating = false;
+                },
+
+                async loadCommit(epoch) {
+                    const url = '/api/v1/commit?full=true' + (epoch ? `&epoch=${epoch}` : '');
+                    const res = await fetch(url);
+                    if (res.status === 404) { this.commit = null; return; }
+                    if (!res.ok) throw new Error((await res.json()).error || 'Failed to fetch');
+                    this.commit = await res.json();
+                    this.treeDepth = this.commit?.layers?.length ? this.commit.layers.length + 1 : this.commit?.clusters?.length ? 1 : 0;
+                    this.viewingEpoch = epoch;
+                    const u = new URL(window.location);
+                    epoch ? u.searchParams.set('epoch', epoch) : u.searchParams.delete('epoch');
+                    history.replaceState(null, '', u);
+                    this.$nextTick(() => {
+                        const container = document.getElementById('tree-container');
+                        if (this.commit?.clusters?.length && container?.offsetParent !== null) this.renderTree();
+                    });
                 },
 
                 startPolling() {
@@ -373,23 +490,28 @@
                     this.pollInFlight = true;
                     this.pollStatus = 'checking';
                     try {
-                        const res = await fetch('/api/v1/commit');
+                        const pollEpoch = this.viewingEpoch;
+                        const url = pollEpoch ? `/api/v1/commit?epoch=${pollEpoch}` : '/api/v1/commit';
+                        const res = await fetch(url);
                         if (!res.ok) throw new Error();
                         const data = await res.json();
-                        if (data.merkleRoot !== this.commit?.merkleRoot) {
-                            const fullRes = await fetch('/api/v1/commit?full=true');
-                            if (fullRes.ok) {
+                        if (this.viewingEpoch === pollEpoch) {
+                            if (pollEpoch) {
+                                this.commit.previousEpoch = data.previousEpoch;
+                                this.commit.nextEpoch = data.nextEpoch;
+                                this.commit.status = data.status;
+                                this.commit.txHash = data.txHash;
+                            } else if (data.merkleRoot !== this.commit?.merkleRoot) {
                                 const selectedId = this.selected?.clusterId;
-                                this.commit = await fullRes.json();
-                                this.$nextTick(() => {
-                                    if (this.commit?.clusters?.length) this.renderTree();
-                                    if (selectedId) {
-                                        const cluster = this.commit?.clusters?.find(c => c.clusterId === selectedId);
-                                        cluster ? this.selectCluster(cluster) : this.clearSelection();
-                                    }
-                                });
+                                await this.loadCommit(null);
+                                if (selectedId) {
+                                    const cluster = this.commit?.clusters?.find(c => c.clusterId === selectedId);
+                                    cluster ? this.selectCluster(cluster) : this.clearSelection();
+                                }
                                 this.pollStatus = 'updated';
                                 setTimeout(() => this.pollStatus = 'idle', 3000);
+                            } else if (data.nextEpoch !== this.commit?.nextEpoch) {
+                                this.commit.nextEpoch = data.nextEpoch;
                             }
                         }
                     } catch (e) { console.warn('Poll failed:', e); }
@@ -403,7 +525,6 @@
                     const clusters = this.commit.clusters, layers = this.commit.layers || [];
                     if (clusters.length === 1) {
                         this.treeData = { hash: clusters[0].hash, type: 'root', cluster: clusters[0], children: [], isDuplicate: false };
-                        this.treeDepth = 1;
                     } else {
                         let level = clusters.map(c => ({ hash: c.hash, type: 'leaf', cluster: c, children: [], isDuplicate: false }));
                         for (let i = 0; i < layers.length; i++) {
@@ -418,8 +539,6 @@
                             level = newLevel;
                         }
                         this.treeData = level[0];
-                        const getDepth = n => n.children?.length ? 1 + Math.max(...n.children.map(getDepth)) : 1;
-                        this.treeDepth = getDepth(this.treeData);
                     }
 
                     const container = document.getElementById('tree-container');
@@ -449,7 +568,8 @@
                         leaf: [css('--c-tree-leaf'), css('--c-tree-leaf-dark')]
                     };
                     const nodes = g.selectAll('.node').data(root.descendants()).enter().append('g')
-                        .attr('class', 'node').attr('transform', d => `translate(${d.x},${d.y})`);
+                        .attr('class', 'node')
+                        .attr('transform', d => `translate(${d.x},${d.y})`);
 
                     nodes.append('circle').attr('r', 18).attr('fill', 'transparent').attr('class', 'hit-area')
                         .on('mouseover', (e, d) => this.showTooltip(e, d.data))
@@ -479,12 +599,27 @@
 
                 hideTooltip() { document.getElementById('tooltip').style.display = 'none'; },
 
+                searchClusters(q) {
+                    const clusters = this.commit?.clusters || [];
+                    q = q.replace(/,+$/, '');
+                    if (/^\d+(,\d+)+$/.test(q)) {
+                        const ops = q.split(',').map(Number);
+                        return clusters.filter(c => ops.every(op => c.operatorIds?.includes(op)));
+                    }
+                    const ql = q.toLowerCase(), opId = /^\d+$/.test(q) ? parseInt(q, 10) : NaN;
+                    return clusters.filter(c =>
+                        c.clusterId.toLowerCase().includes(ql) ||
+                        c.ownerAddress?.toLowerCase().includes(ql) ||
+                        (!isNaN(opId) && c.operatorIds?.includes(opId))
+                    );
+                },
+
                 updateSuggestions() {
                     clearTimeout(this.suggestDebounce);
-                    const q = this.search.query.trim().toLowerCase();
-                    if (q.length < 2) { this.search.suggestions = []; this.search.showDropdown = false; return; }
+                    const q = this.search.query.trim();
+                    if (q.length < 1) { this.search.suggestions = []; this.search.showDropdown = false; return; }
                     this.suggestDebounce = setTimeout(() => {
-                        this.search.suggestions = (this.commit?.clusters || []).filter(c => c.clusterId.toLowerCase().includes(q)).slice(0, 10);
+                        this.search.suggestions = this.searchClusters(q).slice(0, 20);
                         this.search.index = -1;
                         this.search.showDropdown = this.search.suggestions.length > 0;
                     }, 150);
@@ -496,15 +631,19 @@
                 },
 
                 selectSuggestion(cluster) { this.search.query = cluster.clusterId; this.search.showDropdown = false; this.selectCluster(cluster); },
+                selectClusterById(id) { const c = this.commit?.clusters?.find(c => c.clusterId === id); if (c) this.selectCluster(c); },
 
                 submitSearch() {
                     this.search.error = null;
                     if (this.search.showDropdown && this.search.index >= 0) { this.selectSuggestion(this.search.suggestions[this.search.index]); return; }
                     this.search.showDropdown = false;
-                    if (!this.search.query) { this.search.error = 'Please enter a cluster ID'; return; }
-                    const cluster = this.commit?.clusters?.find(c => c.clusterId.toLowerCase() === this.search.query.trim().toLowerCase());
-                    if (!cluster) { this.search.error = 'Cluster not found in current commit'; return; }
-                    this.selectCluster(cluster);
+                    const q = this.search.query.trim();
+                    if (!q) { this.search.error = 'Please enter a search term'; return; }
+                    const matches = this.searchClusters(q);
+                    if (!matches.length) { this.search.error = `No clusters found for "${q}"`; return; }
+                    if (matches.length === 1) { this.selectCluster(matches[0]); return; }
+                    this.search.suggestions = matches.slice(0, 20);
+                    this.search.showDropdown = true;
                 },
 
                 async selectCluster(cluster) {
@@ -512,8 +651,9 @@
                     this.proofAbortController = new AbortController();
                     const clusterId = cluster.clusterId;
                     this.selected = cluster; this.search.query = clusterId; this.search.error = null; this.proofError = null; this.proof = null;
+                    const epochParam = this.viewingEpoch ? `?epoch=${this.viewingEpoch}` : '';
                     try {
-                        const res = await fetch(`/api/v1/proof/${encodeURIComponent(clusterId)}`, { signal: this.proofAbortController.signal });
+                        const res = await fetch(`/api/v1/proof/${encodeURIComponent(clusterId)}${epochParam}`, { signal: this.proofAbortController.signal });
                         if (this.selected?.clusterId !== clusterId) return;
                         if (res.ok) this.proof = (await res.json()).proof || [];
                         else { const err = await res.json().catch(() => ({})); this.proofError = err.error || `Failed (${res.status})`; }
