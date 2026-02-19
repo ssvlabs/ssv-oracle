@@ -226,18 +226,36 @@ func computeDiff(prevEpoch uint64, old, cur []storage.ClusterBalance) *CommitDif
 	}
 
 	diff := &CommitDiff{PreviousEpoch: prevEpoch}
+	curMap := make(map[string]struct{}, len(cur))
 	for _, b := range cur {
 		id := fmt.Sprintf("%x", b.ClusterID)
-		if oldBal, ok := oldMap[id]; ok && oldBal != b.EffectiveBalance {
-			diff.Changed = append(diff.Changed, ClusterDiff{
-				ClusterID:  "0x" + id,
-				OldBalance: oldBal,
-				NewBalance: b.EffectiveBalance,
+		curMap[id] = struct{}{}
+		if oldBal, ok := oldMap[id]; ok {
+			if oldBal != b.EffectiveBalance {
+				diff.Changed = append(diff.Changed, ClusterDiff{
+					ClusterID:  "0x" + id,
+					OldBalance: oldBal,
+					NewBalance: b.EffectiveBalance,
+				})
+			}
+		} else {
+			diff.Added = append(diff.Added, ClusterBalanceEntry{
+				ClusterID: "0x" + id,
+				Balance:   b.EffectiveBalance,
+			})
+		}
+	}
+	for _, b := range old {
+		id := fmt.Sprintf("%x", b.ClusterID)
+		if _, ok := curMap[id]; !ok {
+			diff.Removed = append(diff.Removed, ClusterBalanceEntry{
+				ClusterID: "0x" + id,
+				Balance:   b.EffectiveBalance,
 			})
 		}
 	}
 
-	if len(diff.Changed) == 0 {
+	if len(diff.Changed) == 0 && len(diff.Added) == 0 && len(diff.Removed) == 0 {
 		return nil
 	}
 	return diff

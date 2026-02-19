@@ -33,10 +33,12 @@ type ProofResponse struct {
 	ReferenceBlock   uint64   `json:"referenceBlock"`
 }
 
-// CommitDiff represents cluster balance changes between two commits.
+// CommitDiff represents cluster changes between two commits.
 type CommitDiff struct {
-	PreviousEpoch uint64        `json:"previousEpoch"`
-	Changed       []ClusterDiff `json:"changed,omitempty"`
+	PreviousEpoch uint64                `json:"previousEpoch"`
+	Changed       []ClusterDiff         `json:"changed,omitempty"`
+	Added         []ClusterBalanceEntry `json:"added,omitempty"`
+	Removed       []ClusterBalanceEntry `json:"removed,omitempty"`
 }
 
 // ClusterDiff represents a cluster whose balance changed between commits.
@@ -44,6 +46,12 @@ type ClusterDiff struct {
 	ClusterID  string `json:"clusterId"`
 	OldBalance uint32 `json:"oldBalance"`
 	NewBalance uint32 `json:"newBalance"`
+}
+
+// ClusterBalanceEntry represents a cluster with its balance (used for added/removed in diffs).
+type ClusterBalanceEntry struct {
+	ClusterID string `json:"clusterId"`
+	Balance   uint32 `json:"balance"`
 }
 
 // ErrorResponse is returned for all error cases.

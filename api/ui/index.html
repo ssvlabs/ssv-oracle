@@ -229,25 +229,53 @@
                     </div>
                 </div>
 
-                <template x-if="commit.balanceDiff?.changed?.length">
-                    <div class="card rounded-xl p-5 mb-6">
-                        <div class="flex items-center gap-3 mb-4">
-                            <p class="font-medium">Cluster Balance Updates</p>
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-ssv-accent/15 text-ssv-accent border-ssv-accent/30"
-                                x-text="commit.balanceDiff.changed.length + ' changed'"></span>
+                <template x-if="commit.balanceDiff">
+                    <div class="card rounded-xl p-5 mb-6" x-data="{tab: 'changed'}" x-effect="tab = commit.balanceDiff?.changed?.length ? 'changed' : commit.balanceDiff?.added?.length ? 'added' : 'removed'">
+                        <div class="flex items-center gap-2 mb-4 flex-wrap">
+                            <template x-for="t in [{id:'changed',label:'Changed',n:commit.balanceDiff.changed?.length},{id:'added',label:'Added',n:commit.balanceDiff.added?.length},{id:'removed',label:'Removed',n:commit.balanceDiff.removed?.length}].filter(t => t.n)" :key="t.id">
+                                <button @click="tab = t.id" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                                    :class="tab === t.id ? 'bg-ssv-accent/20 text-ssv-accent' : 'bg-ssv-border/30 text-ssv-text hover:text-ssv-white'"
+                                    x-text="t.label + ' (' + t.n + ')'"></button>
+                            </template>
                         </div>
                         <div class="bg-ssv-bg/50 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
-                            <table class="w-full text-sm">
+                            <table x-show="tab === 'changed'" class="w-full text-sm">
                                 <thead class="text-xs text-ssv-text uppercase sticky top-0 bg-ssv-bg/90">
                                     <tr><th class="text-left px-3 py-2">Cluster ID</th><th class="text-right px-3 py-2">Old</th><th class="text-right px-3 py-2">New</th><th class="text-right px-3 py-2">Delta</th></tr>
                                 </thead>
                                 <tbody>
-                                    <template x-for="d in [...commit.balanceDiff.changed].sort((a, b) => Math.abs(b.newBalance - b.oldBalance) - Math.abs(a.newBalance - a.oldBalance))" :key="d.clusterId">
+                                    <template x-for="d in [...(commit.balanceDiff.changed||[])].sort((a, b) => Math.abs(b.newBalance - b.oldBalance) - Math.abs(a.newBalance - a.oldBalance))" :key="d.clusterId">
                                         <tr class="border-t border-ssv-border/20 hover:bg-ssv-border/20 cursor-pointer" @click="selectClusterById(d.clusterId)">
                                             <td class="px-3 py-2 font-mono text-xs truncate max-w-[200px]" x-text="d.clusterId"></td>
                                             <td class="px-3 py-2 text-right text-ssv-text" x-text="d.oldBalance.toLocaleString()"></td>
                                             <td class="px-3 py-2 text-right" x-text="d.newBalance.toLocaleString()"></td>
                                             <td class="px-3 py-2 text-right font-medium" :class="d.newBalance > d.oldBalance ? 'text-ssv-success' : 'text-ssv-error'" x-text="(d.newBalance > d.oldBalance ? '+' : '') + (d.newBalance - d.oldBalance).toLocaleString()"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                            <table x-show="tab === 'added'" class="w-full text-sm">
+                                <thead class="text-xs text-ssv-text uppercase sticky top-0 bg-ssv-bg/90">
+                                    <tr><th class="text-left px-3 py-2">Cluster ID</th><th class="text-right px-3 py-2">Balance</th></tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="d in (commit.balanceDiff.added||[])" :key="d.clusterId">
+                                        <tr class="border-t border-ssv-border/20 hover:bg-ssv-border/20 cursor-pointer" @click="selectClusterById(d.clusterId)">
+                                            <td class="px-3 py-2 font-mono text-xs truncate max-w-[200px]" x-text="d.clusterId"></td>
+                                            <td class="px-3 py-2 text-right text-ssv-success" x-text="'+' + d.balance.toLocaleString()"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                            <table x-show="tab === 'removed'" class="w-full text-sm">
+                                <thead class="text-xs text-ssv-text uppercase sticky top-0 bg-ssv-bg/90">
+                                    <tr><th class="text-left px-3 py-2">Cluster ID</th><th class="text-right px-3 py-2">Balance</th></tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="d in (commit.balanceDiff.removed||[])" :key="d.clusterId">
+                                        <tr class="border-t border-ssv-border/20">
+                                            <td class="px-3 py-2 font-mono text-xs truncate max-w-[200px]" x-text="d.clusterId"></td>
+                                            <td class="px-3 py-2 text-right text-ssv-error" x-text="'-' + d.balance.toLocaleString()"></td>
                                         </tr>
                                     </template>
                                 </tbody>
@@ -288,7 +316,7 @@
                     <p x-cloak x-show="search.error" class="mt-3 text-ssv-error text-sm" x-text="search.error"></p>
                 </div>
 
-                <div x-cloak x-show="selected"
+                <div id="selected-cluster" x-cloak x-show="selected"
                      x-transition:enter="slide-enter" x-transition:leave="slide-leave"
                      class="card p-5 border-ssv-accent/30 overflow-hidden" :class="selected ? 'mb-6' : ''">
                     <div class="flex items-center gap-2 mb-4">
@@ -425,10 +453,12 @@
                 },
 
                 get balanceDelta() {
-                    const changed = this.commit?.balanceDiff?.changed;
-                    if (!changed?.length) return null;
+                    const diff = this.commit?.balanceDiff;
+                    if (!diff) return null;
                     let delta = 0;
-                    for (const c of changed) delta += c.newBalance - c.oldBalance;
+                    for (const c of diff.changed || []) delta += c.newBalance - c.oldBalance;
+                    for (const c of diff.added || []) delta += c.balance;
+                    for (const c of diff.removed || []) delta -= c.balance;
                     return delta || null;
                 },
 
@@ -631,7 +661,10 @@
                 },
 
                 selectSuggestion(cluster) { this.search.query = cluster.clusterId; this.search.showDropdown = false; this.selectCluster(cluster); },
-                selectClusterById(id) { const c = this.commit?.clusters?.find(c => c.clusterId === id); if (c) this.selectCluster(c); },
+                selectClusterById(id) {
+                    const c = this.commit?.clusters?.find(c => c.clusterId === id);
+                    if (c) { this.selectCluster(c); this.$nextTick(() => document.getElementById('selected-cluster')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })); }
+                },
 
                 submitSearch() {
                     this.search.error = null;

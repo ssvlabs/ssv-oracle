@@ -829,12 +829,13 @@ func TestHandleGetCommit_TotalBalanceAndDiff(t *testing.T) {
 	// Total balance: 40 + 64 + 128 = 232
 	require.Equal(t, uint64(232), resp.TotalEffectiveBalance)
 
-	// Diff: cluster 0x11 changed 32->40, cluster 0x22 unchanged, cluster 0x33 new (ignored)
 	require.NotNil(t, resp.BalanceDiff)
 	require.Equal(t, uint64(100), resp.BalanceDiff.PreviousEpoch)
 	require.Len(t, resp.BalanceDiff.Changed, 1)
 	require.Equal(t, uint32(32), resp.BalanceDiff.Changed[0].OldBalance)
 	require.Equal(t, uint32(40), resp.BalanceDiff.Changed[0].NewBalance)
+	require.Len(t, resp.BalanceDiff.Added, 1)
+	require.Equal(t, uint32(128), resp.BalanceDiff.Added[0].Balance)
 }
 
 func TestHandleGetCommit_FirstCommitNoDiff(t *testing.T) {
@@ -897,6 +898,10 @@ func TestComputeDiff(t *testing.T) {
 	require.Len(t, diff.Changed, 1)
 	require.Equal(t, uint32(32), diff.Changed[0].OldBalance)
 	require.Equal(t, uint32(40), diff.Changed[0].NewBalance)
+	require.Len(t, diff.Added, 1)
+	require.Equal(t, uint32(128), diff.Added[0].Balance)
+	require.Len(t, diff.Removed, 1)
+	require.Equal(t, uint32(96), diff.Removed[0].Balance)
 }
 
 func TestComputeDiff_NoChanges(t *testing.T) {
@@ -905,6 +910,24 @@ func TestComputeDiff_NoChanges(t *testing.T) {
 	}
 	diff := computeDiff(50, bal, bal)
 	require.Nil(t, diff)
+}
+
+func TestComputeDiff_OnlyAddedRemoved(t *testing.T) {
+	old := []storage.ClusterBalance{
+		{ClusterID: testClusterID(0x11), EffectiveBalance: 32},
+	}
+	cur := []storage.ClusterBalance{
+		{ClusterID: testClusterID(0x22), EffectiveBalance: 64},
+	}
+
+	diff := computeDiff(50, old, cur)
+
+	require.NotNil(t, diff)
+	require.Empty(t, diff.Changed)
+	require.Len(t, diff.Added, 1)
+	require.Equal(t, uint32(64), diff.Added[0].Balance)
+	require.Len(t, diff.Removed, 1)
+	require.Equal(t, uint32(32), diff.Removed[0].Balance)
 }
 
 func TestToHexOrEmpty(t *testing.T) {

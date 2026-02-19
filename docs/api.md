@@ -89,6 +89,12 @@ Get a commit with full cluster balances, merkle tree layers, and balance changes
     "previousEpoch": 54200,
     "changed": [
       { "clusterId": "0xabc...", "oldBalance": 310, "newBalance": 320 }
+    ],
+    "added": [
+      { "clusterId": "0xdef...", "balance": 320 }
+    ],
+    "removed": [
+      { "clusterId": "0x999...", "balance": 160 }
     ]
   }
 }
@@ -98,7 +104,10 @@ Get a commit with full cluster balances, merkle tree layers, and balance changes
 - `clusters` - Array of cluster balances with leaf hashes, owner address, and operator IDs
 - `layers` - Inner merkle tree layers (excludes leaves, which are in `clusters`)
 - `totalEffectiveBalance` - Sum of all cluster effective balances
-- `balanceDiff` - Cluster balance updates compared to the previous commit (only clusters that exist in both commits; omitted if no changes or no previous commit)
+- `balanceDiff` - Cluster changes compared to the previous commit (omitted if no changes or no previous commit)
+  - `changed` - Clusters with different balances in both commits
+  - `added` - Clusters present in current but not previous commit
+  - `removed` - Clusters present in previous but not current commit
 
 **Example:**
 
