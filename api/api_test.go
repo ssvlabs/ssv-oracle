@@ -69,6 +69,36 @@ func TestHandleGetCommit_NoCommit(t *testing.T) {
 	require.Equal(t, "no commit found", resp.Error)
 }
 
+func TestHandleGetCommit_StorageError(t *testing.T) {
+	server := New(&mockStorage{err: fmt.Errorf("db connection lost")}, "127.0.0.1:0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleGetCommit(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+
+	var resp ErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "internal error", resp.Error)
+}
+
+func TestHandleGetCommit_InvalidEpoch(t *testing.T) {
+	server := New(&mockStorage{}, "127.0.0.1:0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=abc", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleGetCommit(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp ErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "invalid epoch parameter", resp.Error)
+}
+
 func TestHandleGetCommit_Basic(t *testing.T) {
 	commit := &storage.OracleCommit{
 		TargetEpoch:    100,

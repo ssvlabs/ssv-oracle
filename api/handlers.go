@@ -16,10 +16,16 @@ import (
 
 const internalError = "internal error"
 
+var (
+	errBadEpoch       = errors.New("invalid epoch parameter")
+	errCommitNotFound = errors.New("no commit found")
+)
+
 func (s *Server) handleGetCommit(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	commit, prevEpoch, nextEpoch, ok := s.resolveCommit(ctx, w, r)
-	if !ok {
+	commit, prevEpoch, nextEpoch, err := s.resolveCommit(ctx, r)
+	if err != nil {
+		s.handleResolveError(w, err)
 		return
 	}
 
@@ -102,8 +108,9 @@ func (s *Server) handleGetProof(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	commit, _, _, ok := s.resolveCommit(r.Context(), w, r)
-	if !ok {
+	commit, _, _, err := s.resolveCommit(r.Context(), r)
+	if err != nil {
+		s.handleResolveError(w, err)
 		return
 	}
 
@@ -157,34 +164,44 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveCommit parses the optional epoch query param and returns the commit
-// with navigation epochs. Writes an error response and returns ok=false on failure.
-func (s *Server) resolveCommit(ctx context.Context, w http.ResponseWriter, r *http.Request) (commit *storage.OracleCommit, prev, next *uint64, ok bool) {
-	var err error
-
+// with navigation epochs.
+func (s *Server) resolveCommit(ctx context.Context, r *http.Request) (commit *storage.OracleCommit, prev, next *uint64, err error) {
 	if epochStr := r.URL.Query().Get("epoch"); epochStr != "" {
 		epoch, parseErr := strconv.ParseUint(epochStr, 10, 64)
 		if parseErr != nil {
-			s.writeError(w, http.StatusBadRequest, "invalid epoch parameter")
-			return nil, nil, nil, false
+			return nil, nil, nil, errBadEpoch
 		}
 		commit, prev, next, err = s.storage.GetCommitByEpoch(ctx, epoch)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("get commit by epoch: %w", err)
+		}
 	} else {
 		commit, err = s.storage.GetLatestCommit(ctx)
-		if err == nil && commit != nil {
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("get latest commit: %w", err)
+		}
+		if commit != nil {
 			_, prev, next, _ = s.storage.GetCommitByEpoch(ctx, commit.TargetEpoch)
 		}
 	}
 
-	if err != nil {
+	if commit == nil {
+		return nil, nil, nil, errCommitNotFound
+	}
+	return commit, prev, next, nil
+}
+
+// handleResolveError maps resolveCommit errors to HTTP responses.
+func (s *Server) handleResolveError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errBadEpoch):
+		s.writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, errCommitNotFound):
+		s.writeError(w, http.StatusNotFound, err.Error())
+	default:
 		logger.Errorw("Failed to get commit", "error", err)
 		s.writeError(w, http.StatusInternalServerError, internalError)
-		return nil, nil, nil, false
 	}
-	if commit == nil {
-		s.writeError(w, http.StatusNotFound, "no commit found")
-		return nil, nil, nil, false
-	}
-	return commit, prev, next, true
 }
 
 // parseClusterID validates and decodes a cluster ID string (0x + 64 hex chars).

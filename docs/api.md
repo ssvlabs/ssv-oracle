@@ -52,15 +52,16 @@ Get the latest confirmed commit metadata. Use `?epoch=N` to query a specific epo
 # Latest confirmed commit
 curl http://127.0.0.1:8080/api/v1/commit
 
-# Specific epoch
+# Commit for a specific epoch
 curl http://127.0.0.1:8080/api/v1/commit?epoch=54321
+
+# Full details with clusters, tree layers, and balance changes
+curl 'http://127.0.0.1:8080/api/v1/commit?full=true&epoch=54321'
 ```
 
-### GET `/api/v1/commit?full=true`
+#### Full mode (`full=true`)
 
-Get a commit with full cluster balances, merkle tree layers, and balance changes.
-
-**Response:**
+When `full=true` is set, the response includes additional fields:
 
 ```json
 {
@@ -100,7 +101,7 @@ Get a commit with full cluster balances, merkle tree layers, and balance changes
 }
 ```
 
-**Additional fields (full mode only):**
+**Additional fields:**
 - `clusters` - Array of cluster balances with leaf hashes, owner address, and operator IDs
 - `layers` - Inner merkle tree layers (excludes leaves, which are in `clusters`)
 - `totalEffectiveBalance` - Sum of all cluster effective balances
@@ -108,12 +109,6 @@ Get a commit with full cluster balances, merkle tree layers, and balance changes
   - `changed` - Clusters with different balances in both commits
   - `added` - Clusters present in current but not previous commit
   - `removed` - Clusters present in previous but not current commit
-
-**Example:**
-
-```bash
-curl 'http://127.0.0.1:8080/api/v1/commit?full=true&epoch=54321'
-```
 
 ### GET `/api/v1/proof/{clusterId}`
 
