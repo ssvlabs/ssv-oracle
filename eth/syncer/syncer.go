@@ -416,10 +416,10 @@ func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
 		func(batchEnd uint64, logs []execution.BlockLogs) error {
 			for _, blockLogs := range logs {
 				n, err := s.applyClusterUpdates(ctx, blockLogs)
+				updates += n
 				if err != nil {
 					return err
 				}
-				updates += n
 			}
 			return nil
 		})
