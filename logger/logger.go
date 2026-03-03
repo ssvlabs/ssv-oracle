@@ -37,6 +37,8 @@ func Init(level string) {
 		config.DisableStacktrace = true
 	} else {
 		config = zap.NewProductionConfig()
+		// Production config drops repeated messages after 100/sec; disable to preserve all logs.
+		config.Sampling = nil
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	}
 
