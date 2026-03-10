@@ -24,6 +24,8 @@ var uiFS embed.FS
 
 type apiStorage interface {
 	GetLatestCommit(ctx context.Context) (*storage.OracleCommit, error)
+	GetCommitByEpoch(ctx context.Context, epoch uint64) (*storage.OracleCommit, *uint64, *uint64, error)
+	GetAllClusterInfo(ctx context.Context) (storage.AllClusterInfo, error)
 }
 
 // Server is the HTTP API server.
