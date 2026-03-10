@@ -805,6 +805,7 @@ func TestStorage_UpdateClusterIfExists_Existing(t *testing.T) {
 	// Now update using UpdateClusterIfExists
 	updated := &ClusterRow{
 		ClusterID:       clusterID,
+		ValidatorCount:  5,
 		NetworkFeeIndex: 500,
 		Index:           600,
 		IsActive:        false,
@@ -825,6 +826,9 @@ func TestStorage_UpdateClusterIfExists_Existing(t *testing.T) {
 		t.Fatal("Expected cluster, got nil")
 	}
 
+	if got.ValidatorCount != 5 {
+		t.Errorf("ValidatorCount = %d, want 5", got.ValidatorCount)
+	}
 	if got.NetworkFeeIndex != 500 {
 		t.Errorf("NetworkFeeIndex = %d, want 500", got.NetworkFeeIndex)
 	}
@@ -836,10 +840,6 @@ func TestStorage_UpdateClusterIfExists_Existing(t *testing.T) {
 	}
 	if got.Balance.Cmp(big.NewInt(9999)) != 0 {
 		t.Errorf("Balance = %v, want 9999", got.Balance)
-	}
-	// ValidatorCount should remain unchanged
-	if got.ValidatorCount != 1 {
-		t.Errorf("ValidatorCount = %d, want 1 (unchanged)", got.ValidatorCount)
 	}
 }
 

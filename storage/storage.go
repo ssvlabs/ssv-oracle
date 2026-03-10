@@ -593,6 +593,7 @@ func (s *Storage) SetSyncMode(bulk bool) error {
 func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow) error {
 	query := `
 		UPDATE clusters SET
+			validator_count = ?,
 			network_fee_index = ?,
 			idx = ?,
 			is_active = ?,
@@ -600,6 +601,7 @@ func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow
 		WHERE cluster_id = ?
 	`
 	_, err := s.db.ExecContext(ctx, query,
+		cluster.ValidatorCount,
 		cluster.NetworkFeeIndex,
 		cluster.Index,
 		boolToInt(cluster.IsActive),
