@@ -33,6 +33,7 @@ ssv-oracle/
 │   └── syncer/         # Event syncing & parsing
 ├── logger/             # Zap-based structured logging
 ├── merkle/             # OpenZeppelin-compatible Merkle tree
+├── observability/      # OTel metrics setup (Prometheus exporter)
 ├── oracle/             # Main oracle loop
 ├── storage/            # SQLite storage layer
 ├── txmanager/          # Transaction lifecycle (gas, retries, cancellation)
@@ -100,8 +101,9 @@ Listens for RootCommitted events and updates cluster balances on-chain:
 
 ### API Server (api/)
 Optional HTTP API for querying oracle state:
-- `GET /api/v1/commit` - Latest commit with merkle root and block number
-- `GET /api/v1/proof/{clusterId}` - Merkle proof for a specific cluster
+- `GET /api/v1/commit` - Latest commit (`?epoch=N` for specific epoch, `?full=true` for clusters and tree layers)
+- `GET /api/v1/proof/{clusterId}` - Merkle proof for a cluster (`?epoch=N` for specific epoch)
+- `GET /metrics` - Prometheus metrics (OpenMetrics format)
 - Embedded UI at `/` for merkle tree visualization
 
 ### Merkle Tree (merkle/)
@@ -231,3 +233,26 @@ mev_rpcs: "https://rpc.flashbots.net/fast,https://rpc.titanbuilder.xyz"
 - After `pending_timeout_blocks`, switches to `eth_rpc` with gas bumping
 - Minimum 1 gwei tip enforced for MEV RPC compatibility
 - Mutex serializes all tx sends to prevent nonce collisions
+
+## Observability
+
+Prometheus metrics via OpenTelemetry SDK. Exposed at `GET /metrics` (OpenMetrics format).
+
+### Architecture
+- `observability/` — OTel provider setup with Prometheus exporter (`Setup()` called once at startup)
+- Per-package `observability.go` files define metrics and recording helpers
+- Business logic files stay free of OTel imports — they call domain helpers like `recordCommit(ctx, outcome)`
+- Dot-delimited OTel instrument names (e.g. `ssv.oracle.commit`) auto-converted to underscores by Prometheus exporter
+
+### Metrics
+
+| Prometheus Name | Type | Labels | Package | Description |
+|----------------|------|--------|---------|-------------|
+| `ssv_oracle_commit_total` | counter | `outcome` | oracle | Commit cycle outcomes (success, missed, error, reverted, already_committed, conflict) |
+| `ssv_oracle_next_target_epoch` | gauge | — | oracle | Next scheduled commit target epoch |
+| `ssv_oracle_cluster_count` | gauge | — | oracle | Clusters in latest merkle tree |
+| `ssv_oracle_validator_count` | gauge | — | oracle | Active validators at last commit |
+| `ssv_oracle_total_effective_balance` | gauge | — | oracle | Total effective balance across all clusters (ETH) |
+| `ssv_oracle_tx_total` | counter | `outcome` | txmanager | Transaction submissions (success, reverted, cancelled, error) |
+| `ssv_oracle_syncer_last_block` | gauge | — | syncer | Last synced block number |
+| `ssv_oracle_updater_clusters_total` | counter | `outcome` | updater | Cluster update results (updated, skipped, failed) |

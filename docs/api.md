@@ -161,6 +161,16 @@ curl 'http://127.0.0.1:8080/api/v1/proof/0x1234...?epoch=54321'
 }
 ```
 
+### GET `/metrics`
+
+Prometheus metrics in OpenMetrics format. See [CLAUDE.md](../CLAUDE.md#observability) for the full metrics table.
+
+**Example:**
+
+```bash
+curl http://127.0.0.1:8080/metrics
+```
+
 ### GET `/`
 
 Web UI for merkle tree visualization.

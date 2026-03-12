@@ -78,9 +78,9 @@ The oracle exposes an HTTP API for querying committed data and generating merkle
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/commit` | Latest confirmed commit metadata |
-| GET | `/api/v1/commit?full=true` | Include clusters and tree layers |
-| GET | `/api/v1/proof/{clusterId}` | Merkle proof for a cluster |
+| GET | `/api/v1/commit` | Latest confirmed commit (`?epoch=N` for specific epoch, `?full=true` for clusters and tree layers) |
+| GET | `/api/v1/proof/{clusterId}` | Merkle proof for a cluster (`?epoch=N` for specific epoch) |
+| GET | `/metrics` | Prometheus metrics (OpenMetrics) |
 | GET | `/` | Tree visualization UI |
 
 **Configuration:**
