@@ -11,8 +11,11 @@ import (
 	"github.com/ssvlabs/ssv-oracle/logger"
 )
 
+// MetricNamespace is the common prefix for all metric names.
+const MetricNamespace = "ssv.oracle"
+
 // Setup initializes the OTel meter provider with a Prometheus exporter
-// and sets it as the global provider. Must be called once per process.
+// and sets it as the global provider. Must be called once during application startup.
 // Returns a shutdown function that must be called on application exit.
 func Setup() (func(context.Context) error, error) {
 	exporter, err := prometheus.New()

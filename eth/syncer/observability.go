@@ -10,6 +10,6 @@ import (
 var syncerMeter = otel.Meter("github.com/ssvlabs/ssv-oracle/eth/syncer")
 
 var syncerLastBlock = observability.NewMetric(syncerMeter.Int64Gauge(
-	"ssv.oracle.syncer.last_block",
+	observability.MetricNamespace+".syncer.last_block",
 	metric.WithDescription("Last synced block number."),
 ))

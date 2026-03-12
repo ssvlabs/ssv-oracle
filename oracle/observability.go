@@ -23,28 +23,27 @@ var meter = otel.Meter("github.com/ssvlabs/ssv-oracle/oracle")
 
 var (
 	commitCounter = observability.NewMetric(meter.Int64Counter(
-		"ssv.oracle.commit",
-		metric.WithUnit("{commit}"),
+		observability.MetricNamespace+".commit",
 		metric.WithDescription("Oracle commit cycle outcomes."),
 	))
 
 	nextTargetGauge = observability.NewMetric(meter.Int64Gauge(
-		"ssv.oracle.next_target_epoch",
+		observability.MetricNamespace+".next_target_epoch",
 		metric.WithDescription("Next scheduled commit target epoch."),
 	))
 
 	clusterGauge = observability.NewMetric(meter.Int64Gauge(
-		"ssv.oracle.cluster_count",
+		observability.MetricNamespace+".cluster_count",
 		metric.WithDescription("Number of clusters in the latest merkle tree."),
 	))
 
 	validatorGauge = observability.NewMetric(meter.Int64Gauge(
-		"ssv.oracle.validator_count",
+		observability.MetricNamespace+".validator_count",
 		metric.WithDescription("Number of active validators at last commit."),
 	))
 
 	totalEffBalanceGauge = observability.NewMetric(meter.Int64Gauge(
-		"ssv.oracle.total_effective_balance",
+		observability.MetricNamespace+".total_effective_balance",
 		metric.WithUnit("{ETH}"),
 		metric.WithDescription("Total effective balance across all clusters."),
 	))

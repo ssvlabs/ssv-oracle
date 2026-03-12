@@ -20,8 +20,7 @@ const (
 var txMeter = otel.Meter("github.com/ssvlabs/ssv-oracle/txmanager")
 
 var txCounter = observability.NewMetric(txMeter.Int64Counter(
-	"ssv.oracle.tx",
-	metric.WithUnit("{tx}"),
+	observability.MetricNamespace+".tx",
 	metric.WithDescription("Total transaction submissions by outcome."),
 ))
 

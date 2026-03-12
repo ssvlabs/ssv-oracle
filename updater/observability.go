@@ -19,8 +19,7 @@ const (
 var updaterMeter = otel.Meter("github.com/ssvlabs/ssv-oracle/updater")
 
 var updaterClustersCounter = observability.NewMetric(updaterMeter.Int64Counter(
-	"ssv.oracle.updater.clusters",
-	metric.WithUnit("{cluster}"),
+	observability.MetricNamespace+".updater.clusters",
 	metric.WithDescription("Total cluster update results by outcome."),
 ))
 
