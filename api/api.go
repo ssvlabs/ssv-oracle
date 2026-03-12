@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/ssvlabs/ssv-oracle/logger"
 	"github.com/ssvlabs/ssv-oracle/merkle"
 	"github.com/ssvlabs/ssv-oracle/storage"
@@ -51,6 +54,10 @@ func (s *Server) Run(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/v1/", s.contentTypeMiddleware(apiMux))
+	mux.Handle("GET /metrics", promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{EnableOpenMetrics: true},
+	))
 	mux.HandleFunc("GET /", s.handleUI)
 
 	handler := s.recoveryMiddleware(mux)

@@ -18,6 +18,7 @@ import (
 	"github.com/ssvlabs/ssv-oracle/eth/execution"
 	"github.com/ssvlabs/ssv-oracle/eth/syncer"
 	"github.com/ssvlabs/ssv-oracle/logger"
+	"github.com/ssvlabs/ssv-oracle/observability"
 	"github.com/ssvlabs/ssv-oracle/oracle"
 	"github.com/ssvlabs/ssv-oracle/storage"
 	"github.com/ssvlabs/ssv-oracle/updater"
@@ -56,6 +57,12 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	logger.Init(cfg.LogLevel)
+
+	metricsShutdown, err := observability.Setup()
+	if err != nil {
+		return fmt.Errorf("setup metrics: %w", err)
+	}
+	defer func() { _ = metricsShutdown(context.Background()) }()
 
 	signer, err := wallet.NewSigner(&cfg.Wallet)
 	if err != nil {
