@@ -33,7 +33,7 @@ jobs:
           password: ${{ secrets.SSV_ORACLE_DOCKER_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
         with:
           context: .
           push: true
