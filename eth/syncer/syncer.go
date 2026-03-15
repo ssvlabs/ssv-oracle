@@ -95,6 +95,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 	}
 
 	if lastSynced >= targetBlock {
+		syncerLastBlock.Record(ctx, int64(lastSynced))
 		logger.Debugw("Events already synced", "lastSynced", lastSynced, "target", targetBlock)
 		return nil
 	}
@@ -168,6 +169,7 @@ func (s *EventSyncer) SyncToBlock(ctx context.Context, targetBlock uint64) error
 
 	_ = bar.Finish()
 
+	syncerLastBlock.Record(ctx, int64(targetBlock))
 	logger.Infow("Events synced", "from", lastSynced+1, "to", targetBlock, "events", knownEvents, "took", time.Since(start).Round(time.Millisecond).String())
 	return nil
 }
