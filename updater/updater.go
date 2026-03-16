@@ -204,6 +204,8 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		}
 	}
 
+	recordClusterUpdates(ctx, stats)
+
 	log.Infow("Commit complete",
 		"updated", stats.updated,
 		"skipped", stats.skipped,

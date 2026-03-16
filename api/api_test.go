@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,12 +15,43 @@ import (
 )
 
 type mockStorage struct {
-	commit *storage.OracleCommit
-	err    error
+	commit      *storage.OracleCommit
+	commits     map[uint64]*storage.OracleCommit // epoch -> commit
+	clusterInfo storage.AllClusterInfo
+	err         error
 }
 
 func (m *mockStorage) GetLatestCommit(_ context.Context) (*storage.OracleCommit, error) {
 	return m.commit, m.err
+}
+
+func (m *mockStorage) GetCommitByEpoch(_ context.Context, epoch uint64) (*storage.OracleCommit, *uint64, *uint64, error) {
+	if m.err != nil {
+		return nil, nil, nil, m.err
+	}
+	c, ok := m.commits[epoch]
+	if !ok {
+		return nil, nil, nil, nil
+	}
+	var prev, next *uint64
+	for e := range m.commits {
+		if e < epoch && (prev == nil || e > *prev) {
+			v := e
+			prev = &v
+		}
+		if e > epoch && (next == nil || e < *next) {
+			v := e
+			next = &v
+		}
+	}
+	return c, prev, next, nil
+}
+
+func (m *mockStorage) GetAllClusterInfo(_ context.Context) (storage.AllClusterInfo, error) {
+	if m.clusterInfo != nil {
+		return m.clusterInfo, nil
+	}
+	return make(storage.AllClusterInfo), nil
 }
 
 func TestHandleGetCommit_NoCommit(t *testing.T) {
@@ -37,6 +69,36 @@ func TestHandleGetCommit_NoCommit(t *testing.T) {
 	require.Equal(t, "no commit found", resp.Error)
 }
 
+func TestHandleGetCommit_StorageError(t *testing.T) {
+	server := New(&mockStorage{err: fmt.Errorf("db connection lost")}, "127.0.0.1:0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleGetCommit(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+
+	var resp ErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "internal error", resp.Error)
+}
+
+func TestHandleGetCommit_InvalidEpoch(t *testing.T) {
+	server := New(&mockStorage{}, "127.0.0.1:0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=abc", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleGetCommit(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp ErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "invalid epoch parameter", resp.Error)
+}
+
 func TestHandleGetCommit_Basic(t *testing.T) {
 	commit := &storage.OracleCommit{
 		TargetEpoch:    100,
@@ -51,7 +113,10 @@ func TestHandleGetCommit_Basic(t *testing.T) {
 	commit.TxHash[0] = 0xee
 	commit.ClusterBalances[0].ClusterID[0] = 0x11
 
-	server := New(&mockStorage{commit: commit}, "127.0.0.1:0")
+	server := New(&mockStorage{
+		commit:  commit,
+		commits: map[uint64]*storage.OracleCommit{100: commit},
+	}, "127.0.0.1:0")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit", nil)
 	rec := httptest.NewRecorder()
@@ -89,7 +154,10 @@ func TestHandleGetCommit_FullTree(t *testing.T) {
 		ClusterBalances: clusterBalances,
 	}
 
-	server := New(&mockStorage{commit: commit}, "127.0.0.1:0")
+	server := New(&mockStorage{
+		commit:  commit,
+		commits: map[uint64]*storage.OracleCommit{100: commit},
+	}, "127.0.0.1:0")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?full=true", nil)
 	rec := httptest.NewRecorder()
@@ -111,6 +179,50 @@ func TestHandleGetCommit_FullTree(t *testing.T) {
 	}
 }
 
+func TestHandleGetCommit_ClusterInfoEnrichment(t *testing.T) {
+	clusterBalances := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+	}
+	clusterBalances[0].ClusterID[0] = 0x11
+
+	tree := buildTree(clusterBalances)
+
+	commit := &storage.OracleCommit{
+		TargetEpoch:     100,
+		MerkleRoot:      tree.Root[:],
+		ReferenceBlock:  500000,
+		TxHash:          make([]byte, 32),
+		ClusterBalances: clusterBalances,
+	}
+
+	ownerAddr := []byte{0xaa, 0xbb}
+	clusterInfo := storage.AllClusterInfo{
+		fmt.Sprintf("%x", clusterBalances[0].ClusterID): {
+			OwnerAddress: ownerAddr,
+			OperatorIDs:  []uint64{1, 2, 3, 4},
+		},
+	}
+
+	server := New(&mockStorage{
+		commit:      commit,
+		commits:     map[uint64]*storage.OracleCommit{100: commit},
+		clusterInfo: clusterInfo,
+	}, "127.0.0.1:0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?full=true", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleGetCommit(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp CommitResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Clusters, 1)
+	require.Equal(t, toHex(ownerAddr), resp.Clusters[0].OwnerAddress)
+	require.Equal(t, []uint64{1, 2, 3, 4}, resp.Clusters[0].OperatorIDs)
+}
+
 func TestHandleGetCommit_SingleCluster(t *testing.T) {
 	clusterID := [32]byte{0x11}
 	effectiveBalance := uint32(32)
@@ -128,7 +240,10 @@ func TestHandleGetCommit_SingleCluster(t *testing.T) {
 		},
 	}
 
-	server := New(&mockStorage{commit: commit}, "127.0.0.1:0")
+	server := New(&mockStorage{
+		commit:  commit,
+		commits: map[uint64]*storage.OracleCommit{100: commit},
+	}, "127.0.0.1:0")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?full=true", nil)
 	rec := httptest.NewRecorder()
@@ -265,6 +380,68 @@ func TestHandleGetProof_Success(t *testing.T) {
 	require.NotEmpty(t, resp.Proof)
 	require.NotEmpty(t, resp.MerkleRoot)
 	require.Equal(t, uint64(500000), resp.ReferenceBlock)
+}
+
+func TestHandleGetProof_WithEpoch(t *testing.T) {
+	balances100 := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64},
+	}
+	balances100[0].ClusterID[0] = 0x11
+	balances100[1].ClusterID[0] = 0x22
+	tree100 := buildTree(balances100)
+
+	balances200 := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 40},
+	}
+	balances200[0].ClusterID[0] = 0x11
+	tree200 := buildTree(balances200)
+
+	commits := map[uint64]*storage.OracleCommit{
+		100: {
+			TargetEpoch: 100, MerkleRoot: tree100.Root[:], ReferenceBlock: 500000,
+			TxHash: make([]byte, 32), ClusterBalances: balances100,
+		},
+		200: {
+			TargetEpoch: 200, MerkleRoot: tree200.Root[:], ReferenceBlock: 600000,
+			TxHash: make([]byte, 32), ClusterBalances: balances200,
+		},
+	}
+
+	server := New(&mockStorage{commit: commits[200], commits: commits}, "127.0.0.1:0")
+
+	clusterID := "0x1100000000000000000000000000000000000000000000000000000000000000"
+
+	t.Run("epoch 100 returns proof from historical commit", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+clusterID+"?epoch=100", nil)
+		req.SetPathValue("clusterId", clusterID)
+		rec := httptest.NewRecorder()
+
+		server.handleGetProof(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp ProofResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Equal(t, uint32(32), resp.EffectiveBalance)
+		require.NotEmpty(t, resp.Proof) // 2 clusters = 1 proof element
+		require.Equal(t, toHex(tree100.Root[:]), resp.MerkleRoot)
+	})
+
+	t.Run("no epoch returns latest", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+clusterID, nil)
+		req.SetPathValue("clusterId", clusterID)
+		rec := httptest.NewRecorder()
+
+		server.handleGetProof(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp ProofResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Equal(t, uint32(40), resp.EffectiveBalance)
+		require.Equal(t, toHex(tree200.Root[:]), resp.MerkleRoot)
+	})
 }
 
 func TestHandleGetProof_SingleCluster(t *testing.T) {
@@ -404,7 +581,10 @@ func TestHandleGetCommit_OddLeafCount(t *testing.T) {
 		ClusterBalances: clusterBalances,
 	}
 
-	server := New(&mockStorage{commit: commit}, "127.0.0.1:0")
+	server := New(&mockStorage{
+		commit:  commit,
+		commits: map[uint64]*storage.OracleCommit{100: commit},
+	}, "127.0.0.1:0")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?full=true", nil)
 	rec := httptest.NewRecorder()
@@ -489,7 +669,10 @@ func TestHandleGetCommit_RootMismatch(t *testing.T) {
 		ClusterBalances: clusterBalances,
 	}
 
-	server := New(&mockStorage{commit: commit}, "127.0.0.1:0")
+	server := New(&mockStorage{
+		commit:  commit,
+		commits: map[uint64]*storage.OracleCommit{100: commit},
+	}, "127.0.0.1:0")
 
 	// Request with full=true triggers root verification
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?full=true", nil)
@@ -536,6 +719,245 @@ func TestHandleGetProof_RootMismatch(t *testing.T) {
 	var resp ErrorResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, "internal error", resp.Error)
+}
+
+func TestHandleGetCommit_EpochParam(t *testing.T) {
+	balances1 := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+	}
+	balances1[0].ClusterID[0] = 0x11
+	tree1 := buildTree(balances1)
+
+	balances2 := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64},
+	}
+	balances2[0].ClusterID[0] = 0x11
+	tree2 := buildTree(balances2)
+
+	commits := map[uint64]*storage.OracleCommit{
+		100: {
+			TargetEpoch:     100,
+			MerkleRoot:      tree1.Root[:],
+			ReferenceBlock:  500000,
+			TxHash:          make([]byte, 32),
+			ClusterBalances: balances1,
+			Status:          storage.CommitStatusConfirmed,
+		},
+		200: {
+			TargetEpoch:     200,
+			MerkleRoot:      tree2.Root[:],
+			ReferenceBlock:  600000,
+			TxHash:          make([]byte, 32),
+			ClusterBalances: balances2,
+			Status:          storage.CommitStatusConfirmed,
+		},
+	}
+
+	server := New(&mockStorage{commit: commits[200], commits: commits}, "127.0.0.1:0")
+
+	t.Run("specific epoch", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=100", nil)
+		rec := httptest.NewRecorder()
+
+		server.handleGetCommit(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp CommitResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Equal(t, uint64(100), resp.Epoch)
+		require.Nil(t, resp.PreviousEpoch)
+		require.NotNil(t, resp.NextEpoch)
+		require.Equal(t, uint64(200), *resp.NextEpoch)
+	})
+
+	t.Run("latest has prev", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=200", nil)
+		rec := httptest.NewRecorder()
+
+		server.handleGetCommit(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp CommitResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Equal(t, uint64(200), resp.Epoch)
+		require.NotNil(t, resp.PreviousEpoch)
+		require.Equal(t, uint64(100), *resp.PreviousEpoch)
+		require.Nil(t, resp.NextEpoch)
+	})
+
+	t.Run("nonexistent epoch", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=999", nil)
+		rec := httptest.NewRecorder()
+
+		server.handleGetCommit(rec, req)
+
+		require.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("invalid epoch", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=abc", nil)
+		rec := httptest.NewRecorder()
+
+		server.handleGetCommit(rec, req)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+}
+
+func TestHandleGetCommit_TotalBalanceAndDiff(t *testing.T) {
+	balances1 := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64},
+	}
+	balances1[0].ClusterID[0] = 0x11
+	balances1[1].ClusterID[0] = 0x22
+	tree1 := buildTree(balances1)
+
+	balances2 := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 40},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 64},
+		{ClusterID: make([]byte, 32), EffectiveBalance: 128},
+	}
+	balances2[0].ClusterID[0] = 0x11
+	balances2[1].ClusterID[0] = 0x22
+	balances2[2].ClusterID[0] = 0x33
+	tree2 := buildTree(balances2)
+
+	commits := map[uint64]*storage.OracleCommit{
+		100: {
+			TargetEpoch:     100,
+			MerkleRoot:      tree1.Root[:],
+			ReferenceBlock:  500000,
+			TxHash:          make([]byte, 32),
+			ClusterBalances: balances1,
+			Status:          storage.CommitStatusConfirmed,
+		},
+		200: {
+			TargetEpoch:     200,
+			MerkleRoot:      tree2.Root[:],
+			ReferenceBlock:  600000,
+			TxHash:          make([]byte, 32),
+			ClusterBalances: balances2,
+			Status:          storage.CommitStatusConfirmed,
+		},
+	}
+
+	server := New(&mockStorage{commit: commits[200], commits: commits}, "127.0.0.1:0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=200&full=true", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleGetCommit(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp CommitResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	// Total balance: 40 + 64 + 128 = 232
+	require.Equal(t, uint64(232), resp.TotalEffectiveBalance)
+
+	require.NotNil(t, resp.BalanceDiff)
+	require.Equal(t, uint64(100), resp.BalanceDiff.PreviousEpoch)
+	require.Len(t, resp.BalanceDiff.Changed, 1)
+	require.Equal(t, uint32(32), resp.BalanceDiff.Changed[0].OldBalance)
+	require.Equal(t, uint32(40), resp.BalanceDiff.Changed[0].NewBalance)
+	require.Len(t, resp.BalanceDiff.Added, 1)
+	require.Equal(t, uint32(128), resp.BalanceDiff.Added[0].Balance)
+}
+
+func TestHandleGetCommit_FirstCommitNoDiff(t *testing.T) {
+	balances := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+	}
+	balances[0].ClusterID[0] = 0x11
+	tree := buildTree(balances)
+
+	commits := map[uint64]*storage.OracleCommit{
+		100: {
+			TargetEpoch:     100,
+			MerkleRoot:      tree.Root[:],
+			ReferenceBlock:  500000,
+			TxHash:          make([]byte, 32),
+			ClusterBalances: balances,
+			Status:          storage.CommitStatusConfirmed,
+		},
+	}
+
+	server := New(&mockStorage{commit: commits[100], commits: commits}, "127.0.0.1:0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/commit?epoch=100&full=true", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleGetCommit(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp CommitResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, uint64(32), resp.TotalEffectiveBalance)
+	require.Nil(t, resp.BalanceDiff)
+	require.Nil(t, resp.PreviousEpoch)
+	require.Nil(t, resp.NextEpoch)
+}
+
+func testClusterID(prefix byte) []byte {
+	id := make([]byte, 32)
+	id[0] = prefix
+	return id
+}
+
+func TestComputeDiff(t *testing.T) {
+	old := []storage.ClusterBalance{
+		{ClusterID: testClusterID(0x11), EffectiveBalance: 32},
+		{ClusterID: testClusterID(0x22), EffectiveBalance: 64},
+		{ClusterID: testClusterID(0x33), EffectiveBalance: 96},
+	}
+	cur := []storage.ClusterBalance{
+		{ClusterID: testClusterID(0x11), EffectiveBalance: 40},
+		{ClusterID: testClusterID(0x22), EffectiveBalance: 64},
+		{ClusterID: testClusterID(0x44), EffectiveBalance: 128},
+	}
+
+	diff := computeDiff(50, old, cur)
+
+	require.NotNil(t, diff)
+	require.Equal(t, uint64(50), diff.PreviousEpoch)
+	require.Len(t, diff.Changed, 1)
+	require.Equal(t, uint32(32), diff.Changed[0].OldBalance)
+	require.Equal(t, uint32(40), diff.Changed[0].NewBalance)
+	require.Len(t, diff.Added, 1)
+	require.Equal(t, uint32(128), diff.Added[0].Balance)
+	require.Len(t, diff.Removed, 1)
+	require.Equal(t, uint32(96), diff.Removed[0].Balance)
+}
+
+func TestComputeDiff_NoChanges(t *testing.T) {
+	bal := []storage.ClusterBalance{
+		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
+	}
+	diff := computeDiff(50, bal, bal)
+	require.Nil(t, diff)
+}
+
+func TestComputeDiff_OnlyAddedRemoved(t *testing.T) {
+	old := []storage.ClusterBalance{
+		{ClusterID: testClusterID(0x11), EffectiveBalance: 32},
+	}
+	cur := []storage.ClusterBalance{
+		{ClusterID: testClusterID(0x22), EffectiveBalance: 64},
+	}
+
+	diff := computeDiff(50, old, cur)
+
+	require.NotNil(t, diff)
+	require.Empty(t, diff.Changed)
+	require.Len(t, diff.Added, 1)
+	require.Equal(t, uint32(64), diff.Added[0].Balance)
+	require.Len(t, diff.Removed, 1)
+	require.Equal(t, uint32(32), diff.Removed[0].Balance)
 }
 
 func TestToHexOrEmpty(t *testing.T) {

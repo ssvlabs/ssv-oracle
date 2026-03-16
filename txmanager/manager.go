@@ -152,16 +152,23 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 	gasLimit, err := m.estimateGas(ctx, opts)
 	if err != nil {
+		if _, isRevert := IsRevertError(err); isRevert {
+			recordTx(ctx, txOutcomeReverted)
+		} else {
+			recordTx(ctx, txOutcomeError)
+		}
 		return nil, err
 	}
 
 	gasTipCap, gasFeeCap, err := m.suggestGasFees(ctx)
 	if err != nil {
+		recordTx(ctx, txOutcomeError)
 		return nil, err
 	}
 
 	nonce, err := m.client.PendingNonceAt(ctx, from)
 	if err != nil {
+		recordTx(ctx, txOutcomeError)
 		return nil, fmt.Errorf("get nonce: %w", err)
 	}
 
@@ -181,6 +188,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 	for attempt := 1; attempt <= m.policy.MaxAttempts; attempt++ {
 		signedTx, err := m.buildAndSignTx(opts, nonce, gasLimit, currentTip, currentFeeCap, value)
 		if err != nil {
+			recordTx(ctx, txOutcomeError)
 			return nil, err
 		}
 		log = logger.With("hash", signedTx.Hash().Hex(),
@@ -204,12 +212,15 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			case isNonceTooLow(sendErr):
 				if len(publishedTxs) > 0 {
 					if receipt, recErr := m.findMinedReceipt(ctx, opts, publishedTxs); receipt != nil {
+						recordTxReceipt(ctx, recErr)
 						return receipt, recErr
 					}
 				}
+				recordTx(ctx, txOutcomeError)
 				return nil, fmt.Errorf("%w: %w", errNonceTooLow, sendErr)
 
 			case isInsufficientFunds(sendErr):
+				recordTx(ctx, txOutcomeError)
 				return nil, fmt.Errorf("%w: %w", errInsufficientFunds, sendErr)
 
 			case isUnderpriced(sendErr):
@@ -222,6 +233,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 					if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 						log.Warnw("Cancel tx failed", "error", err)
 					}
+					recordTx(ctx, txOutcomeCancelled)
 					return nil, errMaxGasReached
 				}
 				log.Warnw("Tx underpriced",
@@ -247,6 +259,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 					}
 					continue
 				}
+				recordTx(ctx, txOutcomeError)
 				return nil, fmt.Errorf("send tx: %w", sendErr)
 			}
 		}
@@ -261,7 +274,9 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 
 		receipt, err := m.waitForReceipt(ctx, signedTx)
 		if err == nil {
-			return m.handleReceipt(ctx, opts, signedTx, receipt)
+			rcpt, rcptErr := m.handleReceipt(ctx, opts, signedTx, receipt)
+			recordTxReceipt(ctx, rcptErr)
+			return rcpt, rcptErr
 		}
 
 		if ctx.Err() != nil {
@@ -292,6 +307,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 			if err := m.cancelTx(ctx, nonce, currentFeeCap); err != nil {
 				log.Warnw("Cancel tx failed", "error", err)
 			}
+			recordTx(ctx, txOutcomeCancelled)
 			return nil, errMaxGasReached
 		}
 
@@ -305,6 +321,7 @@ func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.R
 		log.Warnw("Cancel tx failed", "error", err)
 	}
 
+	recordTx(ctx, txOutcomeCancelled)
 	return nil, errMaxAttemptsExhausted
 }
 
