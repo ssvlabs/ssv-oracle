@@ -1,0 +1,32 @@
+# SSV Oracle - Ethereum Mainnet
+
+log_level: "debug"
+
+eth_rpc: ""
+beacon_url: ""
+
+# Contracts (Mainnet)
+ssv_contract: "0xDD9BC35aE942eF0cFa76930954a156B3fF30a4E1"
+ssv_views_contract: "0xafE830B6Ee262ba11cce5F32fDCd760FFE6a66e4"
+ssv_contract_deploy_block: 17507487
+
+# Wallet
+wallet:
+  type: "keystore"
+  keystore_path: "/path/to/keystore.json"
+  password_env: "KEYSTORE_PASSWORD"
+
+# Transaction Policy
+tx_policy:
+  gas_buffer_percent: 60
+  max_fee_per_gas_gwei: 100
+  pending_timeout_blocks: 10
+  gas_bump_percent: 10
+  max_attempts: 3
+  retry_delay: 5s
+
+# Commit Schedule
+# Start: Mar 23, 2026, 07:44 UTC
+commit_phases:
+  - start_epoch: 436010
+    interval: 75    # 8 hours (3x daily)
