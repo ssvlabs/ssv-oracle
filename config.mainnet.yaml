@@ -14,7 +14,8 @@ ssv_contract_deploy_block: 17507487
 wallet:
   type: "keystore"
   keystore_path: "/path/to/keystore.json"
-  password_env: "KEYSTORE_PASSWORD"
+  password_file: "/path/to/password.txt"
+  # password_env: "KEYSTORE_PASSWORD"  # Alternative: password from env var
 
 # Transaction Policy
 tx_policy:
