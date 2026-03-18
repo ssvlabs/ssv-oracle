@@ -82,6 +82,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 	}
 	fullyFinalized := finalizedEpoch - 1
 	o.nextTarget = o.schedule.NextTarget(fullyFinalized)
+	recordNextTarget(ctx, o.nextTarget)
 
 	phase := o.schedule.PhaseAt(fullyFinalized)
 	logger.Infow("Oracle started",
@@ -118,8 +119,10 @@ func (o *Oracle) Run(ctx context.Context) error {
 			}
 
 			if fullyFinalized > o.nextTarget {
+				recordCommit(ctx, outcomeMissed)
 				missed := o.nextTarget
 				o.nextTarget = o.schedule.NextTarget(fullyFinalized)
+				recordNextTarget(ctx, o.nextTarget)
 				logger.Warnw("Missed commit target",
 					"missed", missed,
 					"fullyFinalized", fullyFinalized,
@@ -128,8 +131,10 @@ func (o *Oracle) Run(ctx context.Context) error {
 			}
 
 			if err := o.commit(ctx, checkpoint, o.nextTarget); err != nil {
+				recordCommit(ctx, outcomeError)
 				failed := o.nextTarget
 				o.nextTarget = o.schedule.NextTarget(fullyFinalized)
+				recordNextTarget(ctx, o.nextTarget)
 				logger.Errorw("Commit failed",
 					"target", failed,
 					"nextTarget", o.nextTarget,
@@ -138,6 +143,7 @@ func (o *Oracle) Run(ctx context.Context) error {
 			}
 
 			o.nextTarget = o.schedule.NextTarget(fullyFinalized)
+			recordNextTarget(ctx, o.nextTarget)
 			logger.Debugw("Next target", "epoch", o.nextTarget)
 		}
 	}
@@ -162,6 +168,12 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		return fmt.Errorf("fetch balances: %w", err)
 	}
 
+	var totalEffBalance uint64
+	for _, bal := range clusterBalances {
+		totalEffBalance += uint64(bal.EffectiveBalance)
+	}
+	recordCommitStats(ctx, len(clusterBalances), validatorCount, totalEffBalance)
+
 	merkleRoot := buildTree(clusterBalances).Root
 	log.Debugw("Merkle tree built",
 		"root", fmt.Sprintf("0x%x", merkleRoot),
@@ -180,6 +192,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		log.Warnw("Failed to check committed root, proceeding with commit", "error", err)
 	} else if committedRoot != [32]byte{} {
 		if committedRoot == merkleRoot {
+			recordCommit(ctx, outcomeAlreadyCommitted)
 			log.Infow("Block already confirmed with matching root, skipping commit",
 				"blockNum", checkpoint.BlockNum,
 				"root", fmt.Sprintf("0x%x", merkleRoot))
@@ -187,6 +200,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 				log.Warnw("Failed to update commit status", "error", err)
 			}
 		} else {
+			recordCommit(ctx, outcomeConflict)
 			log.Warnw("Block already confirmed with different root, skipping commit",
 				"blockNum", checkpoint.BlockNum,
 				"ourRoot", fmt.Sprintf("0x%x", merkleRoot),
@@ -207,6 +221,7 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 		log.Warnw("Failed to update commit status", "error", err)
 	}
 
+	recordCommit(ctx, outcomeSuccess)
 	log.Infow("Committed",
 		"txHash", receipt.TxHash.Hex(),
 		"root", fmt.Sprintf("0x%x", merkleRoot),
@@ -323,6 +338,7 @@ func (o *Oracle) handleCommitError(
 	}
 
 	if revertErr, ok := txmanager.IsRevertError(err); ok {
+		recordCommit(ctx, outcomeReverted)
 		log.Warnw("Commit reverted",
 			"root", fmt.Sprintf("0x%x", merkleRoot),
 			"simulated", revertErr.Simulated,

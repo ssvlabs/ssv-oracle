@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/ssvlabs/ssv-oracle/logger"
 	"github.com/ssvlabs/ssv-oracle/merkle"
 	"github.com/ssvlabs/ssv-oracle/storage"
@@ -24,6 +27,8 @@ var uiFS embed.FS
 
 type apiStorage interface {
 	GetLatestCommit(ctx context.Context) (*storage.OracleCommit, error)
+	GetCommitByEpoch(ctx context.Context, epoch uint64) (*storage.OracleCommit, *uint64, *uint64, error)
+	GetAllClusterInfo(ctx context.Context) (storage.AllClusterInfo, error)
 }
 
 // Server is the HTTP API server.
@@ -49,6 +54,10 @@ func (s *Server) Run(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/v1/", s.contentTypeMiddleware(apiMux))
+	mux.Handle("GET /metrics", promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{EnableOpenMetrics: true},
+	))
 	mux.HandleFunc("GET /", s.handleUI)
 
 	handler := s.recoveryMiddleware(mux)

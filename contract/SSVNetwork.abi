@@ -1,10 +1,5 @@
 [
   {
-    "inputs": [],
-    "stateMutability": "nonpayable",
-    "type": "constructor"
-  },
-  {
     "inputs": [
       {
         "internalType": "address",
@@ -69,7 +64,7 @@
   },
   {
     "inputs": [],
-    "name": "ClusterDoesNotExists",
+    "name": "ClusterDoesNotExist",
     "type": "error"
   },
   {
@@ -193,12 +188,27 @@
   },
   {
     "inputs": [],
-    "name": "InvalidContractAddress",
+    "name": "InsufficientCSSVSupply",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidOperatorFeeIncreaseLimit",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidOperatorFeeRange",
     "type": "error"
   },
   {
     "inputs": [],
     "name": "InvalidOperatorIdsLength",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidOracleId",
     "type": "error"
   },
   {
@@ -209,6 +219,11 @@
   {
     "inputs": [],
     "name": "InvalidPublicKeyLength",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidQuorum",
     "type": "error"
   },
   {
@@ -239,6 +254,11 @@
   },
   {
     "inputs": [],
+    "name": "MaxPrecisionExceeded",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "MaxRequestsAmountReached",
     "type": "error"
   },
@@ -249,22 +269,17 @@
   },
   {
     "inputs": [],
+    "name": "MustUseLatestRoot",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NewBlockPeriodIsBelowMinimum",
     "type": "error"
   },
   {
     "inputs": [],
     "name": "NoFeeDeclared",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotAuthorized",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotAuthorizedOracle",
     "type": "error"
   },
   {
@@ -320,6 +335,11 @@
   {
     "inputs": [],
     "name": "SameFeeChangeNotAllowed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SameOracleAddressNotAllowed",
     "type": "error"
   },
   {
@@ -390,6 +410,22 @@
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes",
+        "name": "publicKey",
+        "type": "bytes"
+      },
+      {
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      }
+    ],
+    "name": "ValidatorAlreadyRegistered",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "ValidatorDoesNotExist",
     "type": "error"
@@ -411,7 +447,7 @@
   },
   {
     "inputs": [],
-    "name": "ZeroInterval",
+    "name": "ZeroCSSVSupply",
     "type": "error"
   },
   {
@@ -832,31 +868,6 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "user",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint32[4]",
-        "name": "oracleIds",
-        "type": "uint32[4]"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256[4]",
-        "name": "amounts",
-        "type": "uint256[4]"
-      }
-    ],
-    "name": "DelegationUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
         "name": "token",
         "type": "address"
       },
@@ -971,6 +982,19 @@
     "inputs": [
       {
         "indexed": false,
+        "internalType": "uint32",
+        "name": "newMinBlocksBetweenUpdates",
+        "type": "uint32"
+      }
+    ],
+    "name": "MinBlocksBetweenUpdatesUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
         "internalType": "uint256",
         "name": "value",
         "type": "uint256"
@@ -990,6 +1014,19 @@
       }
     ],
     "name": "MinimumLiquidationCollateralUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "minFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "MinimumOperatorEthFeeUpdated",
     "type": "event"
   },
   {
@@ -1198,22 +1235,9 @@
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint64",
+        "internalType": "uint256",
         "name": "maxFee",
-        "type": "uint64"
-      }
-    ],
-    "name": "OperatorMaximumFeeSSVUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "maxFee",
-        "type": "uint64"
+        "type": "uint256"
       }
     ],
     "name": "OperatorMaximumFeeUpdated",
@@ -1350,6 +1374,31 @@
       }
     ],
     "name": "OperatorWithdrawn",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint64",
+        "name": "operatorId",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+      }
+    ],
+    "name": "OperatorWithdrawnSSV",
     "type": "event"
   },
   {
@@ -1501,19 +1550,19 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": true,
-        "internalType": "bytes32",
-        "name": "merkleRoot",
-        "type": "bytes32"
+        "indexed": false,
+        "internalType": "string",
+        "name": "version",
+        "type": "string"
       },
       {
-        "indexed": true,
-        "internalType": "uint64",
-        "name": "blockNum",
-        "type": "uint64"
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "blockNumber",
+        "type": "uint256"
       }
     ],
-    "name": "RootProposed",
+    "name": "SSVNetworkUpgradeBlock",
     "type": "event"
   },
   {
@@ -2149,6 +2198,29 @@
   {
     "inputs": [
       {
+        "internalType": "uint64",
+        "name": "cooldownDuration",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint32[4]",
+        "name": "defaultOracleIds",
+        "type": "uint32[4]"
+      },
+      {
+        "internalType": "uint16",
+        "name": "quorumBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "initializeSSVStaking",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "clusterOwner",
         "type": "address"
@@ -2733,32 +2805,6 @@
   {
     "inputs": [
       {
-        "internalType": "uint16",
-        "name": "quorum",
-        "type": "uint16"
-      }
-    ],
-    "name": "setQuorumBps",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint64",
-        "name": "duration",
-        "type": "uint64"
-      }
-    ],
-    "name": "setUnstakeCooldownDuration",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
@@ -2909,9 +2955,9 @@
   {
     "inputs": [
       {
-        "internalType": "uint64",
+        "internalType": "uint256",
         "name": "maxFee",
-        "type": "uint64"
+        "type": "uint256"
       }
     ],
     "name": "updateMaximumOperatorFee",
@@ -2922,12 +2968,12 @@
   {
     "inputs": [
       {
-        "internalType": "uint64",
-        "name": "maxFee",
-        "type": "uint64"
+        "internalType": "uint32",
+        "name": "blocks",
+        "type": "uint32"
       }
     ],
-    "name": "updateMaximumOperatorFeeSSV",
+    "name": "updateMinBlocksBetweenUpdates",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -2954,6 +3000,19 @@
       }
     ],
     "name": "updateMinimumLiquidationCollateralSSV",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "minFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "updateMinimumOperatorEthFee",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -3011,6 +3070,32 @@
       }
     ],
     "name": "updateOperatorFeeIncreaseLimit",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "quorum",
+        "type": "uint16"
+      }
+    ],
+    "name": "updateQuorumBps",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint64",
+        "name": "duration",
+        "type": "uint64"
+      }
+    ],
+    "name": "updateUnstakeCooldownDuration",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
