@@ -103,8 +103,8 @@ Listens for RootCommitted events and updates cluster balances on-chain:
 Optional HTTP API for querying oracle state:
 - `GET /api/v1/commit` - Latest commit (`?epoch=N` for specific epoch, `?full=true` for clusters and tree layers)
 - `GET /api/v1/proof/{clusterId}` - Merkle proof for a cluster (`?epoch=N` for specific epoch)
-- `GET /metrics` - Prometheus metrics (OpenMetrics format)
 - Embedded UI at `/` for merkle tree visualization
+- Prometheus metrics at `metrics_address` (default `127.0.0.1:9090`)
 
 ### Merkle Tree (merkle/)
 OpenZeppelin StandardMerkleTree-compatible implementation:
@@ -173,6 +173,7 @@ ssv_contract: "0x..."                 # SSV Network contract (includes oracle fu
 ssv_views_contract: "0x..."           # Required for --updater (SSV Network Views contract)
 db_path: "./data/oracle.db"           # SQLite database path
 api_address: "127.0.0.1:8080"         # API server address (default)
+metrics_address: "127.0.0.1:9090"     # Metrics server address (default, separate from API)
 max_sync_batch_size: 10000            # Max blocks per eth_getLogs request (default: 10000)
 ```
 
@@ -236,7 +237,7 @@ mev_rpcs: "https://rpc.flashbots.net/fast,https://rpc.titanbuilder.xyz"
 
 ## Observability
 
-Prometheus metrics via OpenTelemetry SDK. Exposed at `GET /metrics` (OpenMetrics format).
+Prometheus metrics via OpenTelemetry SDK. Exposed at `metrics_address` (default `127.0.0.1:9090`).
 
 ### Architecture
 - `observability/` — OTel provider setup with Prometheus exporter (`Setup()` called once at startup)
