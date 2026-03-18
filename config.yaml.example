@@ -40,6 +40,8 @@ db_path: "./data/oracle.db"            # SQLite database file (local)
 api_address: "127.0.0.1:8080"          # HTTP API server address
                                        # Default binds to localhost only (secure)
                                        # Use "0.0.0.0:8080" to expose externally
+metrics_address: "127.0.0.1:9090"      # Prometheus metrics server address
+                                       # For Docker: use "0.0.0.0:9090"
 
 # ============================================================================
 # Event Syncing

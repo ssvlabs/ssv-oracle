@@ -8,10 +8,12 @@ Configure the API server in `config.yaml`:
 
 ```yaml
 api_address: "127.0.0.1:8080"  # Default: localhost only
+metrics_address: "127.0.0.1:9090"  # Default: localhost only
 ```
 
 - Default `127.0.0.1:8080` - Accessible only from localhost
 - Use `0.0.0.0:8080` - Accessible from all interfaces
+- Prometheus metrics are exposed at `metrics_address` (default `127.0.0.1:9090`)
 
 ## Endpoints
 
@@ -159,16 +161,6 @@ curl 'http://127.0.0.1:8080/api/v1/proof/0x1234...?epoch=54321'
 {
   "error": "cluster not found"
 }
-```
-
-### GET `/metrics`
-
-Prometheus metrics in OpenMetrics format. See [CLAUDE.md](../CLAUDE.md#observability) for the full metrics table.
-
-**Example:**
-
-```bash
-curl http://127.0.0.1:8080/metrics
 ```
 
 ### GET `/`
