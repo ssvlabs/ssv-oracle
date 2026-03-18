@@ -80,12 +80,14 @@ The oracle exposes an HTTP API for querying committed data and generating merkle
 |--------|----------|-------------|
 | GET | `/api/v1/commit` | Latest confirmed commit (`?epoch=N` for specific epoch, `?full=true` for clusters and tree layers) |
 | GET | `/api/v1/proof/{clusterId}` | Merkle proof for a cluster (`?epoch=N` for specific epoch) |
-| GET | `/metrics` | Prometheus metrics (OpenMetrics) |
 | GET | `/` | Tree visualization UI |
+
+Prometheus metrics are exposed at `metrics_address` (default `127.0.0.1:9090`).
 
 **Configuration:**
 ```yaml
-api_address: "127.0.0.1:8080"  # Default: localhost only
+api_address: "127.0.0.1:8080"      # Default: localhost only
+metrics_address: "127.0.0.1:9090"  # Default: localhost only
 ```
 
 To expose externally, use `0.0.0.0:8080` (ensure firewall/proxy protection).

@@ -73,6 +73,7 @@ All settings are in `config.yaml`. See [`config.yaml.example`](../config.yaml.ex
 | `ssv_views_contract` | SSV Views contract (required for `--updater`) |
 | `db_path` | SQLite path (`/data/oracle.db` for Docker) |
 | `api_address` | API bind address (`0.0.0.0:8080` to expose) |
+| `metrics_address` | Metrics bind address (default `127.0.0.1:9090`) |
 
 **Wallet options:**
 

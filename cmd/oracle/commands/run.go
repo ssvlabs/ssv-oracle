@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
@@ -75,6 +79,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		"updater", withUpdater,
 		"DBPath", cfg.DBPath,
 		"apiAddress", cfg.APIAddress,
+		"metricsAddress", cfg.MetricsAddress,
 		"ethRPC", cfg.EthRPC,
 		"beaconURL", cfg.BeaconURL,
 		"contract", cfg.SSVContract,
@@ -207,6 +212,10 @@ func runServices(
 
 	g, gCtx := errgroup.WithContext(ctx)
 
+	g.Go(func() error {
+		return runMetricsServer(gCtx, cfg.MetricsAddress)
+	})
+
 	// Start API server
 	apiServer := api.New(store, cfg.APIAddress)
 	g.Go(func() error {
@@ -229,4 +238,38 @@ func runServices(
 	}
 
 	return g.Wait()
+}
+
+func runMetricsServer(ctx context.Context, addr string) error {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{EnableOpenMetrics: true},
+	))
+
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Infow("Metrics server starting", "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+		return ctx.Err()
+	case err := <-errCh:
+		return fmt.Errorf("metrics server: %w", err)
+	}
 }

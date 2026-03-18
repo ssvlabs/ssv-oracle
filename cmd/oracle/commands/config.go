@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	defaultDBPath     = "./data/oracle.db"
-	defaultAPIAddress = "127.0.0.1:8080"
+	defaultDBPath         = "./data/oracle.db"
+	defaultAPIAddress     = "127.0.0.1:8080"
+	defaultMetricsAddress = "127.0.0.1:9090"
 )
 
 type config struct {
@@ -36,8 +37,9 @@ type config struct {
 	SSVContractDeployBlock uint64 `yaml:"ssv_contract_deploy_block"`
 	MaxSyncBatchSize       uint64 `yaml:"max_sync_batch_size"`
 
-	DBPath     string `yaml:"db_path"`
-	APIAddress string `yaml:"api_address"`
+	DBPath         string `yaml:"db_path"`
+	APIAddress     string `yaml:"api_address"`
+	MetricsAddress string `yaml:"metrics_address"`
 
 	Wallet   wallet.Config         `yaml:"wallet"`
 	TxPolicy txmanager.TxPolicy    `yaml:"tx_policy"`
@@ -151,8 +153,9 @@ func validateURL(value, name string, schemes ...string) error {
 
 func loadConfig(path string, withUpdater bool) (*config, error) {
 	cfg := &config{
-		DBPath:     defaultDBPath,
-		APIAddress: defaultAPIAddress,
+		DBPath:         defaultDBPath,
+		APIAddress:     defaultAPIAddress,
+		MetricsAddress: defaultMetricsAddress,
 	}
 
 	data, err := os.ReadFile(path)
