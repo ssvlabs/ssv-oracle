@@ -28,6 +28,8 @@ services:
       # API server (localhost only by default)
       # Change to "8080:8080" to expose externally (use reverse proxy)
       - "127.0.0.1:8080:8080"
+      # Metrics server
+      - "127.0.0.1:9090:9090"
     
     # Environment variables (see .env.example)
     env_file:
