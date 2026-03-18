@@ -27,7 +27,8 @@ tx_policy:
   retry_delay: 5s
 
 # Commit Schedule
-# Start: Mar 23, 2026, 07:44 UTC
 commit_phases:
-  - start_epoch: 436010
-    interval: 75    # 8 hours (3x daily)
+  - start_epoch: 436045    # Mar 23, 11:28 UTC
+    interval: 10           # 64 min
+  - start_epoch: 436085    # Mar 23, 15:44 UTC
+    interval: 75           # 8 hours (3x daily)
