@@ -259,7 +259,11 @@ func (s *EventSyncer) processBatch(ctx context.Context, batchEnd uint64, logs []
 func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs) (bool, error) {
 	eventType, eventData, err := s.parser.parseLog(log)
 	if err != nil {
-		return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
+		if errors.Is(err, errUnknownEvent) {
+			return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
+		}
+		return false, fmt.Errorf("handled event parse failure at block %d tx %s log %d: %w",
+			blockLogs.BlockNumber, log.TxHash.Hex(), log.Index, err)
 	}
 
 	clusterID := computeClusterIDFromEvent(eventData)
