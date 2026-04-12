@@ -246,12 +246,14 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 			clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
 			if revertErr, isRevert := txmanager.IsRevertError(err); isRevert {
-				if revertErr.Reason == "IncorrectClusterState" {
+				reason := revertErr.Reason
+				switch reason {
+				case "IncorrectClusterState":
 					staleLeaves = append(staleLeaves, leaf)
-					logger.Debugw("Cluster stale", "clusterID", clusterID, "error", revertErr)
-				} else {
+					logger.Warnw("Cluster stale", "clusterID", clusterID, "reason", reason)
+				default:
 					stats.skipped++
-					logger.Debugw("Cluster skipped", "clusterID", clusterID, "error", revertErr)
+					logger.Warnw("Cluster skipped", "clusterID", clusterID, "reason", reason)
 				}
 				continue
 			}
