@@ -150,6 +150,13 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 
+	if !bytes.Equal(commit.MerkleRoot, event.MerkleRoot[:]) {
+		log.Warnw("Local commit root differs from on-chain root, skipping",
+			"localRoot", fmt.Sprintf("0x%x", commit.MerkleRoot),
+			"onchainRoot", fmt.Sprintf("0x%x", event.MerkleRoot))
+		return
+	}
+
 	if err := u.processCommit(ctx, commit); err != nil {
 		log.Errorw("Failed to process commit", "error", err)
 		return
