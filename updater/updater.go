@@ -251,6 +251,9 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 				case "IncorrectClusterState":
 					staleLeaves = append(staleLeaves, leaf)
 					logger.Warnw("Cluster stale", "clusterID", clusterID, "reason", reason)
+				case "ClusterIsLiquidated":
+					staleLeaves = append(staleLeaves, leaf)
+					logger.Warnw("Cluster liquidated", "clusterID", clusterID, "reason", reason)
 				default:
 					stats.skipped++
 					logger.Warnw("Cluster skipped", "clusterID", clusterID, "reason", reason)
