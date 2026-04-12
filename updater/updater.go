@@ -254,6 +254,12 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 				case "ClusterIsLiquidated":
 					staleLeaves = append(staleLeaves, leaf)
 					logger.Warnw("Cluster liquidated", "clusterID", clusterID, "reason", reason)
+				case "MustUseLatestRoot":
+					logger.Warnw("Root rotated", "clusterID", clusterID, "reason", reason)
+					return stats, nil
+				case "RootNotFound":
+					logger.Warnw("Root not found", "clusterID", clusterID, "reason", reason)
+					return stats, nil
 				default:
 					stats.skipped++
 					logger.Warnw("Cluster skipped", "clusterID", clusterID, "reason", reason)
