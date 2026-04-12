@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -28,10 +29,20 @@ type Storage interface {
 
 // EventSyncer continuously syncs SSV contract events to the database.
 type EventSyncer struct {
+	mu          sync.Mutex
 	client      *execution.Client
 	storage     Storage
 	parser      *eventParser
 	ssvContract common.Address
+}
+
+// WithSyncLock calls fn while holding the syncer mutex, preventing concurrent
+// SyncClustersToHead execution. Used by the oracle to prevent head-state
+// writes to the clusters table during the SyncToBlock→GetActiveValidators window.
+func (s *EventSyncer) WithSyncLock(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fn()
 }
 
 // Config holds configuration for the event syncer.
@@ -397,7 +408,11 @@ func computeClusterIDFromEvent(eventData any) []byte {
 // SyncClustersToHead fetches events from finalized to head and updates
 // only the clusters table. Does not modify contract_events, validators,
 // or sync_progress. Used by updater to get fresh cluster data.
+// Holds the syncer mutex for the duration; serialized against WithSyncLock.
 func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
 	if err != nil {
 		return fmt.Errorf("get last synced block: %w", err)

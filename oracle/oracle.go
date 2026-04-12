@@ -155,15 +155,26 @@ func (o *Oracle) commit(ctx context.Context, checkpoint *beacon.FinalizedCheckpo
 
 	log.Infow("Committing", "refBlock", checkpoint.BlockNum)
 
-	if err := o.syncer.SyncToBlock(ctx, checkpoint.BlockNum); err != nil {
-		return fmt.Errorf("sync to block %d: %w", checkpoint.BlockNum, err)
+	var validators []storage.ActiveValidator
+	if err := o.syncer.WithSyncLock(func() error {
+		if err := o.syncer.SyncToBlock(ctx, checkpoint.BlockNum); err != nil {
+			return fmt.Errorf("sync to block %d: %w", checkpoint.BlockNum, err)
+		}
+		var err error
+		validators, err = o.storage.GetActiveValidators(ctx)
+		if err != nil {
+			return fmt.Errorf("get active validators: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if err := o.beaconClient.VerifyFinalizedBlockRoot(ctx, checkpoint.BlockRoot); err != nil {
 		return fmt.Errorf("verify finalized block: %w", err)
 	}
 
-	clusterBalances, validatorCount, err := o.fetchClusterBalances(ctx)
+	clusterBalances, validatorCount, err := o.fetchBalances(ctx, validators)
 	if err != nil {
 		return fmt.Errorf("fetch balances: %w", err)
 	}
@@ -242,12 +253,7 @@ func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
 	return merkle.NewTree(clusterMap)
 }
 
-func (o *Oracle) fetchClusterBalances(ctx context.Context) ([]storage.ClusterBalance, int, error) {
-	validators, err := o.storage.GetActiveValidators(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("get active validators: %w", err)
-	}
-
+func (o *Oracle) fetchBalances(ctx context.Context, validators []storage.ActiveValidator) ([]storage.ClusterBalance, int, error) {
 	if len(validators) == 0 {
 		logger.Debug("No active validators")
 		return nil, 0, nil
