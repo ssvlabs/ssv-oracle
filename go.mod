@@ -3,7 +3,7 @@ module github.com/ssvlabs/ssv-oracle
 go 1.25.0
 
 require (
-	github.com/attestantio/go-eth2-client v0.28.0
+	github.com/attestantio/go-eth2-client v0.28.1
 	github.com/ethereum/go-ethereum v1.17.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.34.0
