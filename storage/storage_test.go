@@ -749,101 +749,6 @@ func TestStorage_ForeignKeysEnabled(t *testing.T) {
 	}
 }
 
-func TestStorage_UpdateClusterIfExists_Missing(t *testing.T) {
-	storage := setupTestStorage(t)
-	ctx := context.Background()
-
-	// Try to update a cluster that doesn't exist
-	cluster := &ClusterRow{
-		ClusterID:       []byte("nonexistent-cluster-id-here!"),
-		NetworkFeeIndex: 100,
-		Index:           200,
-		IsActive:        true,
-		Balance:         big.NewInt(1000),
-	}
-
-	// Should not error - just updates 0 rows
-	err := storage.UpdateClusterIfExists(ctx, cluster)
-	if err != nil {
-		t.Errorf("UpdateClusterIfExists() unexpected error: %v", err)
-	}
-
-	// Verify cluster was not created
-	got, err := storage.GetCluster(ctx, cluster.ClusterID)
-	if err != nil {
-		t.Fatalf("GetCluster() error: %v", err)
-	}
-	if got != nil {
-		t.Error("Expected nil cluster, but cluster was created")
-	}
-}
-
-func TestStorage_UpdateClusterIfExists_Existing(t *testing.T) {
-	storage := setupTestStorage(t)
-	ctx := context.Background()
-
-	// First create a cluster
-	clusterID := []byte("test-cluster-id-32-bytes-long!!")
-	owner := []byte("owner-address-20-bytes")
-	operatorIDs := []uint64{1, 2, 3, 4}
-
-	original := &ClusterRow{
-		ClusterID:       clusterID,
-		OwnerAddress:    owner,
-		OperatorIDs:     operatorIDs,
-		ValidatorCount:  1,
-		NetworkFeeIndex: 100,
-		Index:           200,
-		IsActive:        true,
-		Balance:         big.NewInt(1000),
-	}
-
-	err := storage.UpsertCluster(ctx, original)
-	if err != nil {
-		t.Fatalf("UpsertCluster() error: %v", err)
-	}
-
-	// Now update using UpdateClusterIfExists
-	updated := &ClusterRow{
-		ClusterID:       clusterID,
-		ValidatorCount:  5,
-		NetworkFeeIndex: 500,
-		Index:           600,
-		IsActive:        false,
-		Balance:         big.NewInt(9999),
-	}
-
-	err = storage.UpdateClusterIfExists(ctx, updated)
-	if err != nil {
-		t.Errorf("UpdateClusterIfExists() error: %v", err)
-	}
-
-	// Verify the update
-	got, err := storage.GetCluster(ctx, clusterID)
-	if err != nil {
-		t.Fatalf("GetCluster() error: %v", err)
-	}
-	if got == nil {
-		t.Fatal("Expected cluster, got nil")
-	}
-
-	if got.ValidatorCount != 5 {
-		t.Errorf("ValidatorCount = %d, want 5", got.ValidatorCount)
-	}
-	if got.NetworkFeeIndex != 500 {
-		t.Errorf("NetworkFeeIndex = %d, want 500", got.NetworkFeeIndex)
-	}
-	if got.Index != 600 {
-		t.Errorf("Index = %d, want 600", got.Index)
-	}
-	if got.IsActive {
-		t.Error("IsActive = true, want false")
-	}
-	if got.Balance.Cmp(big.NewInt(9999)) != 0 {
-		t.Errorf("Balance = %v, want 9999", got.Balance)
-	}
-}
-
 func insertCommit(t *testing.T, s *Storage, epoch, block uint64, status CommitStatus) {
 	t.Helper()
 	root := make([]byte, 32)
@@ -1182,5 +1087,158 @@ func TestStorage_DecodeOperatorIDs_Valid(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// makeTestCluster builds a deterministic ClusterRow keyed off id.
+func makeTestCluster(id byte, active bool, balance int64) *ClusterRow {
+	clusterID := make([]byte, 32)
+	clusterID[0] = id
+	owner := make([]byte, 20)
+	owner[0] = id
+	return &ClusterRow{
+		ClusterID:       clusterID,
+		OwnerAddress:    owner,
+		OperatorIDs:     []uint64{1, 2, 3, 4},
+		ValidatorCount:  uint32(id),
+		NetworkFeeIndex: uint64(id) * 10,
+		Index:           uint64(id) * 100,
+		IsActive:        active,
+		Balance:         big.NewInt(balance),
+	}
+}
+
+func TestStorage_GetFinalizedClusters_ReturnsRequestedRowsAndLastSynced(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	c1 := makeTestCluster(0x01, true, 100)
+	c2 := makeTestCluster(0x02, false, 200)
+	if err := storage.UpsertCluster(ctx, c1); err != nil {
+		t.Fatalf("upsert c1: %v", err)
+	}
+	if err := storage.UpsertCluster(ctx, c2); err != nil {
+		t.Fatalf("upsert c2: %v", err)
+	}
+	if err := storage.UpdateLastSyncedBlock(ctx, 4242); err != nil {
+		t.Fatalf("set last_synced: %v", err)
+	}
+
+	rows, lastSynced, err := storage.GetFinalizedClusters(ctx, [][]byte{c1.ClusterID, c2.ClusterID})
+	if err != nil {
+		t.Fatalf("GetFinalizedClusters: %v", err)
+	}
+	if lastSynced != 4242 {
+		t.Errorf("lastSynced = %d, want 4242", lastSynced)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+
+	byID := map[byte]*ClusterRow{}
+	for _, r := range rows {
+		byID[r.ClusterID[0]] = r
+	}
+	if got := byID[0x01]; got == nil || got.Balance.Int64() != 100 || !got.IsActive {
+		t.Errorf("c1 mismatch: %+v", got)
+	}
+	if got := byID[0x02]; got == nil || got.Balance.Int64() != 200 || got.IsActive {
+		t.Errorf("c2 mismatch: %+v", got)
+	}
+}
+
+func TestStorage_GetFinalizedClusters_OmitsMissingIDs(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	c1 := makeTestCluster(0x01, true, 100)
+	if err := storage.UpsertCluster(ctx, c1); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	missing := make([]byte, 32)
+	missing[0] = 0xab
+
+	rows, _, err := storage.GetFinalizedClusters(ctx, [][]byte{c1.ClusterID, missing})
+	if err != nil {
+		t.Fatalf("GetFinalizedClusters: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1 (missing id should be omitted)", len(rows))
+	}
+	if rows[0].ClusterID[0] != 0x01 {
+		t.Errorf("returned wrong row: %x", rows[0].ClusterID)
+	}
+}
+
+func TestStorage_GetFinalizedClusters_EmptyIDsReturnsLastSynced(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	if err := storage.UpdateLastSyncedBlock(ctx, 7); err != nil {
+		t.Fatalf("set last_synced: %v", err)
+	}
+
+	rows, lastSynced, err := storage.GetFinalizedClusters(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetFinalizedClusters: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("len(rows) = %d, want 0", len(rows))
+	}
+	if lastSynced != 7 {
+		t.Errorf("lastSynced = %d, want 7", lastSynced)
+	}
+}
+
+func TestStorage_GetFinalizedClusters_ReadAndSubsequentWriteSucceed(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	c := makeTestCluster(0x01, true, 100)
+	if err := storage.UpsertCluster(ctx, c); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := storage.UpdateLastSyncedBlock(ctx, 1000); err != nil {
+		t.Fatalf("seed last_synced: %v", err)
+	}
+
+	// Open a long-running read tx via a background goroutine that holds
+	// the connection while we attempt a concurrent write. The read
+	// completes before the write; the snapshot should reflect pre-write
+	// state.
+	type result struct {
+		rows       []*ClusterRow
+		lastSynced uint64
+		err        error
+	}
+	done := make(chan result, 1)
+	go func() {
+		rows, ls, err := storage.GetFinalizedClusters(ctx, [][]byte{c.ClusterID})
+		done <- result{rows, ls, err}
+	}()
+
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("GetFinalizedClusters: %v", res.err)
+	}
+	if len(res.rows) != 1 || res.rows[0].Balance.Int64() != 100 {
+		t.Errorf("snapshot row mismatch: %+v", res.rows)
+	}
+	if res.lastSynced != 1000 {
+		t.Errorf("lastSynced = %d, want 1000", res.lastSynced)
+	}
+
+	// Sanity: after the snapshot returns, a fresh write goes through.
+	flipped := makeTestCluster(0x01, false, 999)
+	if err := storage.UpsertCluster(ctx, flipped); err != nil {
+		t.Fatalf("post-snapshot write: %v", err)
+	}
+	got, err := storage.GetCluster(ctx, c.ClusterID)
+	if err != nil {
+		t.Fatalf("post-write read: %v", err)
+	}
+	if got.Balance.Int64() != 999 || got.IsActive {
+		t.Errorf("post-write row not applied: %+v", got)
 	}
 }

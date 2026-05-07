@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -23,26 +22,16 @@ type Storage interface {
 	GetLastSyncedBlock(ctx context.Context) (uint64, error)
 	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
 	BeginTx(ctx context.Context) (storage.Tx, error)
-	UpdateClusterIfExists(ctx context.Context, cluster *storage.ClusterRow) error
+	GetFinalizedClusters(ctx context.Context, ids [][]byte) ([]*storage.ClusterRow, uint64, error)
 	SetSyncMode(bulk bool) error
 }
 
 // EventSyncer continuously syncs SSV contract events to the database.
 type EventSyncer struct {
-	mu          sync.Mutex
 	client      *execution.Client
 	storage     Storage
 	parser      *eventParser
 	ssvContract common.Address
-}
-
-// WithSyncLock calls fn while holding the syncer mutex, preventing concurrent
-// SyncClustersToHead execution. Used by the oracle to prevent head-state
-// writes to the clusters table during the SyncToBlock→GetActiveValidators window.
-func (s *EventSyncer) WithSyncLock(fn func() error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return fn()
 }
 
 // Config holds configuration for the event syncer.
@@ -409,86 +398,3 @@ func computeClusterIDFromEvent(eventData any) []byte {
 	return nil
 }
 
-// SyncClustersToHead fetches events from finalized to head and updates
-// only the clusters table. Does not modify contract_events, validators,
-// or sync_progress. Used by updater to get fresh cluster data.
-// Holds the syncer mutex for the duration; serialized against WithSyncLock.
-func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
-	if err != nil {
-		return fmt.Errorf("get last synced block: %w", err)
-	}
-
-	headBlock, err := s.client.GetHeadBlock(ctx)
-	if err != nil {
-		return fmt.Errorf("get head block: %w", err)
-	}
-
-	if fromBlock >= headBlock {
-		return nil
-	}
-
-	var updates int
-	topics := EventTopics() // Filter by handled event signatures
-	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock, topics,
-		func(batchEnd uint64, logs []execution.BlockLogs) error {
-			for _, blockLogs := range logs {
-				n, err := s.applyClusterUpdates(ctx, blockLogs)
-				updates += n
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	if err != nil {
-		return err
-	}
-
-	logger.Debugw("Clusters synced to head", "from", fromBlock+1, "to", headBlock, "clusterUpdates", updates)
-	return nil
-}
-
-func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
-	var updated int
-	for _, log := range blockLogs.Logs {
-		_, eventData, err := s.parser.parseLog(&log)
-		if err != nil {
-			if !errors.Is(err, errUnknownEvent) {
-				logger.Warnw("Failed to parse event in head sync",
-					"block", blockLogs.BlockNumber,
-					"txHash", log.TxHash.Hex(),
-					"logIndex", log.Index,
-					"error", err)
-			}
-			continue
-		}
-
-		e, ok := eventData.(clusterEvent)
-		if !ok {
-			continue
-		}
-
-		owner, operatorIDs := e.clusterKey()
-		clusterID := computeClusterID(owner, operatorIDs)
-		cluster := e.cluster()
-
-		row := &storage.ClusterRow{
-			ClusterID:       clusterID[:],
-			ValidatorCount:  cluster.ValidatorCount,
-			NetworkFeeIndex: cluster.NetworkFeeIndex,
-			Index:           cluster.Index,
-			IsActive:        cluster.Active,
-			Balance:         cluster.Balance,
-		}
-
-		if err := s.storage.UpdateClusterIfExists(ctx, row); err != nil {
-			return updated, err
-		}
-		updated++
-	}
-	return updated, nil
-}
