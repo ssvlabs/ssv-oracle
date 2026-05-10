@@ -198,44 +198,46 @@ func runServices(
 	eventSyncer *syncer.EventSyncer,
 	beaconClient *beacon.Client,
 ) error {
-	if err := eventSyncer.SyncToFinalized(ctx, cfg.SSVContractDeployBlock); err != nil {
-		return fmt.Errorf("initial sync: %w", err)
-	}
-
-	oracleInstance := oracle.New(&oracle.Config{
-		Storage:        store,
-		ContractClient: ethClient,
-		Syncer:         eventSyncer,
-		BeaconClient:   beaconClient,
-		Schedule:       cfg.Schedule,
-	})
-
 	g, gCtx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
 		return runMetricsServer(gCtx, cfg.MetricsAddress)
 	})
 
-	// Start API server
 	apiServer := api.New(store, cfg.APIAddress)
 	g.Go(func() error {
 		return apiServer.Run(gCtx)
 	})
 
 	g.Go(func() error {
-		return oracleInstance.Run(gCtx)
-	})
+		if err := eventSyncer.SyncToFinalized(gCtx, cfg.SSVContractDeployBlock); err != nil {
+			return fmt.Errorf("initial sync: %w", err)
+		}
 
-	if withUpdater {
-		updaterInstance := updater.New(&updater.Config{
+		oracleInstance := oracle.New(&oracle.Config{
 			Storage:        store,
 			ContractClient: ethClient,
 			Syncer:         eventSyncer,
+			BeaconClient:   beaconClient,
+			Schedule:       cfg.Schedule,
 		})
 		g.Go(func() error {
-			return updaterInstance.Run(gCtx)
+			return oracleInstance.Run(gCtx)
 		})
-	}
+
+		if withUpdater {
+			updaterInstance := updater.New(&updater.Config{
+				Storage:        store,
+				ContractClient: ethClient,
+				Syncer:         eventSyncer,
+			})
+			g.Go(func() error {
+				return updaterInstance.Run(gCtx)
+			})
+		}
+
+		return nil
+	})
 
 	return g.Wait()
 }
