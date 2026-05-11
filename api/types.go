@@ -31,6 +31,7 @@ type ProofResponse struct {
 	Proof            []string `json:"proof"`
 	MerkleRoot       string   `json:"merkleRoot"`
 	ReferenceBlock   uint64   `json:"referenceBlock"`
+	Status           string   `json:"status"`
 }
 
 // CommitDiff represents cluster changes between two commits.
