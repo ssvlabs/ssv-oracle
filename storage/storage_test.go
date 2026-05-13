@@ -1203,30 +1203,15 @@ func TestStorage_GetFinalizedClusters_ReadAndSubsequentWriteSucceed(t *testing.T
 		t.Fatalf("seed last_synced: %v", err)
 	}
 
-	// Open a long-running read tx via a background goroutine that holds
-	// the connection while we attempt a concurrent write. The read
-	// completes before the write; the snapshot should reflect pre-write
-	// state.
-	type result struct {
-		rows       []*ClusterRow
-		lastSynced uint64
-		err        error
+	rows, lastSynced, err := storage.GetFinalizedClusters(ctx, [][]byte{c.ClusterID})
+	if err != nil {
+		t.Fatalf("GetFinalizedClusters: %v", err)
 	}
-	done := make(chan result, 1)
-	go func() {
-		rows, ls, err := storage.GetFinalizedClusters(ctx, [][]byte{c.ClusterID})
-		done <- result{rows, ls, err}
-	}()
-
-	res := <-done
-	if res.err != nil {
-		t.Fatalf("GetFinalizedClusters: %v", res.err)
+	if len(rows) != 1 || rows[0].Balance.Int64() != 100 {
+		t.Errorf("snapshot row mismatch: %+v", rows)
 	}
-	if len(res.rows) != 1 || res.rows[0].Balance.Int64() != 100 {
-		t.Errorf("snapshot row mismatch: %+v", res.rows)
-	}
-	if res.lastSynced != 1000 {
-		t.Errorf("lastSynced = %d, want 1000", res.lastSynced)
+	if lastSynced != 1000 {
+		t.Errorf("lastSynced = %d, want 1000", lastSynced)
 	}
 
 	// Sanity: after the snapshot returns, a fresh write goes through.

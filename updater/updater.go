@@ -72,6 +72,9 @@ func storageLookup(s updaterStorage) clusterLookup {
 	}
 }
 
+// overlayLookup returns a clusterLookup backed by an overlay map.
+// Returned ClusterRow values share *big.Int Balance and []uint64
+// OperatorIDs with the overlay; callers must not mutate them.
 func overlayLookup(overlay map[[32]byte]storage.ClusterRow) clusterLookup {
 	return func(_ context.Context, id []byte) (storage.ClusterRow, bool, error) {
 		var key [32]byte
