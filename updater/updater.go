@@ -32,14 +32,56 @@ type Config struct {
 type Updater struct {
 	storage        updaterStorage
 	contractClient *contract.Client
-	syncer         *syncer.EventSyncer
+	syncer         headStateBuilder
 
 	lastProcessedBlock uint64 // Deduplication: skip events for already-processed blocks
 }
 
+// updaterStorage is read-only by design. The updater consumes
+// finalized cluster state but must never mutate the clusters table —
+// head-state writes belong to the in-memory overlay built by the
+// syncer, not the shared DB.
 type updaterStorage interface {
 	GetCluster(ctx context.Context, clusterID []byte) (*storage.ClusterRow, error)
 	GetCommitByBlock(ctx context.Context, blockNum uint64) (*storage.OracleCommit, error)
+}
+
+// headStateBuilder is the read-only syncer surface exposed to the
+// updater. It deliberately omits methods that write to the
+// clusters table.
+type headStateBuilder interface {
+	BuildHeadStateSnapshot(ctx context.Context, clusterIDs [][]byte) (map[[32]byte]storage.ClusterRow, error)
+}
+
+// clusterLookup returns the post-event cluster state for an ID. The
+// first pass of processCommit uses a storage-backed lookup (finalized
+// state); the stale-leaf retry pass uses an overlay-backed lookup
+// (head state).
+type clusterLookup func(ctx context.Context, clusterID []byte) (storage.ClusterRow, bool, error)
+
+func storageLookup(s updaterStorage) clusterLookup {
+	return func(ctx context.Context, id []byte) (storage.ClusterRow, bool, error) {
+		row, err := s.GetCluster(ctx, id)
+		if err != nil {
+			return storage.ClusterRow{}, false, err
+		}
+		if row == nil {
+			return storage.ClusterRow{}, false, nil
+		}
+		return *row, true, nil
+	}
+}
+
+// overlayLookup returns a clusterLookup backed by an overlay map.
+// Returned ClusterRow values share *big.Int Balance and []uint64
+// OperatorIDs with the overlay; callers must not mutate them.
+func overlayLookup(overlay map[[32]byte]storage.ClusterRow) clusterLookup {
+	return func(_ context.Context, id []byte) (storage.ClusterRow, bool, error) {
+		var key [32]byte
+		copy(key[:], id)
+		row, ok := overlay[key]
+		return row, ok, nil
+	}
 }
 
 type processStats struct {
@@ -184,19 +226,28 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 			tree.Root, commit.MerkleRoot)
 	}
 
-	stats, staleLeaves := u.processAllClusters(ctx, commit.ReferenceBlock, tree)
+	stats, staleLeaves := u.processAllClusters(ctx, commit.ReferenceBlock, tree, storageLookup(u.storage))
 
 	if len(staleLeaves) > 0 {
 		log.Debugw("Stale clusters detected", "count", len(staleLeaves))
-		if err := u.syncer.SyncClustersToHead(ctx); err != nil {
-			log.Errorw("Failed to sync clusters to head", "error", err)
+
+		staleIDs := make([][]byte, 0, len(staleLeaves))
+		for _, leaf := range staleLeaves {
+			staleIDs = append(staleIDs, leaf.ClusterID[:])
+		}
+
+		overlay, err := u.syncer.BuildHeadStateSnapshot(ctx, staleIDs)
+		if err != nil {
+			log.Errorw("Failed to build head-state overlay", "error", err)
+			stats.failed += len(staleLeaves)
 		} else {
+			lookup := overlayLookup(overlay)
 			for _, leaf := range staleLeaves {
 				if ctx.Err() != nil {
 					break
 				}
 				clusterID := fmt.Sprintf("%x", leaf.ClusterID)
-				ok, err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree)
+				ok, err := u.processCluster(ctx, commit.ReferenceBlock, leaf, tree, lookup)
 				if err != nil {
 					stats.failed++
 					log.Warnw("Cluster still failing", "clusterID", clusterID, "error", err)
@@ -232,7 +283,7 @@ func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
 	return merkle.NewTree(clusterMap)
 }
 
-func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.Tree) (processStats, []merkle.Leaf) {
+func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree *merkle.Tree, lookup clusterLookup) (processStats, []merkle.Leaf) {
 	var stats processStats
 	var staleLeaves []merkle.Leaf
 
@@ -241,7 +292,7 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 			break
 		}
 
-		ok, err := u.processCluster(ctx, blockNum, leaf, tree)
+		ok, err := u.processCluster(ctx, blockNum, leaf, tree, lookup)
 		if err != nil {
 			clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
@@ -282,7 +333,7 @@ func (u *Updater) processAllClusters(ctx context.Context, blockNum uint64, tree 
 	return stats, staleLeaves
 }
 
-func toContractCluster(c *storage.ClusterRow) contract.Cluster {
+func toContractCluster(c storage.ClusterRow) contract.Cluster {
 	return contract.Cluster{
 		ValidatorCount:  c.ValidatorCount,
 		NetworkFeeIndex: c.NetworkFeeIndex,
@@ -292,14 +343,14 @@ func toContractCluster(c *storage.ClusterRow) contract.Cluster {
 	}
 }
 
-func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.Tree) (bool, error) {
+func (u *Updater) processCluster(ctx context.Context, blockNum uint64, leaf merkle.Leaf, tree *merkle.Tree, lookup clusterLookup) (bool, error) {
 	clusterID := fmt.Sprintf("%x", leaf.ClusterID)
 
-	cluster, err := u.storage.GetCluster(ctx, leaf.ClusterID[:])
+	cluster, ok, err := lookup(ctx, leaf.ClusterID[:])
 	if err != nil {
-		return false, fmt.Errorf("get cluster: %w", err)
+		return false, fmt.Errorf("lookup cluster: %w", err)
 	}
-	if cluster == nil {
+	if !ok {
 		logger.Debugw("Cluster not found", "clusterID", clusterID)
 		return false, nil
 	}
