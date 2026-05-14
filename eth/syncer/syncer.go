@@ -22,7 +22,7 @@ type Storage interface {
 	GetLastSyncedBlock(ctx context.Context) (uint64, error)
 	UpdateLastSyncedBlock(ctx context.Context, blockNum uint64) error
 	BeginTx(ctx context.Context) (storage.Tx, error)
-	UpdateClusterIfExists(ctx context.Context, cluster *storage.ClusterRow) error
+	GetFinalizedClusters(ctx context.Context, ids [][]byte) ([]*storage.ClusterRow, uint64, error)
 	SetSyncMode(bulk bool) error
 }
 
@@ -248,7 +248,11 @@ func (s *EventSyncer) processBatch(ctx context.Context, batchEnd uint64, logs []
 func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs) (bool, error) {
 	eventType, eventData, err := s.parser.parseLog(log)
 	if err != nil {
-		return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
+		if errors.Is(err, errUnknownEvent) {
+			return false, s.storeRawEvent(ctx, tx, log, blockLogs, err)
+		}
+		return false, fmt.Errorf("handled event parse failure at block %d tx %s log %d: %w",
+			blockLogs.BlockNumber, log.TxHash.Hex(), log.Index, err)
 	}
 
 	clusterID := computeClusterIDFromEvent(eventData)
@@ -394,82 +398,3 @@ func computeClusterIDFromEvent(eventData any) []byte {
 	return nil
 }
 
-// SyncClustersToHead fetches events from finalized to head and updates
-// only the clusters table. Does not modify contract_events, validators,
-// or sync_progress. Used by updater to get fresh cluster data.
-func (s *EventSyncer) SyncClustersToHead(ctx context.Context) error {
-	fromBlock, err := s.storage.GetLastSyncedBlock(ctx)
-	if err != nil {
-		return fmt.Errorf("get last synced block: %w", err)
-	}
-
-	headBlock, err := s.client.GetHeadBlock(ctx)
-	if err != nil {
-		return fmt.Errorf("get head block: %w", err)
-	}
-
-	if fromBlock >= headBlock {
-		return nil
-	}
-
-	var updates int
-	topics := EventTopics() // Filter by handled event signatures
-	err = s.client.FetchLogs(ctx, s.ssvContract, fromBlock+1, headBlock, topics,
-		func(batchEnd uint64, logs []execution.BlockLogs) error {
-			for _, blockLogs := range logs {
-				n, err := s.applyClusterUpdates(ctx, blockLogs)
-				updates += n
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	if err != nil {
-		return err
-	}
-
-	logger.Debugw("Clusters synced to head", "from", fromBlock+1, "to", headBlock, "clusterUpdates", updates)
-	return nil
-}
-
-func (s *EventSyncer) applyClusterUpdates(ctx context.Context, blockLogs execution.BlockLogs) (int, error) {
-	var updated int
-	for _, log := range blockLogs.Logs {
-		_, eventData, err := s.parser.parseLog(&log)
-		if err != nil {
-			if !errors.Is(err, errUnknownEvent) {
-				logger.Warnw("Failed to parse event in head sync",
-					"block", blockLogs.BlockNumber,
-					"txHash", log.TxHash.Hex(),
-					"logIndex", log.Index,
-					"error", err)
-			}
-			continue
-		}
-
-		e, ok := eventData.(clusterEvent)
-		if !ok {
-			continue
-		}
-
-		owner, operatorIDs := e.clusterKey()
-		clusterID := computeClusterID(owner, operatorIDs)
-		cluster := e.cluster()
-
-		row := &storage.ClusterRow{
-			ClusterID:       clusterID[:],
-			ValidatorCount:  cluster.ValidatorCount,
-			NetworkFeeIndex: cluster.NetworkFeeIndex,
-			Index:           cluster.Index,
-			IsActive:        cluster.Active,
-			Balance:         cluster.Balance,
-		}
-
-		if err := s.storage.UpdateClusterIfExists(ctx, row); err != nil {
-			return updated, err
-		}
-		updated++
-	}
-	return updated, nil
-}

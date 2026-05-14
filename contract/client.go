@@ -171,7 +171,6 @@ func (c *Client) GetClusterEffectiveBalance(ctx context.Context, owner common.Ad
 // Permissionless call - uses MEV protection when available to prevent
 // front-running: balance updates can trigger liquidation, and without
 // protection attackers could observe our tx and liquidate first.
-// Not thread-safe; callers must ensure sequential execution.
 func (c *Client) UpdateClusterBalance(
 	ctx context.Context,
 	blockNum uint64,
