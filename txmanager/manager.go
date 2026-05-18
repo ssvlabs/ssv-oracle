@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -76,6 +77,7 @@ type TxOpts struct {
 
 // TxManager handles transaction submission, gas bumping, and cancellation.
 type TxManager struct {
+	mu             sync.Mutex
 	client         *ethclient.Client
 	signer         wallet.Signer
 	chainID        *big.Int
@@ -148,6 +150,9 @@ func IsRevertError(err error) (*RevertError, bool) {
 // retry MEV on send errors; after first successful submission, wait PendingTimeoutBlocks
 // then switch to eth_rpc for remaining retries.
 func (m *TxManager) SendTransaction(ctx context.Context, opts *TxOpts) (*types.Receipt, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	from := m.signer.Address()
 
 	gasLimit, err := m.estimateGas(ctx, opts)
