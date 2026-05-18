@@ -219,7 +219,50 @@ func (s *Storage) DeleteCluster(ctx context.Context, clusterID []byte) error {
 
 // GetCluster retrieves a cluster by ID, or nil if not found.
 func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow, error) {
-	query := `
+	return getClusterRow(ctx, s.db, clusterID)
+}
+
+// GetFinalizedClusters reads cluster rows for the given IDs and the
+// last_synced_block atomically through a single read-only transaction.
+// Returns rows for IDs that exist; missing IDs are silently omitted
+// (caller checks len(rows) vs len(ids) if it needs strict semantics).
+//
+// Note: the storage uses db.SetMaxOpenConns(1), so a held read-only tx
+// blocks all writers for its duration. Scope ids to a small bounded set
+// to keep the tx short.
+func (s *Storage) GetFinalizedClusters(ctx context.Context, ids [][]byte) ([]*ClusterRow, uint64, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, fmt.Errorf("begin read tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows := make([]*ClusterRow, 0, len(ids))
+	for _, id := range ids {
+		// Tx-bound read: must not call s.GetCluster here. With
+		// SetMaxOpenConns(1) it would block on the connection this tx
+		// already holds and self-deadlock.
+		row, err := getClusterRow(ctx, tx, id)
+		if err != nil {
+			return nil, 0, fmt.Errorf("get cluster %x: %w", id, err)
+		}
+		if row != nil {
+			rows = append(rows, row)
+		}
+	}
+
+	var lastSynced uint64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT last_synced_block FROM sync_progress WHERE id = 1`,
+	).Scan(&lastSynced); err != nil {
+		return nil, 0, fmt.Errorf("get last synced block: %w", err)
+	}
+
+	return rows, lastSynced, nil
+}
+
+func getClusterRow(ctx context.Context, e executor, clusterID []byte) (*ClusterRow, error) {
+	const query = `
 		SELECT cluster_id, owner_address, operator_ids, validator_count,
 		       network_fee_index, idx, is_active, balance
 		FROM clusters WHERE cluster_id = ?
@@ -229,7 +272,7 @@ func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow
 	var balanceStr string
 	var isActiveInt int
 
-	err := s.db.QueryRowContext(ctx, query, clusterID).Scan(
+	err := e.QueryRowContext(ctx, query, clusterID).Scan(
 		&cluster.ClusterID, &cluster.OwnerAddress, &operatorIDsJSON,
 		&cluster.ValidatorCount, &cluster.NetworkFeeIndex, &cluster.Index,
 		&isActiveInt, &balanceStr,
@@ -656,28 +699,3 @@ func (s *Storage) SetSyncMode(bulk bool) error {
 	return err
 }
 
-// UpdateClusterIfExists updates cluster data only if the cluster exists.
-// Used by head sync to update cluster state without creating new clusters.
-func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow) error {
-	query := `
-		UPDATE clusters SET
-			validator_count = ?,
-			network_fee_index = ?,
-			idx = ?,
-			is_active = ?,
-			balance = ?
-		WHERE cluster_id = ?
-	`
-	_, err := s.db.ExecContext(ctx, query,
-		cluster.ValidatorCount,
-		cluster.NetworkFeeIndex,
-		cluster.Index,
-		boolToInt(cluster.IsActive),
-		cluster.Balance.String(),
-		cluster.ClusterID,
-	)
-	if err != nil {
-		return fmt.Errorf("update cluster: %w", err)
-	}
-	return nil
-}
