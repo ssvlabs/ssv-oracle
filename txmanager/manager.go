@@ -47,7 +47,7 @@ const (
 	percentBase           = 100
 	blockNumberRetryLimit = 3
 	minTipCap             = params.GWei      // minimum for MEV RPC compatibility
-	mevSendTimeout        = 10 * time.Second // per-broadcast timeout in sendToMEVRPCs
+	mevSendTimeout        = 10 * time.Second // shared timeout across all MEV sends per sendToMEVRPCs call
 )
 
 // RevertError represents a contract call or transaction that reverted.
