@@ -395,19 +395,20 @@ func (s *Storage) GetCommitByBlock(ctx context.Context, blockNum uint64) (*Oracl
 	return &c, nil
 }
 
-// GetLatestCommit returns the most recent commit, or nil if none exists.
+// GetLatestCommit returns the most recent confirmed commit with cluster balances.
+// Returns nil if no confirmed commit exists or if cluster_balances is missing.
 func (s *Storage) GetLatestCommit(ctx context.Context) (*OracleCommit, error) {
 	query := `
 		SELECT target_epoch, merkle_root, reference_block, cluster_balances, status, tx_hash
 		FROM oracle_commits
-		WHERE cluster_balances IS NOT NULL
+		WHERE status = ? AND cluster_balances IS NOT NULL
 		ORDER BY target_epoch DESC
 		LIMIT 1
 	`
 	var c OracleCommit
 	var balancesJSON []byte
 	var status string
-	err := s.db.QueryRowContext(ctx, query).Scan(
+	err := s.db.QueryRowContext(ctx, query, CommitStatusConfirmed).Scan(
 		&c.TargetEpoch, &c.MerkleRoot, &c.ReferenceBlock, &balancesJSON, &status, &c.TxHash,
 	)
 	if err != nil {

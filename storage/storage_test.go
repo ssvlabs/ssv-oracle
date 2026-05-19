@@ -496,11 +496,11 @@ func TestStorage_GetLatestCommit_NoCommits(t *testing.T) {
 	}
 }
 
-func TestStorage_GetLatestCommit_ReturnsPending(t *testing.T) {
+func TestStorage_GetLatestCommit_OnlyPending(t *testing.T) {
 	storage := setupTestStorage(t)
 	ctx := context.Background()
 
-	// Insert a pending commit (not yet confirmed).
+	// Insert a pending commit (not confirmed)
 	clusterBalances := []ClusterBalance{
 		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
 	}
@@ -511,18 +511,13 @@ func TestStorage_GetLatestCommit_ReturnsPending(t *testing.T) {
 		t.Fatalf("Failed to insert pending commit: %v", err)
 	}
 
+	// GetLatestCommit should return nil (only returns confirmed)
 	commit, err := storage.GetLatestCommit(ctx)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if commit == nil {
-		t.Fatal("Expected pending commit to be returned, got nil")
-	}
-	if commit.TargetEpoch != 100 {
-		t.Errorf("Expected epoch 100, got %d", commit.TargetEpoch)
-	}
-	if commit.Status != CommitStatusPending {
-		t.Errorf("Expected status pending, got %s", commit.Status)
+	if commit != nil {
+		t.Error("Expected nil when only pending commits exist")
 	}
 }
 
@@ -597,53 +592,6 @@ func TestStorage_GetLatestCommit_ReturnsLatestConfirmed(t *testing.T) {
 	}
 	if commit.Status != CommitStatusConfirmed {
 		t.Errorf("Expected status %s, got %s", CommitStatusConfirmed, commit.Status)
-	}
-}
-
-func TestStorage_GetLatestCommit_NewerPendingOverOlderConfirmed(t *testing.T) {
-	storage := setupTestStorage(t)
-	ctx := context.Background()
-
-	clusterBalances := []ClusterBalance{
-		{ClusterID: make([]byte, 32), EffectiveBalance: 32},
-	}
-	clusterBalances[0].ClusterID[0] = 0x01
-
-	merkleRootOld := make([]byte, 32)
-	merkleRootOld[0] = 0xaa
-	merkleRootNew := make([]byte, 32)
-	merkleRootNew[0] = 0xbb
-
-	// Older commit, confirmed.
-	if err := storage.InsertPendingCommit(ctx, 100, merkleRootOld, 500000, clusterBalances); err != nil {
-		t.Fatalf("Failed to insert older commit: %v", err)
-	}
-	txHash := make([]byte, 32)
-	txHash[0] = 0x11
-	if err := storage.UpdateCommitStatus(ctx, 100, CommitStatusConfirmed, txHash); err != nil {
-		t.Fatalf("Failed to confirm older commit: %v", err)
-	}
-
-	// Newer commit, still pending.
-	if err := storage.InsertPendingCommit(ctx, 200, merkleRootNew, 600000, clusterBalances); err != nil {
-		t.Fatalf("Failed to insert newer pending commit: %v", err)
-	}
-
-	commit, err := storage.GetLatestCommit(ctx)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-	if commit == nil {
-		t.Fatal("Expected newer pending commit to be returned, got nil")
-	}
-	if commit.TargetEpoch != 200 {
-		t.Errorf("Expected epoch 200 (newer pending wins), got %d", commit.TargetEpoch)
-	}
-	if commit.Status != CommitStatusPending {
-		t.Errorf("Expected status %s, got %s", CommitStatusPending, commit.Status)
-	}
-	if commit.MerkleRoot[0] != 0xbb {
-		t.Errorf("Expected merkle root from newer commit (0xbb...), got 0x%x", commit.MerkleRoot[0])
 	}
 }
 

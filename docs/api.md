@@ -19,10 +19,10 @@ metrics_address: "127.0.0.1:9090"  # Default: localhost only
 
 ### GET `/api/v1/commit`
 
-Get the latest commit metadata. Use `?epoch=N` to query a specific epoch.
+Get the latest confirmed commit metadata. Use `?epoch=N` to query a specific epoch.
 
 **Query parameters:**
-- `epoch` *(optional)* - Target epoch to retrieve. Omit for the latest commit (any status).
+- `epoch` *(optional)* - Target epoch to retrieve. Omit for latest confirmed commit.
 - `full` *(optional)* - Set to `true` to include clusters, tree layers, balance diff, and cluster info.
 
 **Response:**
@@ -51,7 +51,7 @@ Get the latest commit metadata. Use `?epoch=N` to query a specific epoch.
 **Examples:**
 
 ```bash
-# Latest commit
+# Latest confirmed commit
 curl http://127.0.0.1:8080/api/v1/commit
 
 # Commit for a specific epoch
@@ -120,7 +120,7 @@ Get the merkle proof for a specific cluster.
 - `clusterId` - Cluster ID (hex string with 0x prefix)
 
 **Query parameters:**
-- `epoch` *(optional)* - Target epoch for the proof. Omit for the latest commit (any status).
+- `epoch` *(optional)* - Target epoch for the proof. Omit for latest confirmed commit.
 
 **Response:**
 
@@ -134,8 +134,7 @@ Get the merkle proof for a specific cluster.
     "0xsibling3..."
   ],
   "merkleRoot": "0xabcdef...",
-  "referenceBlock": 12345678,
-  "status": "confirmed"
+  "referenceBlock": 12345678
 }
 ```
 
@@ -145,12 +144,11 @@ Get the merkle proof for a specific cluster.
 - `proof` - Array of sibling hashes for merkle verification
 - `merkleRoot` - Merkle root the proof is built against
 - `referenceBlock` - Finalized block number used to compute the merkle root
-- `status` - Commit status: `pending`, `confirmed`, or `failed`. Only `confirmed` proofs are guaranteed to match the on-chain root (`getCommittedRoot(referenceBlock)` on the SSV Network views contract).
 
 **Example:**
 
 ```bash
-# Proof from the latest commit
+# Proof from latest confirmed commit
 curl http://127.0.0.1:8080/api/v1/proof/0x1234...
 
 # Proof from a specific epoch

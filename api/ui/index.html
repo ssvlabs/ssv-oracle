@@ -473,7 +473,7 @@
                 },
 
                 async navigateTo(epoch) {
-                    if (this.navigating) return;
+                    if (this.navigating || epoch === this.viewingEpoch) return;
                     this.navigating = true;
                     try { this.clearSelection(); await this.loadCommit(epoch); }
                     catch (e) { console.error('Navigation failed:', e); }
@@ -532,7 +532,7 @@
                                 this.commit.nextEpoch = data.nextEpoch;
                                 this.commit.status = data.status;
                                 this.commit.txHash = data.txHash;
-                            } else if (data.merkleRoot !== this.commit?.merkleRoot) {
+                            } else if (data.merkleRoot !== this.commit?.merkleRoot || data.epoch !== this.commit?.epoch) {
                                 const selectedId = this.selected?.clusterId;
                                 await this.loadCommit(null);
                                 if (selectedId) {
@@ -541,9 +541,7 @@
                                 }
                                 this.pollStatus = 'updated';
                                 setTimeout(() => this.pollStatus = 'idle', 3000);
-                            } else {
-                                this.commit.status = data.status;
-                                this.commit.txHash = data.txHash;
+                            } else if (data.nextEpoch !== this.commit?.nextEpoch) {
                                 this.commit.nextEpoch = data.nextEpoch;
                             }
                         }

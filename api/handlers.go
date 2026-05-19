@@ -148,7 +148,6 @@ func (s *Server) handleGetProof(w http.ResponseWriter, r *http.Request) {
 		Proof:            proofStrings,
 		MerkleRoot:       toHex(commit.MerkleRoot),
 		ReferenceBlock:   commit.ReferenceBlock,
-		Status:           string(commit.Status),
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)
