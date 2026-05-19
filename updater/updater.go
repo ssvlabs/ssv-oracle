@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/ssvlabs/ssv-oracle/contract"
 	"github.com/ssvlabs/ssv-oracle/eth/syncer"
@@ -31,7 +32,7 @@ type Config struct {
 // Updater listens for RootCommitted events and updates cluster balances on-chain.
 type Updater struct {
 	storage        updaterStorage
-	contractClient *contract.Client
+	contractClient updaterContract
 	syncer         headStateBuilder
 
 	lastProcessedBlock uint64 // Deduplication: skip events for already-processed blocks
@@ -51,6 +52,14 @@ type updaterStorage interface {
 // clusters table.
 type headStateBuilder interface {
 	BuildHeadStateSnapshot(ctx context.Context, clusterIDs [][]byte) (map[[32]byte]storage.ClusterRow, error)
+}
+
+// updaterContract is the subset of the SSV contract methods used by the
+// updater.
+type updaterContract interface {
+	SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) (<-chan *contract.RootCommittedEvent, <-chan error, error)
+	GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster contract.Cluster) (uint32, error)
+	UpdateClusterBalance(ctx context.Context, blockNum uint64, owner common.Address, operatorIDs []uint64, cluster contract.Cluster, effectiveBalance uint32, merkleProof [][32]byte) (*types.Receipt, error)
 }
 
 // clusterLookup returns the post-event cluster state for an ID. The
