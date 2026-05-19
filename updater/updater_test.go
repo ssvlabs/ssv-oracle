@@ -40,15 +40,16 @@ func (m *mockStorage) GetCommitByBlock(_ context.Context, blockNum uint64) (*sto
 }
 
 // mockContract implements the updaterContract interface for testing. It
-// returns a fixed currentBalance for every GetClusterEffectiveBalance call
-// and a fixed updateErr (or success receipt) for every UpdateClusterBalance
-// call. updateCalls / balanceCalls let assertions verify how far a batch ran
-// before aborting.
+// returns a fixed currentBalance for every GetClusterEffectiveBalance call.
+// UpdateClusterBalance consults updateByCluster (if set) for per-cluster
+// behavior, otherwise returns updateErr (or success). Counters let
+// assertions verify how far a batch ran before aborting.
 type mockContract struct {
-	currentBalance uint32
-	updateErr      error
-	balanceCalls   int
-	updateCalls    int
+	currentBalance  uint32
+	updateErr       error
+	updateByCluster func(cluster contract.Cluster) error
+	balanceCalls    int
+	updateCalls     int
 }
 
 func (m *mockContract) SubscribeRootCommitted(_ context.Context, _ *uint64) (<-chan *contract.RootCommittedEvent, <-chan error, error) {
@@ -60,15 +61,37 @@ func (m *mockContract) GetClusterEffectiveBalance(_ context.Context, _ common.Ad
 	return m.currentBalance, nil
 }
 
-func (m *mockContract) UpdateClusterBalance(_ context.Context, _ uint64, _ common.Address, _ []uint64, _ contract.Cluster, _ uint32, _ [][32]byte) (*types.Receipt, error) {
+func (m *mockContract) UpdateClusterBalance(_ context.Context, _ uint64, _ common.Address, _ []uint64, cluster contract.Cluster, _ uint32, _ [][32]byte) (*types.Receipt, error) {
 	m.updateCalls++
-	if m.updateErr != nil {
-		return nil, m.updateErr
+	err := m.updateErr
+	if m.updateByCluster != nil {
+		err = m.updateByCluster(cluster)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return &types.Receipt{
 		TxHash:      common.Hash{0xab},
 		BlockNumber: big.NewInt(1234),
 	}, nil
+}
+
+// mockHeadStateBuilder implements the headStateBuilder interface. It returns
+// a pre-baked overlay (or err) and records the ids it was called with.
+type mockHeadStateBuilder struct {
+	overlay map[[32]byte]storage.ClusterRow
+	err     error
+	calls   int
+	lastIDs [][]byte
+}
+
+func (m *mockHeadStateBuilder) BuildHeadStateSnapshot(_ context.Context, ids [][]byte) (map[[32]byte]storage.ClusterRow, error) {
+	m.calls++
+	m.lastIDs = ids
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.overlay, nil
 }
 
 func TestProcessCommit_EmptyClusters(t *testing.T) {
@@ -256,4 +279,155 @@ func TestProcessAllClusters_RevertClassifications(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestProcessCommit_StaleLeafRetry exercises the SSV-OR-1 retry flow: when
+// the first pass discovers stale clusters, processCommit must build a fresh
+// in-memory overlay via the syncer and retry the stale clusters with that
+// overlay (instead of writing to the shared clusters table).
+func TestProcessCommit_StaleLeafRetry(t *testing.T) {
+	clusterIDs := [][32]byte{{0x01}, {0x02}, {0x03}}
+	balances := make([]storage.ClusterBalance, len(clusterIDs))
+	for i, id := range clusterIDs {
+		balances[i] = storage.ClusterBalance{
+			ClusterID:        id[:],
+			EffectiveBalance: 32,
+		}
+	}
+	tree := buildTree(balances)
+	commit := &storage.OracleCommit{
+		TargetEpoch:     100,
+		MerkleRoot:      tree.Root[:],
+		ReferenceBlock:  1000,
+		ClusterBalances: balances,
+	}
+
+	const (
+		staleValidatorCount = uint32(5)
+		freshValidatorCount = uint32(7)
+	)
+
+	seedStorage := func(validatorCount uint32) *mockStorage {
+		store := newMockStorage()
+		for _, id := range clusterIDs {
+			store.clusters[string(id[:])] = &storage.ClusterRow{
+				ClusterID:      id[:],
+				OwnerAddress:   make([]byte, 20),
+				OperatorIDs:    []uint64{1, 2, 3, 4},
+				IsActive:       true,
+				Balance:        big.NewInt(0),
+				ValidatorCount: validatorCount,
+			}
+		}
+		return store
+	}
+
+	buildOverlay := func(validatorCount uint32) map[[32]byte]storage.ClusterRow {
+		overlay := make(map[[32]byte]storage.ClusterRow, len(clusterIDs))
+		for _, id := range clusterIDs {
+			overlay[id] = storage.ClusterRow{
+				ClusterID:      id[:],
+				OwnerAddress:   make([]byte, 20),
+				OperatorIDs:    []uint64{1, 2, 3, 4},
+				IsActive:       true,
+				Balance:        big.NewInt(0),
+				ValidatorCount: validatorCount,
+			}
+		}
+		return overlay
+	}
+
+	// Rejects stale ValidatorCount with IncorrectClusterState; lets fresh through.
+	rejectStale := func(cluster contract.Cluster) error {
+		if cluster.ValidatorCount == staleValidatorCount {
+			return &txmanager.RevertError{Reason: "IncorrectClusterState"}
+		}
+		return nil
+	}
+
+	t.Run("no stale leaves — BuildHeadStateSnapshot not called", func(t *testing.T) {
+		store := seedStorage(staleValidatorCount)
+		// currentBalance matches leaf → "balance unchanged" → no update attempt → no stale leaves
+		mc := &mockContract{currentBalance: 32}
+		mhsb := &mockHeadStateBuilder{}
+		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
+
+		if err := u.processCommit(context.Background(), commit); err != nil {
+			t.Fatalf("processCommit: %v", err)
+		}
+		if mhsb.calls != 0 {
+			t.Errorf("BuildHeadStateSnapshot calls = %d, want 0", mhsb.calls)
+		}
+		if mc.updateCalls != 0 {
+			t.Errorf("UpdateClusterBalance calls = %d, want 0", mc.updateCalls)
+		}
+	})
+
+	t.Run("stale leaves — retry with fresh overlay succeeds", func(t *testing.T) {
+		store := seedStorage(staleValidatorCount)
+		mc := &mockContract{
+			currentBalance:  0, // forces UpdateClusterBalance attempt for each cluster
+			updateByCluster: rejectStale,
+		}
+		mhsb := &mockHeadStateBuilder{overlay: buildOverlay(freshValidatorCount)}
+		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
+
+		if err := u.processCommit(context.Background(), commit); err != nil {
+			t.Fatalf("processCommit: %v", err)
+		}
+		if mhsb.calls != 1 {
+			t.Errorf("BuildHeadStateSnapshot calls = %d, want 1", mhsb.calls)
+		}
+		if len(mhsb.lastIDs) != len(clusterIDs) {
+			t.Errorf("BuildHeadStateSnapshot ids = %d, want %d", len(mhsb.lastIDs), len(clusterIDs))
+		}
+		// 3 first-pass attempts (stale → IncorrectClusterState) + 3 retry attempts (fresh → success)
+		if mc.updateCalls != 2*len(clusterIDs) {
+			t.Errorf("UpdateClusterBalance calls = %d, want %d (first pass + retry)", mc.updateCalls, 2*len(clusterIDs))
+		}
+	})
+
+	t.Run("stale leaves — BuildHeadStateSnapshot fails → no retry attempts", func(t *testing.T) {
+		store := seedStorage(staleValidatorCount)
+		mc := &mockContract{
+			currentBalance: 0,
+			updateByCluster: func(_ contract.Cluster) error {
+				return &txmanager.RevertError{Reason: "IncorrectClusterState"}
+			},
+		}
+		mhsb := &mockHeadStateBuilder{err: errors.New("rpc unavailable")}
+		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
+
+		if err := u.processCommit(context.Background(), commit); err != nil {
+			t.Fatalf("processCommit: %v", err)
+		}
+		if mhsb.calls != 1 {
+			t.Errorf("BuildHeadStateSnapshot calls = %d, want 1", mhsb.calls)
+		}
+		// Only first pass — retry path skipped because overlay build failed
+		if mc.updateCalls != len(clusterIDs) {
+			t.Errorf("UpdateClusterBalance calls = %d, want %d (first pass only)", mc.updateCalls, len(clusterIDs))
+		}
+	})
+
+	t.Run("stale leaves — retry still fails (overlay also stale)", func(t *testing.T) {
+		store := seedStorage(staleValidatorCount)
+		mc := &mockContract{
+			currentBalance:  0,
+			updateByCluster: rejectStale,
+		}
+		// Overlay carries the same stale validator count → retry still rejected.
+		mhsb := &mockHeadStateBuilder{overlay: buildOverlay(staleValidatorCount)}
+		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
+
+		if err := u.processCommit(context.Background(), commit); err != nil {
+			t.Fatalf("processCommit: %v", err)
+		}
+		if mhsb.calls != 1 {
+			t.Errorf("BuildHeadStateSnapshot calls = %d, want 1", mhsb.calls)
+		}
+		if mc.updateCalls != 2*len(clusterIDs) {
+			t.Errorf("UpdateClusterBalance calls = %d, want %d (first pass + retry, both rejected)", mc.updateCalls, 2*len(clusterIDs))
+		}
+	})
 }
