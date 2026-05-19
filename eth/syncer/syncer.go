@@ -279,15 +279,10 @@ func (s *EventSyncer) processLog(ctx context.Context, tx storage.Tx, log *types.
 	return true, nil
 }
 
+// storeRawEvent persists an unknown-signature event so the syncer cursor can
+// safely advance. The caller (processLog) guarantees parseErr wraps
+// errUnknownEvent; handled-event parse failures abort the batch instead.
 func (s *EventSyncer) storeRawEvent(ctx context.Context, tx storage.Tx, log *types.Log, blockLogs execution.BlockLogs, parseErr error) error {
-	if !errors.Is(parseErr, errUnknownEvent) {
-		logger.Warnw("Failed to parse event",
-			"block", blockLogs.BlockNumber,
-			"txHash", log.TxHash.Hex(),
-			"logIndex", log.Index,
-			"error", parseErr)
-	}
-
 	errMsg := parseErr.Error()
 	contractEvent := &storage.ContractEvent{
 		EventType:        "Unknown",
