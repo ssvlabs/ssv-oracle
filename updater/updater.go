@@ -208,7 +208,7 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 
-	if err := u.processCommit(ctx, commit); err != nil {
+	if _, err := u.processCommit(ctx, commit); err != nil {
 		log.Errorw("Failed to process commit", "error", err)
 		return
 	}
@@ -216,13 +216,15 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 	u.lastProcessedBlock = event.BlockNum
 }
 
-func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommit) error {
+// processCommit returns the per-batch stats so callers (and tests) can
+// observe how the batch resolved. The stats are also recorded as metrics.
+func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommit) (processStats, error) {
 	log := logger.With("blockNum", commit.ReferenceBlock, "targetEpoch", commit.TargetEpoch)
 	start := time.Now()
 
 	if len(commit.ClusterBalances) == 0 {
 		log.Info("No clusters to update")
-		return nil
+		return processStats{}, nil
 	}
 
 	tree := buildTree(commit.ClusterBalances)
@@ -231,7 +233,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		"clusters", len(commit.ClusterBalances))
 
 	if !bytes.Equal(tree.Root[:], commit.MerkleRoot) {
-		return fmt.Errorf("root mismatch: computed=0x%x, committed=0x%x",
+		return processStats{}, fmt.Errorf("root mismatch: computed=0x%x, committed=0x%x",
 			tree.Root, commit.MerkleRoot)
 	}
 
@@ -279,7 +281,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		"failed", stats.failed,
 		"took", time.Since(start).Round(time.Millisecond).String())
 
-	return nil
+	return stats, nil
 }
 
 func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
