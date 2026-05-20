@@ -1267,16 +1267,23 @@ func TestStorage_GetFinalizedClusters_ChunksLargeInput(t *testing.T) {
 		t.Fatalf("len(rows) = %d, want %d", len(rows), total)
 	}
 
-	seen := make(map[[32]byte]struct{}, len(rows))
+	balances := make(map[[32]byte]int64, len(rows))
 	for _, r := range rows {
 		var key [32]byte
 		copy(key[:], r.ClusterID)
-		if _, dup := seen[key]; dup {
+		if _, dup := balances[key]; dup {
 			t.Fatalf("duplicate row for %x", key)
 		}
-		seen[key] = struct{}{}
+		balances[key] = r.Balance.Int64()
 	}
-	if len(seen) != total {
-		t.Errorf("distinct rows = %d, want %d", len(seen), total)
+	if len(balances) != total {
+		t.Errorf("distinct rows = %d, want %d", len(balances), total)
+	}
+	for i, id := range ids {
+		var key [32]byte
+		copy(key[:], id)
+		if got, want := balances[key], int64(i); got != want {
+			t.Errorf("balance for id %x: got %d, want %d", id, got, want)
+		}
 	}
 }
