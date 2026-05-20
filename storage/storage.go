@@ -310,7 +310,7 @@ func queryClusterRowsBatch(ctx context.Context, e executor, ids [][]byte) ([]*Cl
 	for sqlRows.Next() {
 		row, err := scanClusterRow(sqlRows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan cluster row: %w", err)
 		}
 		rows = append(rows, row)
 	}
