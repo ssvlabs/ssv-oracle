@@ -16,10 +16,32 @@ import (
 	"github.com/ssvlabs/ssv-oracle/txmanager"
 )
 
-// mockStorage implements the updaterStorage interface for testing.
+// assertLastIDsMatch asserts the IDs captured by mockHeadStateBuilder match
+// the expected set (order-independent, no duplicates, no extras).
+func assertLastIDsMatch(t *testing.T, got [][]byte, want [][32]byte) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("BuildHeadStateSnapshot ids = %d, want %d", len(got), len(want))
+		return
+	}
+	wantSet := make(map[string]struct{}, len(want))
+	for _, id := range want {
+		wantSet[string(id[:])] = struct{}{}
+	}
+	for _, id := range got {
+		if _, ok := wantSet[string(id)]; !ok {
+			t.Errorf("BuildHeadStateSnapshot id %x not in expected set", id)
+		}
+	}
+}
+
+// mockStorage implements the updaterStorage interface for testing. The
+// getClusterCalls counter lets the stale-leaf retry tests assert that the
+// retry pass consults the in-memory overlay instead of going back to storage.
 type mockStorage struct {
-	clusters map[string]*storage.ClusterRow
-	commits  map[uint64]*storage.OracleCommit
+	clusters        map[string]*storage.ClusterRow
+	commits         map[uint64]*storage.OracleCommit
+	getClusterCalls int
 }
 
 func newMockStorage() *mockStorage {
@@ -31,6 +53,7 @@ func newMockStorage() *mockStorage {
 
 // GetCluster returns a cluster row by ID.
 func (m *mockStorage) GetCluster(_ context.Context, clusterID []byte) (*storage.ClusterRow, error) {
+	m.getClusterCalls++
 	return m.clusters[string(clusterID)], nil
 }
 
@@ -52,8 +75,10 @@ type mockContract struct {
 	updateCalls     int
 }
 
+// SubscribeRootCommitted is never invoked from processCommit /
+// processAllClusters; the inert return documents that intent.
 func (m *mockContract) SubscribeRootCommitted(_ context.Context, _ *uint64) (<-chan *contract.RootCommittedEvent, <-chan error, error) {
-	return nil, nil, errors.New("not used in tests")
+	return nil, nil, nil
 }
 
 func (m *mockContract) GetClusterEffectiveBalance(_ context.Context, _ common.Address, _ []uint64, _ contract.Cluster) (uint32, error) {
@@ -108,7 +133,7 @@ func TestProcessCommit_EmptyClusters(t *testing.T) {
 		ClusterBalances: nil, // Empty
 	}
 
-	err := u.processCommit(context.Background(), commit)
+	_, err := u.processCommit(context.Background(), commit)
 	if err != nil {
 		t.Errorf("processCommit() with empty clusters should not error, got: %v", err)
 	}
@@ -131,7 +156,7 @@ func TestProcessCommit_RootMismatch(t *testing.T) {
 		ClusterBalances: clusterBalances,
 	}
 
-	err := u.processCommit(context.Background(), commit)
+	_, err := u.processCommit(context.Background(), commit)
 	if err == nil {
 		t.Error("processCommit() should error on root mismatch")
 	}
@@ -352,7 +377,8 @@ func TestProcessCommit_StaleLeafRetry(t *testing.T) {
 		mhsb := &mockHeadStateBuilder{}
 		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
 
-		if err := u.processCommit(context.Background(), commit); err != nil {
+		stats, err := u.processCommit(context.Background(), commit)
+		if err != nil {
 			t.Fatalf("processCommit: %v", err)
 		}
 		if mhsb.calls != 0 {
@@ -360,6 +386,9 @@ func TestProcessCommit_StaleLeafRetry(t *testing.T) {
 		}
 		if mc.updateCalls != 0 {
 			t.Errorf("UpdateClusterBalance calls = %d, want 0", mc.updateCalls)
+		}
+		if stats.skipped != len(clusterIDs) || stats.updated != 0 || stats.failed != 0 {
+			t.Errorf("stats = %+v, want skipped=%d updated=0 failed=0", stats, len(clusterIDs))
 		}
 	})
 
@@ -372,18 +401,24 @@ func TestProcessCommit_StaleLeafRetry(t *testing.T) {
 		mhsb := &mockHeadStateBuilder{overlay: buildOverlay(freshValidatorCount)}
 		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
 
-		if err := u.processCommit(context.Background(), commit); err != nil {
+		stats, err := u.processCommit(context.Background(), commit)
+		if err != nil {
 			t.Fatalf("processCommit: %v", err)
 		}
 		if mhsb.calls != 1 {
 			t.Errorf("BuildHeadStateSnapshot calls = %d, want 1", mhsb.calls)
 		}
-		if len(mhsb.lastIDs) != len(clusterIDs) {
-			t.Errorf("BuildHeadStateSnapshot ids = %d, want %d", len(mhsb.lastIDs), len(clusterIDs))
-		}
+		assertLastIDsMatch(t, mhsb.lastIDs, clusterIDs)
 		// 3 first-pass attempts (stale → IncorrectClusterState) + 3 retry attempts (fresh → success)
 		if mc.updateCalls != 2*len(clusterIDs) {
 			t.Errorf("UpdateClusterBalance calls = %d, want %d (first pass + retry)", mc.updateCalls, 2*len(clusterIDs))
+		}
+		// Storage is consulted only during the first pass; the retry uses the overlay.
+		if store.getClusterCalls != len(clusterIDs) {
+			t.Errorf("storage.GetCluster calls = %d, want %d (first pass only)", store.getClusterCalls, len(clusterIDs))
+		}
+		if stats.updated != len(clusterIDs) || stats.failed != 0 {
+			t.Errorf("stats = %+v, want updated=%d failed=0", stats, len(clusterIDs))
 		}
 	})
 
@@ -398,15 +433,21 @@ func TestProcessCommit_StaleLeafRetry(t *testing.T) {
 		mhsb := &mockHeadStateBuilder{err: errors.New("rpc unavailable")}
 		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
 
-		if err := u.processCommit(context.Background(), commit); err != nil {
+		stats, err := u.processCommit(context.Background(), commit)
+		if err != nil {
 			t.Fatalf("processCommit: %v", err)
 		}
 		if mhsb.calls != 1 {
 			t.Errorf("BuildHeadStateSnapshot calls = %d, want 1", mhsb.calls)
 		}
+		assertLastIDsMatch(t, mhsb.lastIDs, clusterIDs)
 		// Only first pass — retry path skipped because overlay build failed
 		if mc.updateCalls != len(clusterIDs) {
 			t.Errorf("UpdateClusterBalance calls = %d, want %d (first pass only)", mc.updateCalls, len(clusterIDs))
+		}
+		// Snapshot failure must bump stats.failed for every stale leaf.
+		if stats.failed != len(clusterIDs) || stats.updated != 0 {
+			t.Errorf("stats = %+v, want failed=%d updated=0", stats, len(clusterIDs))
 		}
 	})
 
@@ -420,14 +461,20 @@ func TestProcessCommit_StaleLeafRetry(t *testing.T) {
 		mhsb := &mockHeadStateBuilder{overlay: buildOverlay(staleValidatorCount)}
 		u := &Updater{storage: store, contractClient: mc, syncer: mhsb}
 
-		if err := u.processCommit(context.Background(), commit); err != nil {
+		stats, err := u.processCommit(context.Background(), commit)
+		if err != nil {
 			t.Fatalf("processCommit: %v", err)
 		}
 		if mhsb.calls != 1 {
 			t.Errorf("BuildHeadStateSnapshot calls = %d, want 1", mhsb.calls)
 		}
+		assertLastIDsMatch(t, mhsb.lastIDs, clusterIDs)
 		if mc.updateCalls != 2*len(clusterIDs) {
 			t.Errorf("UpdateClusterBalance calls = %d, want %d (first pass + retry, both rejected)", mc.updateCalls, 2*len(clusterIDs))
+		}
+		// Retry still failing → all leaves recorded as failed.
+		if stats.failed != len(clusterIDs) || stats.updated != 0 {
+			t.Errorf("stats = %+v, want failed=%d updated=0", stats, len(clusterIDs))
 		}
 	})
 }
