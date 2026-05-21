@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // testTxManager creates a minimal TxManager for testing methods that don't need network calls.
@@ -357,4 +359,32 @@ func TestErrorTypes(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRPCErrMsg(t *testing.T) {
+	httpErr := rpc.HTTPError{
+		StatusCode: 504,
+		Status:     "504 Gateway Timeout",
+		Body:       []byte("<html><body>504 Gateway Time-out</body></html>"),
+	}
+
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{"nil error", nil, ""},
+		{"plain error", errors.New("boom"), "boom"},
+		{"HTTPError value strips body", httpErr, "504 Gateway Timeout"},
+		{"wrapped HTTPError strips body", fmt.Errorf("send tx: %w", httpErr), "504 Gateway Timeout"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rpcErrMsg(tt.err)
+			if got != tt.expected {
+				t.Errorf("rpcErrMsg() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
 }

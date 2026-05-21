@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/ssvlabs/ssv-oracle/logger"
 	"github.com/ssvlabs/ssv-oracle/wallet"
@@ -45,7 +46,8 @@ const (
 	receiptPollInterval   = 4 * time.Second
 	percentBase           = 100
 	blockNumberRetryLimit = 3
-	minTipCap             = params.GWei // minimum for MEV RPC compatibility
+	minTipCap             = params.GWei      // minimum for MEV RPC compatibility
+	mevSendTimeout        = 10 * time.Second // shared timeout across all MEV sends per sendToMEVRPCs call
 )
 
 // RevertError represents a contract call or transaction that reverted.
@@ -359,9 +361,12 @@ func (m *TxManager) sendToMEVRPCs(ctx context.Context, tx *types.Transaction) er
 	}
 	results := make(chan result, len(m.mevClients))
 
+	sendCtx, cancel := context.WithTimeout(ctx, mevSendTimeout)
+	defer cancel()
+
 	for url, client := range m.mevClients {
 		go func(u string, c *ethclient.Client) {
-			err := c.SendTransaction(ctx, tx)
+			err := c.SendTransaction(sendCtx, tx)
 			results <- result{u, err}
 		}(url, client)
 	}
@@ -378,7 +383,7 @@ func (m *TxManager) sendToMEVRPCs(ctx context.Context, tx *types.Transaction) er
 			logger.Debugw("MEV RPC already knows tx", "url", r.url, "hash", tx.Hash().Hex())
 		} else {
 			lastErr = r.err
-			logger.Warnw("MEV RPC rejected tx", "url", r.url, "error", r.err)
+			logger.Warnw("MEV RPC rejected tx", "url", r.url, "error", rpcErrMsg(r.err))
 		}
 	}
 
@@ -386,7 +391,7 @@ func (m *TxManager) sendToMEVRPCs(ctx context.Context, tx *types.Transaction) er
 		return nil
 	}
 
-	logger.Warnw("All MEV RPCs failed, falling back to eth_rpc", "lastError", lastErr)
+	logger.Warnw("All MEV RPCs failed, falling back to eth_rpc", "lastError", rpcErrMsg(lastErr))
 	return m.client.SendTransaction(ctx, tx)
 }
 
@@ -716,4 +721,17 @@ func isUnderpriced(err error) bool {
 	return strings.Contains(s, errPatternReplacementUnderpriced) ||
 		strings.Contains(s, errPatternMaxFeePerGasTooLow) ||
 		strings.Contains(s, errPatternUnderpricedTxPoolVariant)
+}
+
+// rpcErrMsg collapses rpc.HTTPError values to their status line so HTML
+// response bodies (e.g. 504 gateway pages) do not leak into operator logs.
+func rpcErrMsg(err error) string {
+	if err == nil {
+		return ""
+	}
+	var httpErr rpc.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Status
+	}
+	return err.Error()
 }
