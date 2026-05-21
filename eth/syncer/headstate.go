@@ -22,6 +22,9 @@ import (
 //
 // Parse failures on handled events are fatal. Unknown signatures
 // are skipped.
+//
+// Performs no persistent writes; callers may retry on transient
+// RPC or storage errors.
 func (s *EventSyncer) BuildHeadStateSnapshot(ctx context.Context, clusterIDs [][]byte) (map[[32]byte]storage.ClusterRow, error) {
 	finalized, lastSynced, err := s.storage.GetFinalizedClusters(ctx, clusterIDs)
 	if err != nil {
@@ -88,6 +91,10 @@ func (s *EventSyncer) BuildHeadStateSnapshot(ctx context.Context, clusterIDs [][
 // from e into overlay, only for cluster IDs in the requested set.
 // Multiple events for the same cluster, applied in chain order,
 // leave the overlay reflecting the last event.
+//
+// cluster_id is derived from (owner, operator IDs), so every event
+// for a given cluster_id carries the same operator set; the overlay
+// row therefore takes operator IDs from the event payload directly.
 func applyClusterEventToOverlay(
 	overlay map[[32]byte]storage.ClusterRow,
 	requested map[[32]byte]struct{},

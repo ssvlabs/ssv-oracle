@@ -1227,3 +1227,63 @@ func TestStorage_GetFinalizedClusters_ReadAndSubsequentWriteSucceed(t *testing.T
 		t.Errorf("post-write row not applied: %+v", got)
 	}
 }
+
+func TestStorage_GetFinalizedClusters_ChunksLargeInput(t *testing.T) {
+	storage := setupTestStorage(t)
+	ctx := context.Background()
+
+	// Exceed clusterBatchSize (1000) to force chunking across multiple queries.
+	const total = clusterBatchSize + clusterBatchSize/2
+
+	ids := make([][]byte, total)
+	for i := 0; i < total; i++ {
+		clusterID := make([]byte, 32)
+		clusterID[0] = byte(i / 256)
+		clusterID[1] = byte(i % 256)
+		ids[i] = clusterID
+
+		owner := make([]byte, 20)
+		owner[0] = clusterID[0]
+		owner[1] = clusterID[1]
+		if err := storage.UpsertCluster(ctx, &ClusterRow{
+			ClusterID:       clusterID,
+			OwnerAddress:    owner,
+			OperatorIDs:     []uint64{1, 2, 3, 4},
+			ValidatorCount:  1,
+			NetworkFeeIndex: 0,
+			Index:           0,
+			IsActive:        true,
+			Balance:         big.NewInt(int64(i)),
+		}); err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+	}
+
+	rows, _, err := storage.GetFinalizedClusters(ctx, ids)
+	if err != nil {
+		t.Fatalf("GetFinalizedClusters: %v", err)
+	}
+	if len(rows) != total {
+		t.Fatalf("len(rows) = %d, want %d", len(rows), total)
+	}
+
+	balances := make(map[[32]byte]int64, len(rows))
+	for _, r := range rows {
+		var key [32]byte
+		copy(key[:], r.ClusterID)
+		if _, dup := balances[key]; dup {
+			t.Fatalf("duplicate row for %x", key)
+		}
+		balances[key] = r.Balance.Int64()
+	}
+	if len(balances) != total {
+		t.Errorf("distinct rows = %d, want %d", len(balances), total)
+	}
+	for i, id := range ids {
+		var key [32]byte
+		copy(key[:], id)
+		if got, want := balances[key], int64(i); got != want {
+			t.Errorf("balance for id %x: got %d, want %d", id, got, want)
+		}
+	}
+}

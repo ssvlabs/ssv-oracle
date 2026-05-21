@@ -2,6 +2,8 @@ module github.com/ssvlabs/ssv-oracle
 
 go 1.25.0
 
+toolchain go1.25.10
+
 require (
 	github.com/attestantio/go-eth2-client v0.28.0
 	github.com/ethereum/go-ethereum v1.17.0
