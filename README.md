@@ -10,6 +10,12 @@ Off-chain oracle that publishes Merkle roots of SSV cluster effective balances t
 - **Single binary** - Embedded SQLite database
 - **HTTP API** - Query committed data and generate merkle proofs
 
+## Audits
+
+| Auditor | Date | Scope | Report |
+|---|---|---|---|
+| [Quantstamp](https://quantstamp.com) | May 2026 | Off-chain Go components | [PDF](./audits/quantstamp-ssv-oracle-2026-05-18.pdf) |
+
 ## Quick Start
 
 **Prerequisites:** Go 1.25+, Ethereum execution client, Beacon node, funded wallet
