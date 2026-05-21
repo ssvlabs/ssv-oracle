@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/ssvlabs/ssv-oracle/contract"
 	"github.com/ssvlabs/ssv-oracle/eth/syncer"
@@ -31,7 +32,7 @@ type Config struct {
 // Updater listens for RootCommitted events and updates cluster balances on-chain.
 type Updater struct {
 	storage        updaterStorage
-	contractClient *contract.Client
+	contractClient updaterContract
 	syncer         headStateBuilder
 
 	lastProcessedBlock uint64 // Deduplication: skip events for already-processed blocks
@@ -51,6 +52,14 @@ type updaterStorage interface {
 // clusters table.
 type headStateBuilder interface {
 	BuildHeadStateSnapshot(ctx context.Context, clusterIDs [][]byte) (map[[32]byte]storage.ClusterRow, error)
+}
+
+// updaterContract is the subset of the SSV contract methods used by the
+// updater.
+type updaterContract interface {
+	SubscribeRootCommitted(ctx context.Context, fromBlock *uint64) (<-chan *contract.RootCommittedEvent, <-chan error, error)
+	GetClusterEffectiveBalance(ctx context.Context, owner common.Address, operatorIDs []uint64, cluster contract.Cluster) (uint32, error)
+	UpdateClusterBalance(ctx context.Context, blockNum uint64, owner common.Address, operatorIDs []uint64, cluster contract.Cluster, effectiveBalance uint32, merkleProof [][32]byte) (*types.Receipt, error)
 }
 
 // clusterLookup returns the post-event cluster state for an ID. The
@@ -199,7 +208,7 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 		return
 	}
 
-	if err := u.processCommit(ctx, commit); err != nil {
+	if _, err := u.processCommit(ctx, commit); err != nil {
 		log.Errorw("Failed to process commit", "error", err)
 		return
 	}
@@ -207,13 +216,15 @@ func (u *Updater) handleEvent(ctx context.Context, event *contract.RootCommitted
 	u.lastProcessedBlock = event.BlockNum
 }
 
-func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommit) error {
+// processCommit returns the per-batch stats so callers (and tests) can
+// observe how the batch resolved. The stats are also recorded as metrics.
+func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommit) (processStats, error) {
 	log := logger.With("blockNum", commit.ReferenceBlock, "targetEpoch", commit.TargetEpoch)
 	start := time.Now()
 
 	if len(commit.ClusterBalances) == 0 {
 		log.Info("No clusters to update")
-		return nil
+		return processStats{}, nil
 	}
 
 	tree := buildTree(commit.ClusterBalances)
@@ -222,7 +233,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		"clusters", len(commit.ClusterBalances))
 
 	if !bytes.Equal(tree.Root[:], commit.MerkleRoot) {
-		return fmt.Errorf("root mismatch: computed=0x%x, committed=0x%x",
+		return processStats{}, fmt.Errorf("root mismatch: computed=0x%x, committed=0x%x",
 			tree.Root, commit.MerkleRoot)
 	}
 
@@ -270,7 +281,7 @@ func (u *Updater) processCommit(ctx context.Context, commit *storage.OracleCommi
 		"failed", stats.failed,
 		"took", time.Since(start).Round(time.Millisecond).String())
 
-	return nil
+	return stats, nil
 }
 
 func buildTree(balances []storage.ClusterBalance) *merkle.Tree {
