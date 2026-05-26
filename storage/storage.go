@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
@@ -42,6 +43,7 @@ type Tx interface {
 // executor abstracts *sql.DB and *sql.Tx for shared query implementations.
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
@@ -219,26 +221,141 @@ func (s *Storage) DeleteCluster(ctx context.Context, clusterID []byte) error {
 
 // GetCluster retrieves a cluster by ID, or nil if not found.
 func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow, error) {
-	query := `
+	return getClusterRow(ctx, s.db, clusterID)
+}
+
+// GetFinalizedClusters reads cluster rows for the given IDs and the
+// last_synced_block atomically through a single read-only transaction.
+// Returns rows for IDs that exist; missing IDs are silently omitted
+// (caller checks len(rows) vs len(ids) if it needs strict semantics).
+// Returned rows are in no particular order.
+//
+// Note: the storage uses db.SetMaxOpenConns(1), so a held read-only tx
+// blocks all writers for its duration. Large id sets are internally
+// chunked to stay under SQLite's host-parameter limit.
+func (s *Storage) GetFinalizedClusters(ctx context.Context, ids [][]byte) ([]*ClusterRow, uint64, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, fmt.Errorf("begin read tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := getClusterRowsByIDs(ctx, tx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var lastSynced uint64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT last_synced_block FROM sync_progress WHERE id = 1`,
+	).Scan(&lastSynced); err != nil {
+		return nil, 0, fmt.Errorf("get last synced block: %w", err)
+	}
+
+	return rows, lastSynced, nil
+}
+
+// clusterBatchSize bounds the number of placeholders in one
+// SELECT ... IN (...) query for cluster rows. Well under modernc.org/sqlite's
+// 32766 host-parameter limit; round number for predictable chunking.
+const clusterBatchSize = 1000
+
+// getClusterRowsByIDs fetches cluster rows for the given IDs via batched
+// SELECT ... IN (...) queries (chunked at clusterBatchSize). Returns rows for
+// IDs that exist; missing IDs are silently omitted. Order is unspecified.
+func getClusterRowsByIDs(ctx context.Context, e executor, ids [][]byte) ([]*ClusterRow, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	rows := make([]*ClusterRow, 0, len(ids))
+	for start := 0; start < len(ids); start += clusterBatchSize {
+		end := start + clusterBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch, err := queryClusterRowsBatch(ctx, e, ids[start:end])
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, batch...)
+	}
+	return rows, nil
+}
+
+// queryClusterRowsBatch issues one SELECT ... IN (?,...) for the given ids.
+// Caller guarantees len(ids) > 0 and len(ids) <= clusterBatchSize.
+func queryClusterRowsBatch(ctx context.Context, e executor, ids [][]byte) ([]*ClusterRow, error) {
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	query := fmt.Sprintf(`
+		SELECT cluster_id, owner_address, operator_ids, validator_count,
+		       network_fee_index, idx, is_active, balance
+		FROM clusters
+		WHERE cluster_id IN (%s)
+	`, placeholders)
+
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	sqlRows, err := e.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query clusters: %w", err)
+	}
+	defer func() { _ = sqlRows.Close() }()
+
+	rows := make([]*ClusterRow, 0, len(ids))
+	for sqlRows.Next() {
+		row, err := scanClusterRow(sqlRows)
+		if err != nil {
+			return nil, fmt.Errorf("scan cluster row: %w", err)
+		}
+		rows = append(rows, row)
+	}
+	if err := sqlRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate clusters: %w", err)
+	}
+	return rows, nil
+}
+
+func getClusterRow(ctx context.Context, e executor, clusterID []byte) (*ClusterRow, error) {
+	const query = `
 		SELECT cluster_id, owner_address, operator_ids, validator_count,
 		       network_fee_index, idx, is_active, balance
 		FROM clusters WHERE cluster_id = ?
 	`
-	var cluster ClusterRow
-	var operatorIDsJSON string
-	var balanceStr string
-	var isActiveInt int
-
-	err := s.db.QueryRowContext(ctx, query, clusterID).Scan(
-		&cluster.ClusterID, &cluster.OwnerAddress, &operatorIDsJSON,
-		&cluster.ValidatorCount, &cluster.NetworkFeeIndex, &cluster.Index,
-		&isActiveInt, &balanceStr,
-	)
+	row := e.QueryRowContext(ctx, query, clusterID)
+	cluster, err := scanClusterRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get cluster: %w", err)
+	}
+	return cluster, nil
+}
+
+// rowScanner abstracts *sql.Row and *sql.Rows for shared scan helpers.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanClusterRow scans a single row matching the cluster select shape used
+// by getClusterRow and getClusterRowsByIDs.
+func scanClusterRow(scanner rowScanner) (*ClusterRow, error) {
+	var cluster ClusterRow
+	var operatorIDsJSON string
+	var balanceStr string
+	var isActiveInt int
+
+	if err := scanner.Scan(
+		&cluster.ClusterID, &cluster.OwnerAddress, &operatorIDsJSON,
+		&cluster.ValidatorCount, &cluster.NetworkFeeIndex, &cluster.Index,
+		&isActiveInt, &balanceStr,
+	); err != nil {
+		return nil, err
 	}
 
 	operatorIDs, err := decodeOperatorIDs(operatorIDsJSON)
@@ -251,7 +368,6 @@ func (s *Storage) GetCluster(ctx context.Context, clusterID []byte) (*ClusterRow
 	if _, ok := cluster.Balance.SetString(balanceStr, 10); !ok {
 		return nil, fmt.Errorf("invalid balance value: %s", balanceStr)
 	}
-
 	return &cluster, nil
 }
 
@@ -656,28 +772,3 @@ func (s *Storage) SetSyncMode(bulk bool) error {
 	return err
 }
 
-// UpdateClusterIfExists updates cluster data only if the cluster exists.
-// Used by head sync to update cluster state without creating new clusters.
-func (s *Storage) UpdateClusterIfExists(ctx context.Context, cluster *ClusterRow) error {
-	query := `
-		UPDATE clusters SET
-			validator_count = ?,
-			network_fee_index = ?,
-			idx = ?,
-			is_active = ?,
-			balance = ?
-		WHERE cluster_id = ?
-	`
-	_, err := s.db.ExecContext(ctx, query,
-		cluster.ValidatorCount,
-		cluster.NetworkFeeIndex,
-		cluster.Index,
-		boolToInt(cluster.IsActive),
-		cluster.Balance.String(),
-		cluster.ClusterID,
-	)
-	if err != nil {
-		return fmt.Errorf("update cluster: %w", err)
-	}
-	return nil
-}
