@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SSV Oracle</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='%231ba5f8'%3E%3Cpath opacity='0.62' d='M13.91 31.63L18.95 25.42c.53-.65 1.52-.65 2.05 0l5.04 6.21c.4.48.4 1.18 0 1.66l-5.04 6.22c-.53.65-1.52.65-2.05 0l-5.04-6.22c-.4-.48-.4-1.18 0-1.66z'/%3E%3Cpath d='M21.79 16.43L26.84 10.21c.53-.65 1.52-.65 2.05 0l5.04 6.22c.4.48.4 1.18 0 1.66l-5.04 6.22c-.53.65-1.52.65-2.05 0l-5.04-6.22c-.4-.48-.4-1.18 0-1.66zM6.03 16.43L11.07 10.21c.53-.65 1.52-.65 2.05 0l5.04 6.22c.4.48.4 1.18 0 1.66l-5.04 6.22c-.53.65-1.52.65-2.05 0l-5.04-6.22c-.4-.48-.4-1.18 0-1.66zM13.91 6.71L18.95 0.49c.53-.65 1.52-.65 2.05 0l5.04 6.22c.4.48.4 1.18 0 1.66l-5.04 6.22c-.53.65-1.52.65-2.05 0l-5.04-6.22c-.4-.48-.4-1.18 0-1.66z'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -126,7 +127,7 @@
 
     <div x-data="app()" x-init="init()" class="container mx-auto px-4 md:px-6 py-6 md:py-8 max-w-7xl">
         <header class="mb-6 md:mb-8 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-3 md:gap-4">
+            <a href="/" @click.prevent="navigateTo(null)" class="flex items-center gap-3 md:gap-4 hover:opacity-80 transition-opacity" title="Go to latest commit">
                 <svg class="w-8 h-8 md:w-10 md:h-10 shrink-0" viewBox="0 0 40 40" fill="var(--c-accent)">
                     <path opacity="0.62" d="M13.9083 31.6343L18.9539 25.4152C19.481 24.7656 20.4723 24.7656 20.9993 25.4152L26.045 31.6343C26.4373 32.1178 26.4373 32.8101 26.045 33.2937L20.9993 39.5128C20.4723 40.1624 19.481 40.1624 18.9539 39.5128L13.9083 33.2937C13.5159 32.8101 13.5159 32.1178 13.9083 31.6343Z"/>
                     <path d="M21.7943 16.4263L26.8399 10.2073C27.367 9.55765 28.3582 9.55765 28.8853 10.2073L33.931 16.4263C34.3233 16.9099 34.3233 17.6022 33.931 18.0858L28.8853 24.3049C28.3582 24.9545 27.367 24.9545 26.8399 24.3049L21.7943 18.0858C21.4019 17.6022 21.4019 16.9099 21.7943 16.4263Z"/>
@@ -137,7 +138,7 @@
                     <h1 class="text-xl md:text-2xl font-bold">SSV Oracle</h1>
                     <p class="text-ssv-text text-sm">Merkle Tree Viewer</p>
                 </div>
-            </div>
+            </a>
             <div class="flex items-center gap-3">
                 <span x-cloak x-show="pollStatus === 'updated'" x-transition class="text-xs text-ssv-success">New commit loaded</span>
                 <button @click="manualRefresh()" :disabled="pollInFlight" class="p-1.5 rounded bg-ssv-border/30 hover:bg-ssv-border/50 text-ssv-text hover:text-ssv-white transition-colors disabled:opacity-50" title="Refresh now">
@@ -472,7 +473,7 @@
                 },
 
                 async navigateTo(epoch) {
-                    if (!epoch || this.navigating) return;
+                    if (this.navigating || epoch === this.viewingEpoch) return;
                     this.navigating = true;
                     try { this.clearSelection(); await this.loadCommit(epoch); }
                     catch (e) { console.error('Navigation failed:', e); }
@@ -531,7 +532,7 @@
                                 this.commit.nextEpoch = data.nextEpoch;
                                 this.commit.status = data.status;
                                 this.commit.txHash = data.txHash;
-                            } else if (data.merkleRoot !== this.commit?.merkleRoot) {
+                            } else if (data.merkleRoot !== this.commit?.merkleRoot || data.epoch !== this.commit?.epoch) {
                                 const selectedId = this.selected?.clusterId;
                                 await this.loadCommit(null);
                                 if (selectedId) {
