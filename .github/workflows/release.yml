@@ -27,7 +27,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4.0.0
 
-      - uses: docker/login-action@v4.0.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ssvlabs
           password: ${{ secrets.SSV_ORACLE_DOCKER_TOKEN }}
